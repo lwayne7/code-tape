@@ -10,7 +10,7 @@
 - 普通同学不能直接修改进度/积分台账文件。
 - 一位同学同一时间只能认领一个未完成任务。
 - PR 需要关联 Issue，合并后关闭 Issue。
-- PR 在 24 小时内未达到可合并状态时自动关闭并释放任务。
+- PR 在 24 小时内未达到可合并状态时自动关闭，但不释放任务。
 - 任务分数、开发得分、CR 得分、bug 扣分都可追溯。
 
 ## 角色与权限
@@ -45,7 +45,7 @@ GitHub 官方权限表显示：`read` 权限可以 open issues、从 fork 提 PR
 - 负责检查 PR 与 Issue 的关联关系。
 - 负责判断 CR 是否有效。
 - 负责自动 squash merge 已满足条件的 PR。
-- 负责关闭超时 PR 并释放任务。
+- 负责关闭超时 PR，但保留 Issue 的认领状态。
 - 负责在合并后更新 `docs/progress.json` 与 `docs/progress.md`。
 
 ## Issue 与 Label 规范
@@ -220,7 +220,7 @@ workflow 自动执行 squash merge。
 - 按计分规则写入 `docs/progress.json`。
 - 重新生成 `docs/progress.md`。
 
-### 24 小时清理
+### 24 小时 PR 关闭
 
 PR 创建后开始计时。
 
@@ -228,11 +228,14 @@ PR 创建后开始计时。
 
 - 评论说明超时原因。
 - 关闭 PR。
-- 释放关联 Issue：`status:claimed` -> `status:open`。
-- 清空认领者 active Issue。
+- 保留关联 Issue 的 `status:claimed`。
+- 保留 GitHub assignee。
+- 保留认领者在 `docs/progress.json` 中的 active Issue。
 - 如果 PR 分支在主仓库且不是 `main`，删除该分支。
 
-对于 fork 分支，主仓库无法强制删除，只关闭 PR 并释放任务。
+超时关闭 PR 不代表任务释放。认领者仍然负责该 Issue，可以继续在同一任务下重新提 PR；新 PR 重新开始 24 小时计时。
+
+对于 fork 分支，主仓库无法强制删除，只关闭 PR，并继续保留任务认领状态。
 
 ## 进度与积分台账
 
@@ -340,7 +343,7 @@ bug 修复 PR 合并后：
 - `issue-claim.yml`：监听 Issue 评论 `认领`，处理认领与进度更新。
 - `pr-guard.yml`：监听 PR opened/synchronize/reopened/edited/review/submitted/comment，检查关联 Issue、作者、CR、受保护文件。
 - `pr-auto-merge.yml`：当 `pr-guard` 通过且 CR 有效时 squash merge PR。
-- `pr-timeout-cleanup.yml`：定时扫描超过 24 小时未合并 PR，关闭 PR 并释放 Issue。
+- `pr-timeout-cleanup.yml`：定时扫描超过 24 小时未合并 PR，关闭 PR，但不释放 Issue。
 - `progress-maintenance.yml`：合并后统一更新 `docs/progress.json` 和 `docs/progress.md`。
 - `bug-ledger.yml`：识别 bug Issue 关联的原 Issue/PR，合并修复后写入扣分与修复奖励。
 
@@ -351,7 +354,7 @@ bug 修复 PR 合并后：
 - 普通同学只有 `read` 权限，因此不能通过主仓库分支开发，必须 fork PR。
 - GitHub owner/admin 无法被技术手段完全禁止修改 label 或台账文件，需要作为可信维护者处理。
 - CR 门禁由 workflow 判断，而不是 GitHub 原生 required approving reviews；这样能同时满足“同学不能改 label”和“同学可以参与 CR”。
-- fork 分支无法由主仓库自动删除，24 小时清理只能关闭 PR 并释放 Issue。
+- fork 分支无法由主仓库自动删除，24 小时清理只能关闭 PR，并继续保留 Issue 认领状态。
 - 计分使用小数时需要统一保留规则，建议 `score` 使用整数，结果保留两位小数。
 
 ## 待实现清单
