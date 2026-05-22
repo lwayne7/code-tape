@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-22T06:57:05Z",
+  "updatedAt": "2026-05-22T07:48:25Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 10,
       "completedIssues": [
         11
       ],
@@ -81,6 +81,19 @@
       "status": "claimed",
       "assignee": "MINTPIPERAS",
       "claimedAt": "2026-05-22T04:18:07Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "10": {
+      "number": 10,
+      "title": "[调研] StackBlitz 与 WebContainers 浏览器沙箱",
+      "score": 1,
+      "stack": [
+        "research"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-22T07:48:25Z",
       "closedAt": null,
       "mergedPr": null
     },
