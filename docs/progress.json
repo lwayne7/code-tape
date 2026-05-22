@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-22T08:42:30Z",
+  "updatedAt": "2026-05-22T08:46:04Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 8,
       "completedIssues": [
         11,
         10
@@ -107,6 +107,19 @@
       "status": "claimed",
       "assignee": "yangchloeeeee",
       "claimedAt": "2026-05-22T07:58:32Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "8": {
+      "number": 8,
+      "title": "[调研] CodeSignal Interview 云 IDE 与 Coding Replay",
+      "score": 1,
+      "stack": [
+        "research"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-22T08:46:04Z",
       "closedAt": null,
       "mergedPr": null
     },

@@ -2,7 +2,7 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-22T08:42:30Z
+更新时间：2026-05-22T08:46:04Z
 
 ## 当前任务
 
@@ -11,6 +11,7 @@
 | Suxian2001 | #5 [调研] Codecast 与 RecDev 代码录制回放模式 | 2026-05-22 04:39:25Z |
 | JunMang01 | #6 [调研] CoderPad 协作 IDE 与面试回放 | 2026-05-22 08:42:30Z |
 | yangchloeeeee | #7 [调研] HackerRank CodePair 面试录制与回放 | 2026-05-22 07:58:32Z |
+| ceilf6 | #8 [调研] CodeSignal Interview 云 IDE 与 Coding Replay | 2026-05-22 08:46:04Z |
 | MINTPIPERAS | #9 [调研] CodeSandbox 在线 IDE 与项目分享 | 2026-05-22 04:18:07Z |
 
 ## 积分总览
