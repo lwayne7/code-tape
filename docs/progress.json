@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-22T03:41:28Z",
+  "updatedAt": "2026-05-22T04:18:07Z",
   "students": {
     "ceilf6": {
       "activeIssue": 11,
@@ -11,9 +11,32 @@
       "reviewScore": 0,
       "penaltyScore": 0,
       "totalScore": 0
+    },
+    "MINTPIPERAS": {
+      "activeIssue": 9,
+      "completedIssues": [],
+      "reviewedIssues": [],
+      "bugPenalties": [],
+      "developmentScore": 0,
+      "reviewScore": 0,
+      "penaltyScore": 0,
+      "totalScore": 0
     }
   },
   "issues": {
+    "9": {
+      "number": 9,
+      "title": "[调研] CodeSandbox 在线 IDE 与项目分享",
+      "score": 1,
+      "stack": [
+        "research"
+      ],
+      "status": "claimed",
+      "assignee": "MINTPIPERAS",
+      "claimedAt": "2026-05-22T04:18:07Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
     "11": {
       "number": 11,
       "title": "[调研] Replay.io 浏览器录制回放与调试启发",
