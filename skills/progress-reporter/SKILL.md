@@ -36,10 +36,10 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 
 | 阶段 | 时间 | 关键词 |
 | --- | --- | --- |
-| 阶段一：技术方案与高风险 PoC | 5/22 - 5/24 | 技术方案、事件模型、录制包格式、关键 PoC |
-| 阶段二：P0 录制链路 | 5/25 - 5/28 | 编辑器、操作录制、音视频录制、录制总控 |
-| 阶段三：P0 回放链路 | 5/29 - 6/1 | 回放调度、倍速、seek、同步展示 |
-| 阶段四：加分项最小展示 | 6/2 | 多语言、AI 字幕、WebRTC |
+| 阶段一：技术方案与高风险 PoC | 5/24 前 | 技术方案、事件模型、录制包格式、关键 PoC |
+| 阶段二：P0 录制链路 | 5/28 前 | 编辑器、操作录制、音视频录制、录制总控 |
+| 阶段三：P0 回放链路 | 6/1 前 | 回放调度、倍速、seek、同步展示 |
+| 阶段四：加分项最小展示 | 6/2 前 | 多语言、AI 字幕、WebRTC |
 | 阶段五：联调冻结与 Demo | 6/3 | 验收、演示、兜底 |
 
 同时识别最近的里程碑检查点：
@@ -91,14 +91,14 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 #### 报告模板
 
 ```
-<at id="all"></at>
+@所有人
 
 # code-tape 进展
 更新时间：{北京时间}
 
-当前阶段：{阶段名称}
-近期里程碑：{最近检查点}
-{如果落后则插入警告行}
+当前阶段：{阶段名称}（不显示日期，除非落后）
+近期里程碑：{最近检查点}（不显示日期，除非落后）
+{进度落后时在里程碑行后插入警告行，警告中需包含截止日期}
 
 ## 全部任务
 
@@ -120,13 +120,14 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 格式要求：
 - 不使用 emoji 图标
 - 各段落之间空一行分隔
-- 消息开头用 `<at id="all"></at>` 全员提醒（飞书富文本 at 语法），与正文之间空一行
+- 消息开头用 `@所有人` 全员提醒，与正文之间空一行
 - 时间转换为北京时间（+8），格式 `MM-DD HH:mm`
 - 分数只在非零时显示，总分为 0 时可省略该行或只显示姓名
 - 没有当前任务时显示"暂无"
 - 没有流水时显示"暂无"
 - 未映射的 GitHub ID 原样保留
 - Issue/PR 编号使用 Markdown 超链接，格式为 `[#N](https://github.com/ceilf6/code-tape/issues/N)` 或 `[#N](https://github.com/ceilf6/code-tape/pull/N)`
+- 排除总控 Issue：没有 `score:*` label 的 Issue（如 #2 PRD 拆解总控、#3 竞品调研总控）属于元任务/跟踪 Issue，不出现在任务列表中
 - 当前任务：列出所有 Issue，按编号排序
 - 已完成 / 进行中 / 可认领 三个分组使用 h3 标题
 - 已完成的 Issue 标记为 ~~标题~~（删除线）
@@ -136,7 +137,15 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 
 ### 7. 发送到飞书群聊
 
-使用 `sessions_send` 工具发送报告到群聊: oc_029e808c7d757020aace7c0f4d46fad6
+由于 session visibility 限制，从私聊 session 无法直接 `sessions_send` 到群聊 session。需要通过 `sessions_spawn` 派出子任务发送：
+
+1. 使用 `sessions_spawn` 创建子任务，task 中包含目标 session key 和完整报告内容
+2. 子任务内部用 `sessions_send` 发送到群聊 session
+3. 使用 `sessions_yield` 等待子任务完成
+
+目标群聊 session key：`feishu:group:oc_029e808c7d757020aace7c0f4d46fad6`
+
+如果用户未指定目标群聊，询问用户提供群聊的 chat_id（格式 `oc_xxx`）。
 
 发送时直接使用报告文本作为 message 内容，无需额外包装。
 
