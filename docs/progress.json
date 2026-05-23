@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-22T14:28:52Z",
+  "updatedAt": "2026-05-23T12:47:56Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 40,
       "completedIssues": [
         11,
         10,
@@ -174,6 +174,17 @@
       "claimedAt": "2026-05-22T03:41:28Z",
       "closedAt": "2026-05-22T04:43:11Z",
       "mergedPr": 12
+    },
+    "40": {
+      "number": 40,
+      "title": "[技术文档] P0 技术方案与模块接口设计",
+      "score": 4,
+      "stack": [],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-23T12:47:56Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
