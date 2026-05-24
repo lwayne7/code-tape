@@ -1,8 +1,13 @@
 import { loadPrGuardContext } from './action-context.mjs';
-import { shouldDeferAutoMergeForForkReview } from './auto-merge-rules.mjs';
+import {
+  shouldDeferAutoMergeForForkReview,
+  shouldWaitForRequiredChecks,
+} from './auto-merge-rules.mjs';
 import { evaluatePrGuard } from './guard-pr.mjs';
 import { GitHubClient, readEvent } from './github-client.mjs';
 import { shouldWaitForMergeableState } from './mergeable-state.mjs';
+
+const requiredAutoMergeChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
 
 const event = await readEvent();
 if (event.workflow_run && event.workflow_run.conclusion !== 'success') {
@@ -43,6 +48,20 @@ if (shouldDeferAutoMergeForForkReview(event, context.pr)) {
 
 if (shouldWaitForMergeableState(context.rawPull.mergeable_state)) {
   console.log(`PR #${context.pr.number} mergeable_state is ${context.rawPull.mergeable_state}; waiting for branch protection and checks`);
+  process.exit(0);
+}
+
+const requiredCheckResult = shouldWaitForRequiredChecks({
+  requiredChecks: requiredAutoMergeChecks,
+  checkRuns: await client.listCheckRunsForRef(context.rawPull.head.sha),
+});
+if (requiredCheckResult.wait) {
+  const reasons = [
+    ...requiredCheckResult.missing.map((name) => `missing ${name}`),
+    ...requiredCheckResult.pending.map((name) => `pending ${name}`),
+    ...requiredCheckResult.failed.map((name) => `failed ${name}`),
+  ];
+  console.log(`PR #${context.pr.number} is waiting for required checks:\n- ${reasons.join('\n- ')}`);
   process.exit(0);
 }
 

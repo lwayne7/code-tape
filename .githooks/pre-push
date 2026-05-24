@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if [ "${SKIP_QUALITY_HOOKS:-}" = "1" ]; then
+  echo "Skipping pre-push quality gate because SKIP_QUALITY_HOOKS=1."
+  exit 0
+fi
+
+npm run quality:local

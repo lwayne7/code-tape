@@ -64,6 +64,14 @@ export class GitHubClient {
     return this.request('GET', `/repos/${this.owner}/${this.repo}/commits/${sha}`);
   }
 
+  async listCheckRunsForRef(ref) {
+    const data = await this.request(
+      'GET',
+      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(ref)}/check-runs?filter=latest&per_page=100`,
+    );
+    return data.check_runs ?? [];
+  }
+
   async addLabels(issueNumber, labels) {
     return this.request('POST', this.issuePath(issueNumber, '/labels'), { labels });
   }

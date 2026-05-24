@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   gitnexus-contract:
+    name: Contract Guard / gitnexus-contract
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

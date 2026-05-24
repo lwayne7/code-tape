@@ -1,4 +1,4 @@
-const waitingMergeableStates = new Set(['blocked', 'dirty']);
+const waitingMergeableStates = new Set(['blocked', 'dirty', 'unstable']);
 
 export function shouldWaitForMergeableState(state) {
   if (!state) {

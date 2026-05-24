@@ -31,10 +31,12 @@ try {
 }
 
 function runBootstrap() {
+  execFileSync('node', ['scripts/workflows/install-hooks.mjs'], { stdio: 'inherit' });
   console.log('Agent bootstrap complete.');
-  console.log('- Before editing code: run npm run contract:local');
+  console.log('- Before editing code: run npm run quality:predev');
+  console.log('- Before submitting or pushing code: run npm run quality:local');
   console.log('- For critical skeleton changes: read GitNexus detect_changes/query/context/impact output');
-  console.log('- Do not install hooks from this script; CI is the final contract gate.');
+  console.log('- Local git hooks run quality gates; CI remains the final contract gate.');
 }
 
 function runGitNexusContract({ mode }) {

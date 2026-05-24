@@ -17,8 +17,6 @@
         - 其中 CR 技能来自 [ceilf6-skills](https://github.com/ceilf6/ceilf6-skills/tree/main/code-reviewer)
 - 知识库
     - 通过 GitNexus 观测代码的级联反应，进行 CICD 把控
-    - ~~使用 OpenViking 为 Agent 提供仓库的渐进式上下文~~
-        - 由于需要挂载服务，背离了本项目当前敏捷开发的需求，暂时清除
 
 ## 决策记录
 

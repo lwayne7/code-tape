@@ -6,10 +6,16 @@
     "apps/*"
   ],
   "scripts": {
+    "prepare": "npm run hooks:install",
+    "hooks:install": "node scripts/workflows/install-hooks.mjs",
     "agent:bootstrap": "node scripts/workflows/contract-check.mjs bootstrap",
     "contract:local": "node scripts/workflows/contract-check.mjs local",
     "contract:check": "node scripts/workflows/contract-check.mjs check",
     "contract:gitnexus": "node scripts/workflows/contract-check.mjs gitnexus",
+    "quality:predev": "npm run hooks:install && npm run contract:local",
+    "quality:precommit": "npm test && npm run lint:web && npm run test:web && npm run build",
+    "quality:ci": "npm test && npm run lint:web && npm run test:web && npm run build && npm run e2e:web",
+    "quality:local": "npm run contract:local && npm run quality:ci",
     "dev": "npm run dev -w apps/web",
     "build": "npm run build -w apps/web",
     "preview": "npm run preview -w apps/web",

@@ -17,7 +17,10 @@ import {
   pullNumberFromEvent,
   resolvePullNumberFromEvent,
 } from '../workflows/action-context.mjs';
-import { shouldDeferAutoMergeForForkReview } from '../workflows/auto-merge-rules.mjs';
+import {
+  shouldDeferAutoMergeForForkReview,
+  shouldWaitForRequiredChecks,
+} from '../workflows/auto-merge-rules.mjs';
 import {
   applyBugFixMerge,
   applyFeatureMerge,
@@ -641,9 +644,56 @@ test('auto merge defers fork pull request review events to workflow_run', () => 
 
 test('auto merge waits only for truly blocked mergeable states', () => {
   assert.equal(shouldWaitForMergeableState('clean'), false);
-  assert.equal(shouldWaitForMergeableState('unstable'), false);
+  assert.equal(shouldWaitForMergeableState('unstable'), true);
   assert.equal(shouldWaitForMergeableState(null), false);
   assert.equal(shouldWaitForMergeableState('unknown'), false);
   assert.equal(shouldWaitForMergeableState('dirty'), true);
   assert.equal(shouldWaitForMergeableState('blocked'), true);
+});
+
+test('auto merge waits for required quality checks', () => {
+  const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
+
+  assert.deepEqual(
+    shouldWaitForRequiredChecks({
+      requiredChecks,
+      checkRuns: [
+        { name: 'Workflow Tests / quality', status: 'completed', conclusion: 'success' },
+        { name: 'Contract Guard / gitnexus-contract', status: 'completed', conclusion: 'success' },
+      ],
+    }),
+    { wait: false, missing: [], pending: [], failed: [] },
+  );
+
+  const blocked = shouldWaitForRequiredChecks({
+    requiredChecks,
+    checkRuns: [
+      { name: 'Workflow Tests / quality', status: 'completed', conclusion: 'failure' },
+      { name: 'Contract Guard / gitnexus-contract', status: 'queued', conclusion: null },
+    ],
+  });
+
+  assert.equal(blocked.wait, true);
+  assert.deepEqual(blocked.failed, ['Workflow Tests / quality']);
+  assert.deepEqual(blocked.pending, ['Contract Guard / gitnexus-contract']);
+  assert.deepEqual(blocked.missing, []);
+
+  assert.deepEqual(
+    shouldWaitForRequiredChecks({
+      requiredChecks,
+      checkRuns: [{ name: 'Workflow Tests / quality', status: 'completed', conclusion: 'success' }],
+    }).missing,
+    ['Contract Guard / gitnexus-contract'],
+  );
+});
+
+test('root package exposes complete quality gate scripts', () => {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+
+  assert.equal(pkg.scripts.prepare, 'npm run hooks:install');
+  assert.equal(pkg.scripts['hooks:install'], 'node scripts/workflows/install-hooks.mjs');
+  assert.equal(pkg.scripts['quality:predev'], 'npm run hooks:install && npm run contract:local');
+  assert.equal(pkg.scripts['quality:precommit'], 'npm test && npm run lint:web && npm run test:web && npm run build');
+  assert.equal(pkg.scripts['quality:ci'], 'npm test && npm run lint:web && npm run test:web && npm run build && npm run e2e:web');
+  assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
