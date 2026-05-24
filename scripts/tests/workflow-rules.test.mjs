@@ -684,3 +684,18 @@ test('agent prompt separates predev and local quality gate phases', () => {
   assert.match(agentsPrompt, /提交.*推送前.*`npm run quality:local`/u);
   assert.doesNotMatch(agentsPrompt, /`npm run quality:predev`\s*\/\s*`npm run quality:local`/u);
 });
+
+test('pages workflow deploys the web app with the GitHub Pages contract', () => {
+  const workflow = readFileSync('.github/workflows/pages.yml', 'utf8');
+
+  assert.match(workflow, /name:\s*Deploy Pages/);
+  assert.match(workflow, /push:\s*\n\s*branches:\s*\[main\]/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pages:\s*write/);
+  assert.match(workflow, /id-token:\s*write/);
+  assert.match(workflow, /GITHUB_PAGES=true npm run build/);
+  assert.match(workflow, /cp apps\/web\/dist\/index\.html apps\/web\/dist\/404\.html/);
+  assert.match(workflow, /path:\s*apps\/web\/dist/);
+  assert.match(workflow, /actions\/upload-pages-artifact@v3/);
+  assert.match(workflow, /actions\/deploy-pages@v4/);
+});

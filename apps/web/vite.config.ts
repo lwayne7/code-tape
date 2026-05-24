@@ -2,7 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
+
 export default defineConfig({
+  base: isGitHubPagesBuild ? "/code-tape/" : "/",
   plugins: [react()],
   resolve: {
     alias: {
