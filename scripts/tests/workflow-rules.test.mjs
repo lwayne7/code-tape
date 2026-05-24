@@ -697,3 +697,12 @@ test('root package exposes complete quality gate scripts', () => {
   assert.equal(pkg.scripts['quality:ci'], 'npm test && npm run lint:web && npm run test:web && npm run build && npm run e2e:web');
   assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
+
+test('agent prompt separates predev and local quality gate phases', () => {
+  const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
+
+  assert.match(agentsPrompt, /开始任务前必须运行 `npm run quality:predev`/u);
+  assert.match(agentsPrompt, /提交或推送前必须运行 `npm run quality:local`/u);
+  assert.match(agentsPrompt, /两者不是二选一/u);
+  assert.doesNotMatch(agentsPrompt, /`npm run quality:predev`\s*\/\s*`npm run quality:local`/u);
+});
