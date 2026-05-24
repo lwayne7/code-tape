@@ -8,13 +8,17 @@
 > [竞品分析](docs/竞品分析)
 -> [技术方案](docs/技术方案.md)
 
+## 开发
+
+
 ## Harness 循环
 
 - Github Actions
     - 通过 issues 和 PR 自动算分工作流，调度仓库开发走向
     - 使用 [repo-guard](https://github.com/ceilf6/repo-guard) 对 issues 和 PR 进行质量检测、并通过工程提示词要求开发代理审批守卫评论、做出反应
+        - 其中 CR 技能来自 [ceilf6-skills](https://github.com/ceilf6/ceilf6-skills/tree/main/code-reviewer)
 - 知识库
-    - 通过 gitnexus 观测代码的级联反应，进行 CICD 把控
+    - 通过 GitNexus 观测代码的级联反应，进行 CICD 把控
     - 使用 OpenViking 为 Agent 提供渐进式上下文
 
 ## 决策记录
