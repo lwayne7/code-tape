@@ -79,12 +79,19 @@ describe("createMediaProducer", () => {
     );
   });
 
-  it("should ignore warnings and events when paused or stopped", () => {
+  it("should ignore events when paused, but still emit warnings. ignore all when stopped", () => {
     const producer = createMediaProducer(deps);
     producer.start();
     producer.pause();
 
+    // Warnings SHOULD be emitted during pause
     triggerCapability({ audio: "denied" });
+    expect(mockBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "media-warning" })
+    );
+    mockBus.emit.mockClear();
+
+    // Inputs SHOULD be ignored during pause
     producer.setMicrophoneEnabled(false);
     producer.reportCameraPosition({ x: 0.5, y: 0.5 });
     
@@ -93,6 +100,13 @@ describe("createMediaProducer", () => {
     producer.resume();
     producer.setMicrophoneEnabled(false);
     expect(mockBus.emit).toHaveBeenCalledTimes(1); // the media-toggle
+    mockBus.emit.mockClear();
+
+    producer.stop();
+    // Warning SHOULD be ignored when stopped
+    triggerCapability({ audio: "denied" });
+    producer.setMicrophoneEnabled(true);
+    expect(mockBus.emit).not.toHaveBeenCalled();
   });
 
   it("should call setTrackEnabled and emit media-toggle payload on setMicrophoneEnabled / setCameraEnabled", () => {

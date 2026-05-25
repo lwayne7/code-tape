@@ -26,7 +26,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
   };
 
   const handleCapability = (capability: MediaCapability) => {
-    if (isPaused || isStopped) return;
+    if (isStopped) return; // Note: DO NOT block on isPaused. Users need warnings even if paused.
     const checkTarget = (target: "audio" | "camera", state: MediaCapability["audio"]) => {
       if (state === "denied" || state === "busy" || state === "not-found" || state === "unsupported") {
         let code: MediaWarningPayload["code"] = "not-found";
