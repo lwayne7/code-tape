@@ -1,28 +1,135 @@
 import type { CreateMediaProducer, MediaProducerHandle } from "./types";
+import type { MediaWarningPayload, MediaCapability } from "@/shared/recording-schema";
 
-/**
- * MediaProducer — emits media-toggle / media-warning / camera-position.
- *
- * STUB. Real implementation belongs to issue `[P0] mediaProducer 实装 + CameraPreview 拖拽`.
- *
- * 实装时需要：
- *   - 订阅 deps.devices.subscribe(capability)：capability 变化时若降级为 denied/busy
- *     → emit media-warning
- *   - setMicrophoneEnabled / setCameraEnabled：调用 devices.setTrackEnabled
- *     + emit media-toggle（payload 含两个 track 的最新状态）
- *   - reportCameraPosition：throttle 50ms → camera-position
- *   - pause() 期间禁用上述输入（ADR-022：暂停期间冻结影响回放状态的输入）
- *   - dispose() 调 devices.release()
- */
-export const createMediaProducer: CreateMediaProducer = (_deps): MediaProducerHandle => {
+export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHandle => {
+  let isPaused = false;
+  let isStopped = true;
+  let unsubscribeDevices: (() => void) | null = null;
+  
+  let microphoneEnabled = true;
+  let cameraEnabled = true;
+
+  let lastPositionTime = 0;
+  let pendingPosition: { x: number; y: number } | null = null;
+  let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flushPosition = () => {
+    if (!pendingPosition || isPaused || isStopped) return;
+    deps.bus.emit({
+      type: "camera-position",
+      source: "media",
+      track: "ui",
+      payload: pendingPosition
+    });
+    pendingPosition = null;
+    lastPositionTime = performance.now();
+  };
+
+  const handleCapability = (capability: MediaCapability) => {
+    if (isPaused || isStopped) return;
+    const checkTarget = (target: "audio" | "camera", state: MediaCapability["audio"]) => {
+      if (state === "denied" || state === "busy" || state === "not-found" || state === "unsupported") {
+        let code: MediaWarningPayload["code"] = "not-found";
+        if (state === "denied") code = "permission-denied";
+        else if (state === "busy") code = "busy";
+        else if (state === "unsupported") code = "not-found";
+        
+        deps.bus.emit({
+          type: "media-warning",
+          source: "media",
+          track: "media",
+          payload: {
+            target,
+            code,
+            message: `Device capability downgraded to ${state}`
+          }
+        });
+      }
+    };
+    checkTarget("audio", capability.audio);
+    checkTarget("camera", capability.camera);
+  };
+
   return {
-    start() {},
-    pause() {},
-    resume() {},
-    stop() {},
-    dispose() {},
-    setMicrophoneEnabled(_enabled) {},
-    setCameraEnabled(_enabled) {},
-    reportCameraPosition(_position) {},
+    start() {
+      isStopped = false;
+      isPaused = false;
+      unsubscribeDevices = deps.devices.subscribe(handleCapability);
+    },
+    pause() {
+      isPaused = true;
+      if (throttleTimer) {
+        clearTimeout(throttleTimer);
+        throttleTimer = null;
+      }
+      pendingPosition = null;
+    },
+    resume() {
+      isPaused = false;
+    },
+    stop() {
+      isStopped = true;
+      if (unsubscribeDevices) {
+        unsubscribeDevices();
+        unsubscribeDevices = null;
+      }
+      if (throttleTimer) {
+        clearTimeout(throttleTimer);
+        throttleTimer = null;
+      }
+      pendingPosition = null;
+    },
+    dispose() {
+      this.stop();
+      deps.devices.release();
+    },
+    setMicrophoneEnabled(enabled: boolean) {
+      if (isPaused || isStopped) return;
+      microphoneEnabled = enabled;
+      deps.devices.setTrackEnabled("audio", enabled);
+      deps.bus.emit({
+        type: "media-toggle",
+        source: "media",
+        track: "media",
+        payload: {
+          microphoneEnabled,
+          cameraEnabled,
+        }
+      });
+    },
+    setCameraEnabled(enabled: boolean) {
+      if (isPaused || isStopped) return;
+      cameraEnabled = enabled;
+      deps.devices.setTrackEnabled("camera", enabled);
+      deps.bus.emit({
+        type: "media-toggle",
+        source: "media",
+        track: "media",
+        payload: {
+          microphoneEnabled,
+          cameraEnabled,
+        }
+      });
+    },
+    reportCameraPosition(position: { x: number; y: number }) {
+      if (isPaused || isStopped) return;
+      const x = Math.min(Math.max(position.x, 0), 1);
+      const y = Math.min(Math.max(position.y, 0), 1);
+      pendingPosition = { x, y };
+      
+      const now = Math.round(performance.now());
+      if (now - lastPositionTime >= 50) {
+        if (throttleTimer) {
+          clearTimeout(throttleTimer);
+          throttleTimer = null;
+        }
+        flushPosition();
+      } else if (!throttleTimer) {
+        throttleTimer = setTimeout(() => {
+          throttleTimer = null;
+          flushPosition();
+        }, 50 - (now - lastPositionTime));
+      }
+    },
   };
 };
