@@ -2,13 +2,12 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-25T02:50:19Z
+更新时间：2026-05-25T03:39:39Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| ceilf6 | #55 [P0] Monaco CodeEditor 基础集成 | 2026-05-25 02:19:31Z |
 | yangchloeeeee | #57 [P0] RecorderControls 录制控制条 UI | 2026-05-25 02:42:39Z |
 | cecilyw | #58 [P0] ReplayControls 播放控制条基础交互 | 2026-05-25 02:48:02Z |
 | JunMang01 | #59 [P0] RecordingLibraryPage 列表 UI 与导入导出入口 | 2026-05-25 02:50:19Z |
@@ -19,16 +18,17 @@
 | GitHub 用户 | 开发分 | CR 分 | 扣分 | 总分 |
 | --- | --- | --- | --- | --- |
 | cecilyw | 0.00 | 0.00 | 0.00 | 0.00 |
-| ceilf6 | 5.25 | 1.00 | 0.00 | 6.25 |
+| ceilf6 | 9.00 | 1.00 | 0.00 | 10.00 |
 | JunMang01 | 0.75 | 0.00 | 0.00 | 0.75 |
 | MINTPIPERAS | 1.75 | 0.75 | 0.00 | 2.50 |
 | Suxian2001 | 1.75 | 0.00 | 0.00 | 1.75 |
-| yangchloeeeee | 2.50 | 1.25 | 0.00 | 3.75 |
+| yangchloeeeee | 2.50 | 2.50 | 0.00 | 5.00 |
 
 ## 最近流水
 
 | 时间 | 类型 | Issue | PR | 变更 |
 | --- | --- | --- | --- | --- |
+| 2026-05-25 03:39:39Z | feature_merge | #55 | #61 | ceilf6 +3.75, yangchloeeeee +1.25 |
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | MINTPIPERAS +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | Suxian2001 +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | yangchloeeeee +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |

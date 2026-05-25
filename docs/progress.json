@@ -1,14 +1,15 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T02:50:19Z",
+  "updatedAt": "2026-05-25T03:39:39Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 55,
+      "activeIssue": null,
       "completedIssues": [
         11,
         10,
         8,
-        40
+        40,
+        55
       ],
       "reviewedIssues": [
         4,
@@ -17,10 +18,10 @@
         7
       ],
       "bugPenalties": [],
-      "developmentScore": 5.25,
+      "developmentScore": 9,
       "reviewScore": 1,
       "penaltyScore": 0,
-      "totalScore": 6.25
+      "totalScore": 10
     },
     "MINTPIPERAS": {
       "activeIssue": 60,
@@ -58,13 +59,14 @@
       ],
       "reviewedIssues": [
         10,
-        40
+        40,
+        55
       ],
       "bugPenalties": [],
       "developmentScore": 2.5,
-      "reviewScore": 1.25,
+      "reviewScore": 2.5,
       "penaltyScore": 0,
-      "totalScore": 3.75
+      "totalScore": 5
     },
     "JunMang01": {
       "activeIssue": 59,
@@ -206,11 +208,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-25T02:19:31Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-25T03:39:39Z",
+      "mergedPr": 61
     },
     "57": {
       "number": 57,
@@ -431,6 +433,18 @@
       ],
       "reason": "Discussions #27 #28 #31 #20 #25 建言献策贡献奖励",
       "createdAt": "2026-05-23T14:25:58Z"
+    },
+    {
+      "id": "pr-61-merge",
+      "type": "feature_merge",
+      "issue": 55,
+      "pr": 61,
+      "score": 5,
+      "developer": "ceilf6",
+      "reviewer": "yangchloeeeee",
+      "developerDelta": 3.75,
+      "reviewerDelta": 1.25,
+      "createdAt": "2026-05-25T03:39:39Z"
     }
   ]
 }
