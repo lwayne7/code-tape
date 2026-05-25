@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T13:02:09Z",
+  "updatedAt": "2026-05-25T13:14:34Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 65,
       "completedIssues": [
         11,
         10,
@@ -289,6 +289,19 @@
       "claimedAt": "2026-05-25T02:22:26Z",
       "closedAt": "2026-05-25T10:31:09Z",
       "mergedPr": 62
+    },
+    "65": {
+      "number": 65,
+      "title": "[P0] editorProducer 实装：内容/选区/滚动/语言事件采集",
+      "score": 3,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-25T13:14:34Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
