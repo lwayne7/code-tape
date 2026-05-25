@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T02:42:39Z",
+  "updatedAt": "2026-05-25T02:48:02Z",
   "students": {
     "ceilf6": {
       "activeIssue": 55,
@@ -77,6 +77,16 @@
       "reviewScore": 0,
       "penaltyScore": 0,
       "totalScore": 0.75
+    },
+    "cecilyw": {
+      "activeIssue": 58,
+      "completedIssues": [],
+      "reviewedIssues": [],
+      "bugPenalties": [],
+      "developmentScore": 0,
+      "reviewScore": 0,
+      "penaltyScore": 0,
+      "totalScore": 0
     }
   },
   "issues": {
@@ -213,6 +223,20 @@
       "status": "claimed",
       "assignee": "yangchloeeeee",
       "claimedAt": "2026-05-25T02:42:39Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "58": {
+      "number": 58,
+      "title": "[P0] ReplayControls 播放控制条基础交互",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "cecilyw",
+      "claimedAt": "2026-05-25T02:48:02Z",
       "closedAt": null,
       "mergedPr": null
     },
