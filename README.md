@@ -3,10 +3,12 @@
 > [规范工作流程](docs/规范工作流程.md)
 | [技术模块拆解](docs/技术模块拆解.md)
 | [项目时间规划](docs/项目时间规划.md)
-| [各位同学当前进度](docs/progress.md)
+| [知识库](docs/知识库契约.md)
 
 > [竞品分析](docs/竞品分析)
 -> [技术方案](docs/技术方案.md)
+
+[各位同学当前进度](docs/progress.md)
 
 ## Harness 循环
 
