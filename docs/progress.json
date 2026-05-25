@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-23T14:25:58Z",
+  "updatedAt": "2026-05-25T02:19:31Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 55,
       "completedIssues": [
         11,
         10,
@@ -187,6 +187,20 @@
       "claimedAt": "2026-05-23T12:47:56Z",
       "closedAt": "2026-05-23T12:56:43Z",
       "mergedPr": 53
+    },
+    "55": {
+      "number": 55,
+      "title": "[P0] Monaco CodeEditor 基础集成",
+      "score": 5,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-25T02:19:31Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
