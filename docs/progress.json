@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T03:39:39Z",
+  "updatedAt": "2026-05-25T03:55:02Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 56,
       "completedIssues": [
         11,
         10,
@@ -213,6 +213,19 @@
       "claimedAt": "2026-05-25T02:19:31Z",
       "closedAt": "2026-05-25T03:39:39Z",
       "mergedPr": 61
+    },
+    "56": {
+      "number": 56,
+      "title": "[P0] RuntimeProducer 实装：运行事件写入事件流",
+      "score": 3,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-25T03:55:02Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "57": {
       "number": 57,
