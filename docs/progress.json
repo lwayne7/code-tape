@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T02:19:31Z",
+  "updatedAt": "2026-05-25T02:22:26Z",
   "students": {
     "ceilf6": {
       "activeIssue": 55,
@@ -23,7 +23,7 @@
       "totalScore": 6.25
     },
     "MINTPIPERAS": {
-      "activeIssue": null,
+      "activeIssue": 60,
       "completedIssues": [
         9
       ],
@@ -199,6 +199,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-25T02:19:31Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "60": {
+      "number": 60,
+      "title": "[P0] CameraPreview 悬浮预览 UI",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "MINTPIPERAS",
+      "claimedAt": "2026-05-25T02:22:26Z",
       "closedAt": null,
       "mergedPr": null
     }
