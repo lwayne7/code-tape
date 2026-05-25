@@ -4,6 +4,8 @@
     <img src="apps/web/public/favicon.png" alt="code-tape Logo" width="200"/>
 </div>
 
+## 完成度优先
+
 > [规范工作流程](docs/规范工作流程.md)
 | [技术模块拆解](docs/技术模块拆解.md)
 | [项目时间规划](docs/项目时间规划.md)
