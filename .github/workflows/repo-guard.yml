@@ -1,7 +1,7 @@
 name: Repo Guard
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   issues:
@@ -20,8 +20,7 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       (
         (
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+          github.event_name == 'pull_request_target'
         ) ||
         (
           github.event_name == 'issues' &&

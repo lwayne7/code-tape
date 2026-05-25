@@ -699,3 +699,14 @@ test('pages workflow deploys the web app with the GitHub Pages contract', () => 
   assert.match(workflow, /actions\/upload-pages-artifact@v3/);
   assert.match(workflow, /actions\/deploy-pages@v4/);
 });
+
+test('repo guard supports fork pull requests without checking out PR code', () => {
+  const workflow = readFileSync('.github/workflows/repo-guard.yml', 'utf8');
+
+  assert.match(workflow, /name:\s*Repo Guard/);
+  assert.match(workflow, /^\s{2}pull_request_target:\s*$/m);
+  assert.doesNotMatch(workflow, /^\s{2}pull_request:\s*$/m);
+  assert.doesNotMatch(workflow, /head\.repo\.full_name\s*==\s*github\.repository/);
+  assert.doesNotMatch(workflow, /actions\/checkout@/);
+  assert.match(workflow, /ceilf6\/repo-guard@main/);
+});
