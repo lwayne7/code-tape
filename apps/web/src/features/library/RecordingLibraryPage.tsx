@@ -1,5 +1,6 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { downloadBlob, safeFilenameStem } from "./recordingDownload";
 import { createRecordingStore } from "./recordingStore";
 import { formatDurationMs } from "@/shared/time/duration";
 import { IconButton, Popover, Tooltip } from "@/shared/ui";
@@ -560,32 +561,6 @@ function buildSaveResultError(result: Extract<SaveResult, { ok: false }>): strin
     return `媒体写入失败（${result.message}）。`;
   }
   return result.message;
-}
-
-function safeFilenameStem(title: string, fallbackId: string): string {
-  const blockedChars = new Set(["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]);
-  const normalized = [...title.trim()]
-    .map((char) => {
-      if (blockedChars.has(char)) return "_";
-      if (char.charCodeAt(0) < 32) return "_";
-      return char;
-    })
-    .join("")
-    .replace(/\s+/g, " ")
-    .slice(0, 80);
-  return normalized || fallbackId;
-}
-
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoke in a later macrotask so browsers can start consuming the download URL.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function formatCreatedAt(value: string): string {

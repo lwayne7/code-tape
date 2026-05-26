@@ -365,6 +365,13 @@ test('contract diff filter includes deleted files', () => {
   assert.equal(CONTRACT_DIFF_FILTER.includes('D'), true);
 });
 
+test('authority docs keep IndexedDB save failure export fallback mandatory', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+
+  assert.match(technicalPlan, /文件导出作为保存失败兜底/u);
+  assert.match(technicalPlan, /当 IndexedDB 写入失败或 quota 不足时，文件导出是 P0 兜底路径/u);
+});
+
 test('contract check launches npx through cmd on Windows', () => {
   const contractCheck = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
 

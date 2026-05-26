@@ -51,7 +51,7 @@ export async function verifyRecordingPackageIntegrity(
     }
   }
 
-  return { ok: true, package: normalizedPackage, warnings };
+  return { ok: true, package: normalizedPackage, mediaBlob, warnings };
 }
 
 function stripUnknownEvents(

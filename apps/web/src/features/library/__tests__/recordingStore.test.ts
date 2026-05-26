@@ -156,6 +156,19 @@ describe("createRecordingStore — two-phase commit", () => {
     }
   });
 
+  it("load returns the verified media blob for replay", async () => {
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    await store.saveDraft(makeInput("rec-media"));
+    await store.commit("rec-media");
+
+    const result = await store.load("rec-media");
+
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    expect(result.mediaBlob).toBeInstanceOf(Blob);
+    const buffer = await result.mediaBlob!.arrayBuffer();
+    expect(new TextDecoder().decode(buffer)).toBe("binary");
+  });
+
   it("load on a draft returns incomplete-package", async () => {
     const store = createRecordingStore({ databaseName: uniqueDbName() });
     await store.saveDraft(makeInput("rec-1"));

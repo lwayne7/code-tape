@@ -103,6 +103,26 @@ describe("verifyRecordingPackageIntegrity", () => {
     if (result.ok) expect(result.warnings).toContainEqual({ code: "media-missing", blobId: "blob-1" });
   });
 
+  it("returns the verified media blob for replay", async () => {
+    const media = new Blob(["media"], { type: "video/webm" });
+    const pkg = await makePackage();
+    pkg.media = {
+      blobId: "blob-1",
+      mimeType: "video/webm",
+      durationMs: 1000,
+      sizeBytes: media.size,
+      timelineOffsetMs: 0,
+      hasAudio: true,
+      hasCamera: false,
+    };
+    pkg.manifest.checksums.mediaSha256 = await sha256Blob(media);
+
+    const result = await verifyRecordingPackageIntegrity(pkg, media);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.mediaBlob).toBe(media);
+  });
+
   it("validates checksums before skipping unknown future event types", async () => {
     const pkg = await makePackage();
     pkg.events.push({

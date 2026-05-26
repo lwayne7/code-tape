@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EditorProducerHandle } from "@/features/capture/types";
 import type { CodeEditorHandle } from "@/features/editor/CodeEditor";
+import { ThemeProvider } from "@/shared/ui";
 import type * as ReactRouterDom from "react-router-dom";
 
 const recorderPageCameraPreviewMock = vi.hoisted(() => {
@@ -110,7 +111,12 @@ describe("RecorderPage camera preview integration", () => {
   it("reports normalized coordinates from the real CameraPreview drag path", async () => {
     const { RecorderPage } = await import("../RecorderPage");
 
-    render(<RecorderPage />);
+    render(
+      <ThemeProvider>
+        <RecorderPage />
+      </ThemeProvider>,
+    );
+    await act(async () => {});
 
     const preview = screen.getByRole("img", { name: "Camera preview placeholder" });
     vi.spyOn(preview, "getBoundingClientRect").mockReturnValue({

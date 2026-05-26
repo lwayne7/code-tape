@@ -1,9 +1,9 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayControlsProps } from "../ReplayControls";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
-import type { ReplayStableState } from "@/shared/recording-schema";
+import type { RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
 import type * as ReactRouterDom from "react-router-dom";
 
 const replayPageMock = vi.hoisted(() => {
@@ -45,7 +45,15 @@ const replayPageMock = vi.hoisted(() => {
     },
     events: [],
     snapshots: [],
-    media: null,
+    media: {
+      blobId: "blob-1",
+      mimeType: "video/webm",
+      durationMs: 120_000,
+      sizeBytes: 4,
+      timelineOffsetMs: 0,
+      hasAudio: true,
+      hasCamera: true,
+    },
   };
   const scheduler = {
     load: vi.fn(async () => {}),
@@ -62,7 +70,12 @@ const replayPageMock = vi.hoisted(() => {
     }),
   };
   const repository = {
-    load: vi.fn(async () => ({ ok: true as const, package: packageData, warnings: [] })),
+    load: vi.fn(async () => ({
+      ok: true as const,
+      package: packageData,
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      warnings: [],
+    })),
   };
 
   return {
@@ -72,7 +85,7 @@ const replayPageMock = vi.hoisted(() => {
     controlsProps: null as ReplayControlsProps | null,
     codeEditorProps: null as CodeEditorProps | null,
     previewPaneProps: null as PreviewPaneProps | null,
-    onTick: null as ((state: ReplayStableState) => void) | null,
+    onTick: null as ((state: ReplayStableState, events?: RecordingEvent[], timelineTimeMs?: number) => void) | null,
     reset() {
       scheduler.load.mockClear();
       scheduler.play.mockClear();
@@ -123,7 +136,7 @@ vi.mock("@/features/library/recordingStore", () => ({
 }));
 
 vi.mock("../replayScheduler", () => ({
-  createReplayScheduler: vi.fn((options: { onTick?: (state: ReplayStableState) => void }) => {
+  createReplayScheduler: vi.fn((options: { onTick?: (state: ReplayStableState, events?: RecordingEvent[], timelineTimeMs?: number) => void }) => {
     replayPageMock.onTick = options.onTick ?? null;
     return replayPageMock.scheduler;
   }),
@@ -226,5 +239,101 @@ describe("ReplayPage", () => {
     expect(document.body).toHaveTextContent("hello");
     expect(document.body).toHaveTextContent("warn");
     expect(document.body).toHaveTextContent("boom");
+  });
+
+  it("renders transient pointer and shortcut overlays from scheduler ticks", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.onTick?.(
+        {
+          editor: {
+            code: "",
+            language: "javascript",
+            cursor: null,
+            selection: null,
+            scrollTop: 0,
+            scrollLeft: 0,
+            fontSize: 14,
+            theme: "dark",
+          },
+          pointer: null,
+          media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+          runtime: { status: "idle", stdout: [], stderr: [], previewHtml: null, errorMessage: null },
+        },
+        [
+          {
+            id: "move-1",
+            seq: 1,
+            timestampMs: 100,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-move",
+            payload: { x: 50, y: 20, containerWidth: 100, containerHeight: 80 },
+          },
+          {
+            id: "shortcut-1",
+            seq: 2,
+            timestampMs: 120,
+            source: "shortcut",
+            track: "ui",
+            type: "shortcut",
+            payload: { keys: ["Cmd", "/"], label: "Comment", command: "comment" },
+          },
+        ],
+        120,
+      );
+    });
+
+    expect(screen.getByLabelText("回放鼠标位置")).toBeInTheDocument();
+    expect(screen.getByText("Comment")).toBeInTheDocument();
+  });
+
+  it("renders recorded camera media when the package has a camera track", async () => {
+    if (typeof URL.createObjectURL !== "function") {
+      Object.defineProperty(URL, "createObjectURL", {
+        writable: true,
+        value: vi.fn(() => "blob:replay-media"),
+      });
+    }
+    if (typeof URL.revokeObjectURL !== "function") {
+      Object.defineProperty(URL, "revokeObjectURL", {
+        writable: true,
+        value: vi.fn(),
+      });
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:replay-media");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.onTick?.({
+        editor: {
+          code: "",
+          language: "javascript",
+          cursor: null,
+          selection: null,
+          scrollTop: 0,
+          scrollLeft: 0,
+          fontSize: 14,
+          theme: "dark",
+        },
+        pointer: null,
+        media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+        runtime: { status: "idle", stdout: [], stderr: [], previewHtml: null, errorMessage: null },
+      });
+    });
+
+    const video = screen.getByLabelText("录制摄像头视频") as HTMLVideoElement;
+    expect(video).toHaveAttribute("src", "blob:replay-media");
+    expect(createObjectURL).toHaveBeenCalled();
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
   });
 });

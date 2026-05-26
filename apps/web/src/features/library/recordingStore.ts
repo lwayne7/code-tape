@@ -20,6 +20,7 @@ import type {
 } from "@/shared/recording-schema";
 import { generateId } from "@/shared/util/ids";
 import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
+import { buildRecordingZip } from "./recordingArchive";
 import { awaitTransaction, openDatabase, promisifyRequest } from "./idb";
 
 export type RecordingStoreOptions = {
@@ -271,24 +272,19 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
     async exportZip(recordingId: string): Promise<Blob> {
       const stored = await readRecording(recordingId);
       if (!stored) throw new Error(`recording ${recordingId} not found`);
-      const zip = new JSZip();
-      zip.file("manifest.json", JSON.stringify(stored.manifest, null, 2));
-      zip.file("meta.json", JSON.stringify(stored.meta, null, 2));
-      zip.file("events.json", JSON.stringify(stored.events));
-      zip.file("snapshots.json", JSON.stringify(stored.snapshots));
-      zip.file("indexes.json", JSON.stringify(stored.indexes));
-      if (stored.media) zip.file("media.json", JSON.stringify(stored.media, null, 2));
-      if (stored.blobId) {
-        const blob = await readBlob(stored.blobId);
-        if (blob) {
-          const mime = stored.media?.mimeType ?? blob.type ?? "";
-          // Convert to ArrayBuffer so JSZip handles it the same way across
-          // browsers (Chromium, Firefox, Safari, and our polyfilled jsdom).
-          const buffer = await blob.arrayBuffer();
-          zip.file(`media${extensionFor(mime)}`, buffer);
-        }
-      }
-      return zip.generateAsync({ type: "blob" });
+      const mediaBlob = stored.blobId ? await readBlob(stored.blobId) : null;
+      return buildRecordingZip(
+        {
+          schemaVersion: RECORDING_SCHEMA_VERSION,
+          manifest: stored.manifest,
+          meta: stored.meta,
+          events: stored.events,
+          snapshots: stored.snapshots,
+          media: stored.media,
+          indexes: stored.indexes,
+        },
+        mediaBlob,
+      );
     },
 
     async importZip(zip: Blob): Promise<SaveResult> {
@@ -400,14 +396,6 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       return { usageBytes: 0, quotaBytes: 0 };
     },
   };
-}
-
-function extensionFor(mimeType: string | undefined | null): string {
-  if (!mimeType) return ".bin";
-  if (mimeType.includes("webm")) return ".webm";
-  if (mimeType.includes("mp4")) return ".mp4";
-  if (mimeType.includes("ogg")) return ".ogg";
-  return ".bin";
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

@@ -323,7 +323,7 @@ export type PackageWarning =
   | { code: "unknown-event-skipped"; seq: number; type: string };
 
 export type PackageLoadResult =
-  | { ok: true; package: RecordingPackageV1; warnings: PackageWarning[] }
+  | { ok: true; package: RecordingPackageV1; mediaBlob: Blob | null; warnings: PackageWarning[] }
   | { ok: false; error: PackageLoadError };
 
 export type MigrateResult =

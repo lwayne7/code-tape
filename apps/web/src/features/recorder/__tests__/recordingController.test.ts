@@ -68,7 +68,12 @@ function makeStartPayload(): RecordStartPayload {
   };
 }
 
-function setup(options: { mediaSource?: () => Promise<PackageBuildInput["media"]> } = {}) {
+function setup(
+  options: {
+    mediaSource?: () => Promise<PackageBuildInput["media"]>;
+    onPersistenceFailure?: Parameters<typeof createRecordingController>[0]["onPersistenceFailure"];
+  } = {},
+) {
   let wall = 1_000;
   const clock = createRecordingClock({ nowProvider: () => wall });
   const bus = createEventBus({ clock, wallTimeProvider: () => "T" });
@@ -83,6 +88,7 @@ function setup(options: { mediaSource?: () => Promise<PackageBuildInput["media"]
     appVersion: "0.0.0",
     generateTitle: () => "title-x",
     mediaSource: options.mediaSource,
+    onPersistenceFailure: options.onPersistenceFailure,
   });
   return {
     controller,
@@ -211,6 +217,30 @@ describe("createRecordingController", () => {
     expect(controller.state.status).toBe("failed");
     expect(controller.state.lastError?.code).toBe("save-draft-failed");
     expect(repository.commits.length).toBe(0);
+  });
+
+  it("passes the finalized package to the persistence failure fallback", async () => {
+    const onPersistenceFailure = vi.fn();
+    const { controller, repository } = setup({ onPersistenceFailure });
+    vi.mocked(repository.saveDraft).mockResolvedValueOnce({
+      ok: false,
+      reason: "quota-exceeded",
+      message: "IndexedDB quota exceeded",
+    });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/save-draft-failed/);
+
+    expect(onPersistenceFailure).toHaveBeenCalledTimes(1);
+    expect(onPersistenceFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaBlob: null,
+        pkg: expect.objectContaining({
+          meta: expect.objectContaining({ title: "title-x" }),
+        }),
+        error: expect.any(Error),
+      }),
+    );
   });
 
   it("reuses finalized media when saveDraft fails and stop is retried", async () => {

@@ -18,9 +18,10 @@ export type RecordingControllerOptions = RecordingControllerDeps & {
    * Optional snapshot source. When provided, the controller takes a snapshot
    * during `stop()` so packages always include at least one final snapshot.
    * The recorder's editorProducer is the natural source.
-   */
+  */
   snapshotSource?: () => Promise<RecordingSnapshot | null>;
   mediaSource?: () => Promise<PackageBuildInput["media"]>;
+  onPersistenceFailure?: (failure: RecordingPersistenceFailure) => void | Promise<void>;
 };
 
 const VALID_TRANSITIONS: Record<RecordingControllerStatus, RecordingControllerStatus[]> = {
@@ -35,6 +36,7 @@ const VALID_TRANSITIONS: Record<RecordingControllerStatus, RecordingControllerSt
 };
 
 type PendingPackageSave = { pkg: RecordingPackageV1; mediaBlob: Blob | null };
+export type RecordingPersistenceFailure = PendingPackageSave & { error: unknown };
 
 /**
  * RecordingController — central state machine that wires clock + bus + producers
@@ -204,6 +206,13 @@ export function createRecordingController(options: RecordingControllerOptions): 
         startPayload = null;
         return pkg;
       } catch (err) {
+        if (pendingPackageSave) {
+          try {
+            await options.onPersistenceFailure?.({ ...pendingPackageSave, error: err });
+          } catch (fallbackErr) {
+            console.warn("[recording-controller] persistence fallback failed:", fallbackErr);
+          }
+        }
         transitionTo("failed", { lastError: errorToInfo(err) });
         throw err;
       }

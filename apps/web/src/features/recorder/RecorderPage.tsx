@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRecordingClock } from "./recordingClock";
 import { createEventBus } from "./eventBus";
@@ -12,6 +12,8 @@ import { createPreviewCompiler } from "@/features/runtime-preview/previewCompile
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createMediaDevicesController } from "@/features/media/mediaDevices";
 import { createMediaRecorderWrapper } from "@/features/media/mediaRecorder";
+import { buildRecordingZip } from "@/features/library/recordingArchive";
+import { downloadBlob, safeFilenameStem } from "@/features/library/recordingDownload";
 import { createRecordingStore } from "@/features/library/recordingStore";
 import {
   createEditorProducer,
@@ -20,8 +22,10 @@ import {
   createRuntimeProducer,
   createShortcutProducer,
 } from "@/features/capture";
+import { useTheme } from "@/shared/ui";
 import type {
   CameraPositionPayload,
+  DeviceInfo,
   MediaCapability,
   MediaDevicesController,
   OpenStreamResult,
@@ -49,6 +53,14 @@ const INITIAL_CONTROLLER_STATE: RecordingControllerState = {
 const INITIAL_CAMERA_POSITION: CameraPositionPayload = { x: 0.85, y: 0.85 };
 
 const APP_VERSION = "0.0.0";
+const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20] as const;
+
+type DeviceOptions = {
+  audio: DeviceInfo[];
+  camera: DeviceInfo[];
+  loaded: boolean;
+};
+type DeviceList = Pick<DeviceOptions, "audio" | "camera">;
 
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
@@ -56,6 +68,7 @@ const APP_VERSION = "0.0.0";
  */
 export function RecorderPage() {
   const navigate = useNavigate();
+  const theme = useTheme();
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const mediaRecorderRef = useRef<ReturnType<typeof createMediaRecorderWrapper> | null>(null);
   const mountedRef = useRef(true);
@@ -132,6 +145,11 @@ export function RecorderPage() {
           if (mountedRef.current) setMediaStream(null);
         }
       },
+      onPersistenceFailure: async ({ pkg, mediaBlob, error }) => {
+        console.warn("[recorder-page] persistence failed, downloading fallback package:", error);
+        const zipBlob = await buildRecordingZip(pkg, mediaBlob);
+        downloadBlob(zipBlob, `${safeFilenameStem(pkg.meta.title, pkg.meta.id)}.zip`);
+      },
     });
     return {
       controller,
@@ -145,6 +163,10 @@ export function RecorderPage() {
       setCurrentMediaCapability: (capability: MediaCapability) => {
         currentMediaCapability = capability;
       },
+      setCurrentEditorLanguage: (language: RecordingLanguage) => {
+        currentEditorLanguage = language;
+        editorRef.current?.setModelLanguage(language);
+      },
       getCurrentEditorLanguage: () => currentEditorLanguage,
       getCurrentRuntimeLanguage,
     };
@@ -155,9 +177,54 @@ export function RecorderPage() {
   );
   const [microphoneEnabled, setMicrophoneEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [editorLanguage, setEditorLanguage] = useState<RecordingLanguage>("javascript");
+  const [editorFontSize, setEditorFontSize] = useState<number>(14);
+  const [deviceOptions, setDeviceOptions] = useState<DeviceOptions>({
+    audio: [],
+    camera: [],
+    loaded: false,
+  });
+  const deviceOptionsRef = useRef<DeviceOptions>(deviceOptions);
+  const deviceLoadPromiseRef = useRef<Promise<DeviceList> | null>(null);
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string | null>(null);
+  const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState<string | null>(null);
   const [cameraPosition, setCameraPosition] = useState<CameraPositionPayload>(
     INITIAL_CAMERA_POSITION,
   );
+
+  const loadDevices = useCallback(() => {
+    if (deviceLoadPromiseRef.current) return deviceLoadPromiseRef.current;
+    const promise = (async () => {
+      try {
+        const available = await stack.devices.enumerate();
+        if (!mountedRef.current) return available;
+        const nextOptions = { ...available, loaded: true };
+        deviceOptionsRef.current = nextOptions;
+        setDeviceOptions(nextOptions);
+        setSelectedAudioDeviceId((current) => current ?? available.audio[0]?.deviceId ?? null);
+        setSelectedCameraDeviceId((current) => current ?? available.camera[0]?.deviceId ?? null);
+        return available;
+      } catch (err) {
+        console.warn("[recorder-page] media devices unavailable:", err);
+        stack.devices.release();
+        if (mountedRef.current) {
+          const nextOptions = { audio: [], camera: [], loaded: true };
+          deviceOptionsRef.current = nextOptions;
+          setDeviceOptions(nextOptions);
+          setSelectedAudioDeviceId(null);
+          setSelectedCameraDeviceId(null);
+        }
+        return { audio: [], camera: [] };
+      }
+    })();
+    deviceLoadPromiseRef.current = promise;
+    void promise.finally(() => {
+      if (deviceLoadPromiseRef.current === promise) {
+        deviceLoadPromiseRef.current = null;
+      }
+    });
+    return promise;
+  }, [stack.devices]);
 
   useEffect(
     () => {
@@ -168,6 +235,9 @@ export function RecorderPage() {
     },
     [stack.controller],
   );
+  useEffect(() => {
+    void loadDevices();
+  }, [loadDevices]);
   useEffect(
     () => {
       mountedRef.current = true;
@@ -198,7 +268,13 @@ export function RecorderPage() {
     startInFlightRef.current = true;
     const startToken = (startTokenRef.current += 1);
     try {
-      let media = await openDefaultMedia(stack.devices);
+      const currentDeviceOptions = deviceOptionsRef.current;
+      const available = currentDeviceOptions.loaded
+        ? { audio: currentDeviceOptions.audio, camera: currentDeviceOptions.camera }
+        : await loadDevices();
+      const audioDeviceId = selectedAudioDeviceId ?? available.audio[0]?.deviceId ?? null;
+      const cameraDeviceId = selectedCameraDeviceId ?? available.camera[0]?.deviceId ?? null;
+      let media = await openSelectedMedia(stack.devices, { audioDeviceId, cameraDeviceId });
       if (!isCurrentStart(startToken)) {
         stack.devices.release();
         return;
@@ -241,8 +317,8 @@ export function RecorderPage() {
 
       const payload: RecordStartPayload = {
         initialLanguage: stack.getCurrentEditorLanguage(),
-        initialFontSize: 14,
-        initialTheme: "dark",
+        initialFontSize: editorFontSize,
+        initialTheme: theme.resolved,
         selectedAudioDeviceId: media.capability.selectedAudioDeviceId,
         selectedCameraDeviceId: media.capability.selectedCameraDeviceId,
         mediaCapability: media.capability,
@@ -279,7 +355,10 @@ export function RecorderPage() {
         stack.controller.reset();
       }
     } catch (error) {
-      if (mountedRef.current && stopTokenRef.current === stopToken) throw error;
+      if (mountedRef.current && stopTokenRef.current === stopToken) {
+        console.warn("[recorder-page] stop failed:", error);
+        return;
+      }
       stack.controller.reset();
       console.warn("[recorder-page] stop ignored after unmount:", error);
     }
@@ -325,6 +404,14 @@ export function RecorderPage() {
     });
   };
 
+  const handleLanguageChange = (next: RecordingLanguage) => {
+    setEditorLanguage(next);
+    stack.setCurrentEditorLanguage(next);
+    if (stack.controller.state.status === "recording") {
+      stack.editorProducer.setLanguage(next);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col" data-recorder-host>
       <RecorderControls
@@ -351,14 +438,27 @@ export function RecorderPage() {
         }}
         onRun={handleRun}
       />
+      <RecorderSetupToolbar
+        language={editorLanguage}
+        fontSize={editorFontSize}
+        audioDevices={deviceOptions.audio}
+        cameraDevices={deviceOptions.camera}
+        selectedAudioDeviceId={selectedAudioDeviceId}
+        selectedCameraDeviceId={selectedCameraDeviceId}
+        disabled={controllerState.status !== "idle"}
+        onLanguageChange={handleLanguageChange}
+        onFontSizeChange={setEditorFontSize}
+        onAudioDeviceChange={setSelectedAudioDeviceId}
+        onCameraDeviceChange={setSelectedCameraDeviceId}
+      />
       <div className="grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
         <div className="relative border-r border-border">
           <CodeEditor
             ref={editorRef}
-            language="javascript"
+            language={editorLanguage}
             initialValue=""
-            fontSize={14}
-            theme="dark"
+            fontSize={editorFontSize}
+            theme={theme.resolved}
           />
           <CameraPreview
             stream={mediaStream}
@@ -377,15 +477,14 @@ export function RecorderPage() {
   );
 }
 
-async function openDefaultMedia(devices: MediaDevicesController): Promise<OpenStreamResult> {
+async function openSelectedMedia(
+  devices: MediaDevicesController,
+  request: { audioDeviceId: string | null; cameraDeviceId: string | null },
+): Promise<OpenStreamResult> {
   try {
-    const available = await devices.enumerate();
-    const audioDeviceId = available.audio[0]?.deviceId ?? null;
-    const cameraDeviceId = available.camera[0]?.deviceId ?? null;
+    if (!request.audioDeviceId && !request.cameraDeviceId) return eventOnlyMedia();
 
-    if (!audioDeviceId && !cameraDeviceId) return eventOnlyMedia();
-
-    const result = await devices.openStream({ audioDeviceId, cameraDeviceId });
+    const result = await devices.openStream(request);
     if (!result.stream) {
       devices.release();
       return eventOnlyMedia(result.warnings);
@@ -396,6 +495,112 @@ async function openDefaultMedia(devices: MediaDevicesController): Promise<OpenSt
     devices.release();
     return eventOnlyMedia();
   }
+}
+
+type RecorderSetupToolbarProps = {
+  language: RecordingLanguage;
+  fontSize: number;
+  audioDevices: DeviceInfo[];
+  cameraDevices: DeviceInfo[];
+  selectedAudioDeviceId: string | null;
+  selectedCameraDeviceId: string | null;
+  disabled: boolean;
+  onLanguageChange(language: RecordingLanguage): void;
+  onFontSizeChange(size: number): void;
+  onAudioDeviceChange(deviceId: string | null): void;
+  onCameraDeviceChange(deviceId: string | null): void;
+};
+
+function RecorderSetupToolbar({
+  language,
+  fontSize,
+  audioDevices,
+  cameraDevices,
+  selectedAudioDeviceId,
+  selectedCameraDeviceId,
+  disabled,
+  onLanguageChange,
+  onFontSizeChange,
+  onAudioDeviceChange,
+  onCameraDeviceChange,
+}: RecorderSetupToolbarProps) {
+  return (
+    <div className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-2">
+      <LabeledSelect
+        label="语言"
+        value={language}
+        disabled={disabled}
+        onChange={(value) => onLanguageChange(value as RecordingLanguage)}
+        options={[
+          { value: "javascript", label: "JavaScript" },
+          { value: "typescript", label: "TypeScript" },
+        ]}
+      />
+      <LabeledSelect
+        label="字号"
+        value={String(fontSize)}
+        disabled={disabled}
+        onChange={(value) => onFontSizeChange(Number(value))}
+        options={FONT_SIZE_OPTIONS.map((size) => ({ value: String(size), label: `${size}px` }))}
+      />
+      <span className="hidden h-6 w-px bg-border md:inline-flex" aria-hidden />
+      <LabeledSelect
+        label="麦克风设备"
+        value={selectedAudioDeviceId ?? ""}
+        disabled={disabled}
+        onChange={(value) => onAudioDeviceChange(value || null)}
+        options={[
+          { value: "", label: "无麦克风" },
+          ...audioDevices.map((device) => ({
+            value: device.deviceId,
+            label: device.label || "未命名麦克风",
+          })),
+        ]}
+      />
+      <LabeledSelect
+        label="摄像头设备"
+        value={selectedCameraDeviceId ?? ""}
+        disabled={disabled}
+        onChange={(value) => onCameraDeviceChange(value || null)}
+        options={[
+          { value: "", label: "无摄像头" },
+          ...cameraDevices.map((device) => ({
+            value: device.deviceId,
+            label: device.label || "未命名摄像头",
+          })),
+        ]}
+      />
+    </div>
+  );
+}
+
+type LabeledSelectProps = {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  options: Array<{ value: string; label: string }>;
+  onChange(value: string): void;
+};
+
+function LabeledSelect({ label, value, disabled, options, onChange }: LabeledSelectProps) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted">
+      <span className="shrink-0">{label}</span>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        className="h-8 min-w-[8rem] rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+        onChange={(event) => onChange(event.currentTarget.value)}
+      >
+        {options.map((option) => (
+          <option key={`${label}-${option.value}`} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function eventOnlyMedia(warnings: OpenStreamResult["warnings"] = []): OpenStreamResult {

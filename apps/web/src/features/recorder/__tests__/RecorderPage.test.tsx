@@ -6,14 +6,16 @@ import type {
   EditorProducerHandle,
   MediaProducerDeps,
 } from "@/features/capture/types";
-import type { CodeEditorHandle } from "@/features/editor/CodeEditor";
+import type { CodeEditorHandle, CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { CameraPreviewProps } from "@/features/media/CameraPreview";
 import type {
   MediaDevicesController,
   OpenStreamResult,
+  RecordingRepository,
   RecordingLanguage,
   SaveDraftInput,
 } from "@/shared/recording-schema";
+import type * as SharedUi from "@/shared/ui";
 import type * as ReactRouterDom from "react-router-dom";
 
 const recorderPageMock = vi.hoisted(() => {
@@ -84,8 +86,14 @@ const recorderPageMock = vi.hoisted(() => {
   } as unknown as MediaStream;
   const devices = {
     enumerate: vi.fn(async () => ({
-      audio: [{ deviceId: "mic-1", label: "Mic", kind: "audioinput" as const }],
-      camera: [{ deviceId: "cam-1", label: "Camera", kind: "videoinput" as const }],
+      audio: [
+        { deviceId: "mic-1", label: "Mic", kind: "audioinput" as const },
+        { deviceId: "mic-2", label: "Desk Mic", kind: "audioinput" as const },
+      ],
+      camera: [
+        { deviceId: "cam-1", label: "Camera", kind: "videoinput" as const },
+        { deviceId: "cam-2", label: "Studio Camera", kind: "videoinput" as const },
+      ],
     })),
     requestPermission: vi.fn(),
     openStream: vi.fn<MediaDevicesController["openStream"]>(async () => ({
@@ -118,8 +126,11 @@ const recorderPageMock = vi.hoisted(() => {
   };
   const createMediaRecorderWrapper = vi.fn(() => mediaRecorder);
   const repository = {
-    saveDraft: vi.fn(async (input: SaveDraftInput) => ({ ok: true as const, recordingId: input.meta.id })),
-    commit: vi.fn(async (id: string) => ({ ok: true as const, recordingId: id })),
+    saveDraft: vi.fn<RecordingRepository["saveDraft"]>(async (input: SaveDraftInput) => ({
+      ok: true,
+      recordingId: input.meta.id,
+    })),
+    commit: vi.fn<RecordingRepository["commit"]>(async (id: string) => ({ ok: true, recordingId: id })),
     list: vi.fn(),
     load: vi.fn(),
     rename: vi.fn(),
@@ -149,6 +160,7 @@ const recorderPageMock = vi.hoisted(() => {
     mediaRecorder,
     createMediaRecorderWrapper,
     repository,
+    codeEditorProps: null as CodeEditorProps | null,
     cameraPreviewProps: null as CameraPreviewProps | null,
     get editorProducerDeps() {
       return editorProducerDeps;
@@ -212,6 +224,7 @@ const recorderPageMock = vi.hoisted(() => {
       mediaRecorder.stop.mockClear();
       repository.saveDraft.mockClear();
       repository.commit.mockClear();
+      this.codeEditorProps = null;
       this.cameraPreviewProps = null;
       editorProducerDeps = null;
       mediaProducerDeps = null;
@@ -227,8 +240,23 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+vi.mock("@/shared/ui", async () => {
+  const actual = await vi.importActual<typeof SharedUi>("@/shared/ui");
+  return {
+    ...actual,
+    useTheme: () => ({
+      preference: "dark" as const,
+      resolved: "dark" as const,
+      setPreference: vi.fn(),
+      toggle: vi.fn(),
+      tokens: {},
+    }),
+  };
+});
+
 vi.mock("@/features/editor/CodeEditor", () => ({
-  CodeEditor: forwardRef<CodeEditorHandle>(function MockCodeEditor(_props, ref) {
+  CodeEditor: forwardRef<CodeEditorHandle, CodeEditorProps>(function MockCodeEditor(props, ref) {
+    recorderPageMock.codeEditorProps = props;
     useImperativeHandle(ref, () => ({
       getEditor: () => recorderPageMock.editor as never,
       setModelLanguage: recorderPageMock.setModelLanguage,
@@ -280,6 +308,31 @@ vi.mock("@/features/capture", () => ({
   })),
 }));
 
+function mockDownloadApis() {
+  const createObjectURL = typeof URL.createObjectURL === "function"
+    ? vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fallback")
+    : vi.fn(() => "blob:fallback");
+  if (typeof URL.createObjectURL !== "function") {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+  }
+  const revokeObjectURL = typeof URL.revokeObjectURL === "function"
+    ? vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    : vi.fn();
+  if (typeof URL.revokeObjectURL !== "function") {
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    });
+  }
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  return { createObjectURL, revokeObjectURL, click };
+}
+
 describe("RecorderPage", () => {
   beforeEach(() => {
     recorderPageMock.reset();
@@ -313,6 +366,9 @@ describe("RecorderPage", () => {
     const { RecorderPage } = await import("../RecorderPage");
 
     render(<RecorderPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "麦克风设备" })).toHaveValue("mic-1"),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Move camera preview" }));
 
     expect(recorderPageMock.mediaProducer.reportCameraPosition).toHaveBeenCalledWith({
@@ -342,6 +398,43 @@ describe("RecorderPage", () => {
         selectedAudioDeviceId: "mic-1",
         selectedCameraDeviceId: "cam-1",
       }),
+    );
+  });
+
+  it("uses pre-recording toolbar selections for editor and media setup", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "语言" }), {
+      target: { value: "typescript" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "字号" }), {
+      target: { value: "16" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "麦克风设备" }), {
+      target: { value: "mic-2" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "摄像头设备" }), {
+      target: { value: "cam-2" },
+    });
+
+    expect(recorderPageMock.codeEditorProps).toEqual(
+      expect.objectContaining({
+        language: "typescript",
+        fontSize: 16,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() =>
+      expect(recorderPageMock.devices.openStream).toHaveBeenCalledWith({
+        audioDeviceId: "mic-2",
+        cameraDeviceId: "cam-2",
+      }),
+    );
+    await waitFor(() =>
+      expect(recorderPageMock.trigger).not.toHaveBeenCalled(),
     );
   });
 
@@ -739,5 +832,33 @@ describe("RecorderPage", () => {
     await waitFor(() => expect(recorderPageMock.navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/replay\/rec-/)));
     expect(recorderPageMock.devices.release).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("downloads a fallback package when local persistence fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const downloadApis = mockDownloadApis();
+    recorderPageMock.repository.saveDraft.mockResolvedValueOnce({
+      ok: false,
+      reason: "quota-exceeded",
+      message: "IndexedDB quota exceeded",
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止录制" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "停止录制" }));
+
+    await waitFor(() => expect(downloadApis.createObjectURL).toHaveBeenCalledWith(expect.any(Blob)));
+    expect(downloadApis.click).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.navigate).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent("save-draft-failed");
+
+    warn.mockRestore();
+    downloadApis.click.mockRestore();
+    if ("mockRestore" in downloadApis.createObjectURL) downloadApis.createObjectURL.mockRestore();
+    if ("mockRestore" in downloadApis.revokeObjectURL) downloadApis.revokeObjectURL.mockRestore();
   });
 });
