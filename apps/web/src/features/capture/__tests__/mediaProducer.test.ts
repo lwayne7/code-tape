@@ -196,4 +196,84 @@ describe("createMediaProducer", () => {
     producer.stop();
     expect(listeners.length).toBe(0);
   });
+
+  it("should not emit duplicate media-warnings for continuous identical capability errors", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+
+    // Trigger audio denied
+    triggerCapability({ audio: "denied" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(1);
+    
+    // Trigger audio denied again (should not emit)
+    triggerCapability({ audio: "denied" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(1);
+
+    // Trigger audio busy (changed error state, should emit)
+    triggerCapability({ audio: "busy" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it("should emit again if capability recovers and then fails again", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+
+    triggerCapability({ camera: "busy" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(1);
+
+    // Recovery
+    triggerCapability({ camera: "available" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(1); // No emit for available
+
+    // Fails again
+    triggerCapability({ camera: "busy" });
+    expect(mockBus.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it("should support calling dispose as a naked function (React cleanup style) without throwing", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+
+    const { dispose } = producer;
+    
+    expect(() => dispose()).not.toThrow();
+    expect(listeners.length).toBe(0);
+    expect(mockDevices.release).toHaveBeenCalled();
+  });
+
+  it("should cancel pending throttled camera-position emissions when stopped or disposed", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+
+    // Trigger a position change when at the start of throttled window
+    producer.reportCameraPosition({ x: 0.1, y: 0.1 });
+    producer.reportCameraPosition({ x: 0.2, y: 0.2 }); // This one will be queued by the timer
+
+    producer.stop(); // Wait, let's test dispose or stop cancels the timer
+    
+    vi.advanceTimersByTime(50);
+    
+    expect(mockBus.emit).toHaveBeenCalledTimes(1); // Only the first one which flushed immediately
+    expect(mockBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { x: 0.1, y: 0.1 } })
+    );
+
+    mockBus.emit.mockClear();
+    vi.advanceTimersByTime(500); // Ensure enough time passed
+
+    // Restart and test dispose
+    producer.start();
+    producer.reportCameraPosition({ x: 0.3, y: 0.3 }); // flushes immediately because time passed
+    producer.reportCameraPosition({ x: 0.4, y: 0.4 }); // queued
+
+    const { dispose } = producer;
+    dispose();
+
+    vi.advanceTimersByTime(50);
+    
+    expect(mockBus.emit).toHaveBeenCalledTimes(1); // Only the 0.3, 0.3
+    expect(mockBus.emit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { x: 0.4, y: 0.4 } })
+    );
+  });
 });

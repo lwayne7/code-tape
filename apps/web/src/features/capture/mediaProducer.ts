@@ -8,6 +8,9 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
   
   let microphoneEnabled = true;
   let cameraEnabled = true;
+  
+  let lastAudioState: MediaCapability["audio"] = "available";
+  let lastCameraState: MediaCapability["camera"] = "available";
 
   let lastPositionTime = -Infinity;
   let pendingPosition: { x: number; y: number } | null = null;
@@ -22,12 +25,34 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
       payload: pendingPosition
     });
     pendingPosition = null;
-    lastPositionTime = performance.now();
+    lastPositionTime = Date.now();
+  };
+
+  const stopProducer = () => {
+    isStopped = true;
+    if (unsubscribeDevices) {
+      unsubscribeDevices();
+      unsubscribeDevices = null;
+    }
+    if (throttleTimer) {
+      clearTimeout(throttleTimer);
+      throttleTimer = null;
+    }
+    pendingPosition = null;
   };
 
   const handleCapability = (capability: MediaCapability) => {
     if (isStopped) return; // Note: DO NOT block on isPaused. Users need warnings even if paused.
-    const checkTarget = (target: "audio" | "camera", state: MediaCapability["audio"]) => {
+    
+    const checkTarget = (
+      target: "audio" | "camera", 
+      state: MediaCapability["audio"],
+      lastState: MediaCapability["audio"],
+      updateState: (newState: MediaCapability["audio"]) => void
+    ) => {
+      if (state === lastState) return;
+      updateState(state);
+
       if (state === "denied" || state === "busy" || state === "not-found" || state === "unsupported") {
         let code: MediaWarningPayload["code"] = "not-found";
         if (state === "denied") code = "permission-denied";
@@ -46,8 +71,9 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
         });
       }
     };
-    checkTarget("audio", capability.audio);
-    checkTarget("camera", capability.camera);
+    
+    checkTarget("audio", capability.audio, lastAudioState, (s) => lastAudioState = s);
+    checkTarget("camera", capability.camera, lastCameraState, (s) => lastCameraState = s);
   };
 
   return {
@@ -69,19 +95,10 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
       isPaused = false;
     },
     stop() {
-      isStopped = true;
-      if (unsubscribeDevices) {
-        unsubscribeDevices();
-        unsubscribeDevices = null;
-      }
-      if (throttleTimer) {
-        clearTimeout(throttleTimer);
-        throttleTimer = null;
-      }
-      pendingPosition = null;
+      stopProducer();
     },
     dispose() {
-      this.stop();
+      stopProducer();
       deps.devices.release();
     },
     setMicrophoneEnabled(enabled: boolean) {
@@ -118,7 +135,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
       const y = Math.min(Math.max(position.y, 0), 1);
       pendingPosition = { x, y };
       
-      const now = Math.round(performance.now());
+      const now = Date.now();
       if (now - lastPositionTime >= 50) {
         if (throttleTimer) {
           clearTimeout(throttleTimer);
