@@ -217,6 +217,16 @@ describe("createMediaProducer", () => {
     );
   });
 
+  it("should ignore camera-position updates with non-finite coordinates", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+
+    producer.reportCameraPosition({ x: Number.NaN, y: 0.5 });
+    producer.reportCameraPosition({ x: 0.5, y: Number.POSITIVE_INFINITY });
+
+    expect(mockBus.emit).not.toHaveBeenCalled();
+  });
+
   it("should emit the first camera-position immediately after stop and restart", () => {
     const producer = createMediaProducer(deps);
     producer.start();

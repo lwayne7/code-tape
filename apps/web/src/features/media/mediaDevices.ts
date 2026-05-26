@@ -60,6 +60,17 @@ export function createMediaDevicesController(
     return "unsupported";
   };
 
+  const warningCodeForOpenStreamError = (
+    err: unknown,
+    status: MediaCapability["audio"],
+  ): MediaWarningPayload["code"] => {
+    if (status === "denied") return "permission-denied";
+    if (status === "not-found") return "not-found";
+    if (status === "busy") return "busy";
+    if (err instanceof Error && err.name === "NotSupportedError") return "unsupported";
+    return "recorder-error";
+  };
+
   return {
     async enumerate() {
       if (!md) return { audio: [], camera: [] };
@@ -135,14 +146,8 @@ export function createMediaDevicesController(
           request.cameraDeviceId !== null ? "camera" : "audio";
         warnings.push({
           target,
-          code: code === "denied"
-            ? "permission-denied"
-            : code === "not-found"
-              ? "not-found"
-            : code === "busy"
-              ? "busy"
-              : "unsupported",
-          message: (err as Error).message,
+          code: warningCodeForOpenStreamError(err, code),
+          message: err instanceof Error ? err.message : "Failed to open media stream",
         });
         return { stream: null, capability, warnings };
       }

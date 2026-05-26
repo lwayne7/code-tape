@@ -151,6 +151,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
     },
     reportCameraPosition(position: { x: number; y: number }) {
       if (isPaused || isStopped) return;
+      if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
       const x = Math.min(Math.max(position.x, 0), 1);
       const y = Math.min(Math.max(position.y, 0), 1);
       pendingPosition = { x, y };
