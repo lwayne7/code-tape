@@ -2,15 +2,13 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-25T13:19:39Z
+更新时间：2026-05-26T03:06:54Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
 | cecilyw | #58 [P0] ReplayControls 播放控制条基础交互 | 2026-05-25 02:48:02Z |
-| JunMang01 | #59 [P0] RecordingLibraryPage 列表 UI 与导入导出入口 | 2026-05-25 02:50:19Z |
-| ceilf6 | #65 [P0] editorProducer 实装：内容/选区/滚动/语言事件采集 | 2026-05-25 13:14:34Z |
 | yangchloeeeee | #66 [P0] pointerProducer + shortcutProducer 实装 | 2026-05-25 13:19:39Z |
 | MINTPIPERAS | #67 [P0] mediaProducer 实装：媒体开关、权限告警与摄像头位置事件 | 2026-05-25 13:16:07Z |
 
@@ -19,16 +17,18 @@
 | GitHub 用户 | 开发分 | CR 分 | 扣分 | 总分 |
 | --- | --- | --- | --- | --- |
 | cecilyw | 0.00 | 0.00 | 0.00 | 0.00 |
-| ceilf6 | 11.25 | 1.75 | 0.00 | 13.00 |
-| JunMang01 | 0.75 | 0.00 | 0.00 | 0.75 |
+| ceilf6 | 13.50 | 2.50 | 0.00 | 16.00 |
+| JunMang01 | 3.00 | 0.00 | 0.00 | 3.00 |
 | MINTPIPERAS | 4.00 | 0.75 | 0.00 | 4.75 |
-| Suxian2001 | 1.75 | 1.50 | 0.00 | 3.25 |
+| Suxian2001 | 1.75 | 2.25 | 0.00 | 4.00 |
 | yangchloeeeee | 4.75 | 2.50 | 0.00 | 7.25 |
 
 ## 最近流水
 
 | 时间 | 类型 | Issue | PR | 变更 |
 | --- | --- | --- | --- | --- |
+| 2026-05-26 03:06:54Z | feature_merge | #65 | #68 | ceilf6 +2.25, Suxian2001 +0.75 |
+| 2026-05-26 03:06:26Z | feature_merge | #59 | #69 | JunMang01 +2.25, ceilf6 +0.75 |
 | 2026-05-25 13:02:09Z | feature_merge | #56 | #64 | ceilf6 +2.25, Suxian2001 +0.75 |
 | 2026-05-25 11:40:59Z | feature_merge | #57 | #63 | yangchloeeeee +2.25, ceilf6 +0.75 |
 | 2026-05-25 10:31:09Z | feature_merge | #60 | #62 | MINTPIPERAS +2.25, Suxian2001 +0.75 |

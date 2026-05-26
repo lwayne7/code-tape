@@ -143,7 +143,7 @@ test('parseClosingIssues accepts one closing keyword and rejects ambiguous PRs i
   assert.deepEqual(parseClosingIssues('Fixes #12\nResolves #13'), [12, 13]);
 });
 
-test('findValidReviewer requires first eligible commenter to post CR pass after latest commit', () => {
+test('findValidReviewer requires first eligible commenter to post CR pass', () => {
   const latestCommitAt = '2026-05-22T10:00:00.000Z';
   const comments = [
     { user: { login: 'bob', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:30:00.000Z' },
@@ -166,7 +166,7 @@ test('findValidReviewer requires first eligible commenter to post CR pass after 
       prAuthor: 'carol',
       latestCommitAt,
     }),
-    null,
+    'dave',
   );
 });
 
@@ -204,7 +204,7 @@ test('findValidReviewer ignores bots and the PR author when claiming CR reviewer
   assert.equal(findValidReviewer({ reviews: [], comments, prAuthor: 'carol', latestCommitAt }), 'alice');
 });
 
-test('findValidReviewer keeps claimant after new commits but requires a fresh CR pass', () => {
+test('findValidReviewer keeps claimant CR pass valid after new commits', () => {
   const comments = [
     { user: { login: 'alice', type: 'User' }, body: '这里要改', created_at: '2026-05-22T10:03:00.000Z' },
     { user: { login: 'alice', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:30:00.000Z' },
@@ -218,7 +218,7 @@ test('findValidReviewer keeps claimant after new commits but requires a fresh CR
       prAuthor: 'carol',
       latestCommitAt: '2026-05-22T11:00:00.000Z',
     }),
-    null,
+    'alice',
   );
   assert.equal(
     findValidReviewer({
@@ -706,12 +706,17 @@ test('root package exposes complete quality gate scripts', () => {
   assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
 
-test('agent prompt separates predev and local quality gate phases', () => {
+test('agent prompts separate commit and push quality gates', () => {
   const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
+  const claudePrompt = readFileSync('CLAUDE.md', 'utf8');
+  const bootstrapScript = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
 
-  assert.match(agentsPrompt, /开始任务前.*`npm run quality:predev`/u);
-  assert.match(agentsPrompt, /提交.*推送前.*`npm run quality:local`/u);
-  assert.doesNotMatch(agentsPrompt, /`npm run quality:predev`\s*\/\s*`npm run quality:local`/u);
+  for (const prompt of [agentsPrompt, claudePrompt]) {
+    assert.match(prompt, /开始任务前.*`npm run quality:predev`/u);
+  }
+
+  assert.match(bootstrapScript, /Before committing code: run npm run quality:precommit/u);
+  assert.match(bootstrapScript, /Before pushing or submitting code: run npm run quality:local/u);
 });
 
 test('pages workflow deploys the web app with the GitHub Pages contract', () => {

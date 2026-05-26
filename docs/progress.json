@@ -1,29 +1,31 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-25T13:19:39Z",
+  "updatedAt": "2026-05-26T03:06:54Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 65,
+      "activeIssue": null,
       "completedIssues": [
         11,
         10,
         8,
         40,
         55,
-        56
+        56,
+        65
       ],
       "reviewedIssues": [
         4,
         9,
         5,
         7,
-        57
+        57,
+        59
       ],
       "bugPenalties": [],
-      "developmentScore": 11.25,
-      "reviewScore": 1.75,
+      "developmentScore": 13.5,
+      "reviewScore": 2.5,
       "penaltyScore": 0,
-      "totalScore": 13
+      "totalScore": 16
     },
     "MINTPIPERAS": {
       "activeIssue": 67,
@@ -49,13 +51,14 @@
       ],
       "reviewedIssues": [
         60,
-        56
+        56,
+        65
       ],
       "bugPenalties": [],
       "developmentScore": 1.75,
-      "reviewScore": 1.5,
+      "reviewScore": 2.25,
       "penaltyScore": 0,
-      "totalScore": 3.25
+      "totalScore": 4
     },
     "yangchloeeeee": {
       "activeIssue": 66,
@@ -76,16 +79,17 @@
       "totalScore": 7.25
     },
     "JunMang01": {
-      "activeIssue": 59,
+      "activeIssue": null,
       "completedIssues": [
-        6
+        6,
+        59
       ],
       "reviewedIssues": [],
       "bugPenalties": [],
-      "developmentScore": 0.75,
+      "developmentScore": 3,
       "reviewScore": 0,
       "penaltyScore": 0,
-      "totalScore": 0.75
+      "totalScore": 3
     },
     "cecilyw": {
       "activeIssue": 58,
@@ -270,11 +274,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "JunMang01",
       "claimedAt": "2026-05-25T02:50:19Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-26T03:06:26Z",
+      "mergedPr": 69
     },
     "60": {
       "number": 60,
@@ -297,11 +301,11 @@
       "stack": [
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-25T13:14:34Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-26T03:06:54Z",
+      "mergedPr": 68
     },
     "66": {
       "number": 66,
@@ -542,6 +546,30 @@
       "developerDelta": 2.25,
       "reviewerDelta": 0.75,
       "createdAt": "2026-05-25T13:02:09Z"
+    },
+    {
+      "id": "pr-69-merge",
+      "type": "feature_merge",
+      "issue": 59,
+      "pr": 69,
+      "score": 3,
+      "developer": "JunMang01",
+      "reviewer": "ceilf6",
+      "developerDelta": 2.25,
+      "reviewerDelta": 0.75,
+      "createdAt": "2026-05-26T03:06:26Z"
+    },
+    {
+      "id": "pr-68-merge",
+      "type": "feature_merge",
+      "issue": 65,
+      "pr": 68,
+      "score": 3,
+      "developer": "ceilf6",
+      "reviewer": "Suxian2001",
+      "developerDelta": 2.25,
+      "reviewerDelta": 0.75,
+      "createdAt": "2026-05-26T03:06:54Z"
     }
   ]
 }
