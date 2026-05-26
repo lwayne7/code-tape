@@ -31,4 +31,22 @@ describe("createMediaClockAdapter", () => {
     await adapter.seek(1800);
     expect(seek).toHaveBeenCalledWith(segments[1], 1300);
   });
+
+  it("holds seek until metadata is ready, then flushes the pending media time", async () => {
+    let metadataReady = false;
+    const seek = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments,
+      seekHandler: seek,
+      metadataReadyProvider: () => metadataReady,
+    });
+
+    await adapter.seek(1800);
+    expect(seek).not.toHaveBeenCalled();
+
+    metadataReady = true;
+    await adapter.flushPendingSeek();
+
+    expect(seek).toHaveBeenCalledWith(segments[1], 1300);
+  });
 });

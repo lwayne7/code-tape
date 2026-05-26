@@ -1,4 +1,8 @@
-import type { MediaClockAdapter, MediaTimelineSegment } from "@/shared/recording-schema";
+import type {
+  MediaClockAdapter,
+  MediaTimelineSegment,
+  ReplaySchedulerState,
+} from "@/shared/recording-schema";
 
 export type MediaClockAdapterOptions = {
   segments: MediaTimelineSegment[];
@@ -6,6 +10,18 @@ export type MediaClockAdapterOptions = {
   seekHandler?: (segment: MediaTimelineSegment, mediaTimeMs: number) => Promise<void> | void;
   /** Adjust playback rate of the underlying HTMLMediaElement. */
   rateHandler?: (rate: number) => void;
+  /** Read the underlying HTMLMediaElement currentTime in seconds. */
+  currentTimeProvider?: () => number | null;
+  /** True when assigning HTMLMediaElement.currentTime is valid. */
+  metadataReadyProvider?: () => boolean;
+  /** Surface the media element loading/buffering/error status to the scheduler. */
+  statusProvider?: () => ReplaySchedulerState["mediaStatus"];
+};
+
+export type ReplayMediaClockAdapter = MediaClockAdapter & {
+  getStatus(): ReplaySchedulerState["mediaStatus"];
+  getCurrentTimeSec(): number | null;
+  flushPendingSeek(): Promise<void>;
 };
 
 /**
@@ -17,8 +33,9 @@ export type MediaClockAdapterOptions = {
  * accepts multiple segments so a future "concat pause islands" optimization
  * doesn't require an interface bump.
  */
-export function createMediaClockAdapter(options: MediaClockAdapterOptions): MediaClockAdapter {
+export function createMediaClockAdapter(options: MediaClockAdapterOptions): ReplayMediaClockAdapter {
   const segments = options.segments.slice().sort((a, b) => a.timelineStartMs - b.timelineStartMs);
+  let pendingSeek: { segment: MediaTimelineSegment; mediaTimeMs: number } | null = null;
 
   const findSegmentForTimeline = (targetMs: number): MediaTimelineSegment | null => {
     let lo = 0;
@@ -31,6 +48,11 @@ export function createMediaClockAdapter(options: MediaClockAdapterOptions): Medi
       else return seg;
     }
     return null;
+  };
+
+  const metadataReady = () => options.metadataReadyProvider?.() ?? true;
+  const runSeek = async (segment: MediaTimelineSegment, mediaTimeMs: number) => {
+    await options.seekHandler?.(segment, mediaTimeMs);
   };
 
   return {
@@ -53,10 +75,29 @@ export function createMediaClockAdapter(options: MediaClockAdapterOptions): Medi
       const seg = findSegmentForTimeline(targetMs);
       if (!seg) return;
       const mediaTimeMs = seg.mediaStartMs + (targetMs - seg.timelineStartMs);
-      await options.seekHandler?.(seg, mediaTimeMs);
+      if (!metadataReady()) {
+        pendingSeek = { segment: seg, mediaTimeMs };
+        return;
+      }
+      pendingSeek = null;
+      await runSeek(seg, mediaTimeMs);
     },
     setRate(rate) {
       options.rateHandler?.(rate);
+    },
+    getStatus() {
+      if (options.statusProvider) return options.statusProvider();
+      if (segments.length === 0) return "missing";
+      return metadataReady() ? "ready" : "loading";
+    },
+    getCurrentTimeSec() {
+      return options.currentTimeProvider?.() ?? null;
+    },
+    async flushPendingSeek() {
+      if (!pendingSeek || !metadataReady()) return;
+      const currentPending = pendingSeek;
+      await runSeek(currentPending.segment, currentPending.mediaTimeMs);
+      if (pendingSeek === currentPending) pendingSeek = null;
     },
   };
 }

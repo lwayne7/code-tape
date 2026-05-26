@@ -6,7 +6,11 @@ export {
   findStableEventIndexAtMost,
 } from "./replayIndex";
 export { createTimelineClock, type TimelineClockOptions } from "./timelineClock";
-export { createMediaClockAdapter, type MediaClockAdapterOptions } from "./mediaClockAdapter";
+export {
+  createMediaClockAdapter,
+  type MediaClockAdapterOptions,
+  type ReplayMediaClockAdapter,
+} from "./mediaClockAdapter";
 export {
   createReplayScheduler,
   defaultTickStrategy,

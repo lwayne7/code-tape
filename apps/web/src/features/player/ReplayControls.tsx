@@ -38,7 +38,7 @@ export function ReplayControls({
   const [pendingProgressPercent, setPendingProgressPercent] = useState<number | null>(null);
   const rateCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isPlaying = state.status === "playing";
+  const isPlaying = state.status === "playing" || state.status === "buffering";
   const safeDuration = Math.max(0, durationMs);
   const baseCurrentTime = Math.min(Math.max(0, state.timelineTimeMs), safeDuration);
   const baseProgressPercent = safeDuration > 0 ? (baseCurrentTime / safeDuration) * 100 : 0;
