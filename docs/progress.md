@@ -2,29 +2,30 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-26T06:26:43Z
+更新时间：2026-05-26T06:53:35Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| cecilyw | #58 [P0] ReplayControls 播放控制条基础交互 | 2026-05-25 02:48:02Z |
+| - | - | - |
 
 ## 积分总览
 
 | GitHub 用户 | 开发分 | CR 分 | 扣分 | 总分 |
 | --- | --- | --- | --- | --- |
-| cecilyw | 0.00 | 0.00 | 0.00 | 0.00 |
+| cecilyw | 2.25 | 0.00 | 0.00 | 2.25 |
 | ceilf6 | 13.50 | 2.50 | 0.00 | 16.00 |
 | JunMang01 | 3.00 | 0.00 | 0.00 | 3.00 |
 | MINTPIPERAS | 6.25 | 0.75 | 0.00 | 7.00 |
-| Suxian2001 | 1.75 | 3.75 | 0.00 | 5.50 |
+| Suxian2001 | 1.75 | 4.50 | 0.00 | 6.25 |
 | yangchloeeeee | 7.00 | 2.50 | 0.00 | 9.50 |
 
 ## 最近流水
 
 | 时间 | 类型 | Issue | PR | 变更 |
 | --- | --- | --- | --- | --- |
+| 2026-05-26 06:53:35Z | feature_merge | #58 | #73 | cecilyw +2.25, Suxian2001 +0.75 |
 | 2026-05-26 06:26:43Z | feature_merge | #67 | #72 | MINTPIPERAS +2.25, Suxian2001 +0.75 |
 | 2026-05-26 04:27:32Z | feature_merge | #66 | #71 | yangchloeeeee +2.25, Suxian2001 +0.75 |
 | 2026-05-26 03:06:54Z | feature_merge | #65 | #68 | ceilf6 +2.25, Suxian2001 +0.75 |
@@ -44,4 +45,3 @@
 | 2026-05-22 08:54:11Z | feature_merge | #9 | #15 | MINTPIPERAS +0.75, ceilf6 +0.25 |
 | 2026-05-22 08:21:58Z | feature_merge | #10 | #14 | ceilf6 +0.75, yangchloeeeee +0.25 |
 | 2026-05-22 06:57:05Z | feature_merge | #4 | #13 | yangchloeeeee +0.75, ceilf6 +0.25 |
-| 2026-05-22 04:43:11Z | feature_merge | #11 | #12 | ceilf6 +0.75, MINTPIPERAS +0.25 |
