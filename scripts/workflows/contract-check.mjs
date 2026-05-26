@@ -56,9 +56,12 @@ function getChangedFiles(mode) {
     return process.env.CONTRACT_CHANGED_FILES.split(/\r?\n|,/).map((file) => file.trim()).filter(Boolean);
   }
   if (mode === 'ci' && process.env.GITHUB_BASE_REF) {
-    execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', process.env.GITHUB_BASE_REF], {
-      stdio: 'inherit',
-    });
+    const baseRef = `origin/${process.env.GITHUB_BASE_REF}`;
+    if (!gitRefExists(baseRef)) {
+      execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', process.env.GITHUB_BASE_REF], {
+        stdio: 'inherit',
+      });
+    }
     return gitLines(['diff', '--name-only', `--diff-filter=${CONTRACT_DIFF_FILTER}`, `origin/${process.env.GITHUB_BASE_REF}...HEAD`]);
   }
   return combineChangedFiles(
@@ -125,6 +128,15 @@ function isTimeoutError(err) {
 function gitLines(args) {
   const output = execFileSync('git', ['-c', 'core.quotePath=false', ...args], { encoding: 'utf8' });
   return output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function gitRefExists(ref) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function printContractResult(title, result) {

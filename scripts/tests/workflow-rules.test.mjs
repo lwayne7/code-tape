@@ -382,6 +382,14 @@ test('contract check launches npx through cmd on Windows', () => {
   assert.doesNotMatch(contractCheck, /execFileSync\('npx'/u);
 });
 
+test('contract check reuses an existing CI base ref before fetching', () => {
+  const contractCheck = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
+
+  assert.match(contractCheck, /const baseRef = `origin\/\$\{process\.env\.GITHUB_BASE_REF\}`/u);
+  assert.match(contractCheck, /if \(!gitRefExists\(baseRef\)\)/u);
+  assert.match(contractCheck, /function gitRefExists\(ref\)/u);
+});
+
 test('evaluateGitNexusContract blocks critical changes without tests and impact summary', () => {
   const result = evaluateGitNexusContract({
     changedFiles: ['apps/web/src/shared/recording-schema/validators.ts'],
@@ -804,4 +812,14 @@ test('repo guard supports fork pull requests without checking out PR code', () =
   assert.doesNotMatch(workflow, /head\.repo\.full_name\s*==\s*github\.repository/);
   assert.doesNotMatch(workflow, /actions\/checkout@/);
   assert.match(workflow, /ceilf6\/repo-guard@main/);
+  assert.match(workflow, /github-token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN\s*\}\}/);
+});
+
+test('training PR workflows use the bot token for checkout and API reads when available', () => {
+  const guardWorkflow = readFileSync('.github/workflows/pr-guard.yml', 'utf8');
+  const autoMergeWorkflow = readFileSync('.github/workflows/pr-auto-merge.yml', 'utf8');
+
+  assert.match(guardWorkflow, /token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*github\.token\s*\}\}/);
+  assert.match(guardWorkflow, /GITHUB_TOKEN:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN\s*\}\}/);
+  assert.match(autoMergeWorkflow, /token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*github\.token\s*\}\}/);
 });

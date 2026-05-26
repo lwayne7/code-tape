@@ -43,3 +43,4 @@ jobs:
           model: ${{ vars.LLM_MODEL }}
           api-key: ${{ secrets.LLM_API_KEY }}
           base-url: ${{ vars.LLM_BASE_URL }}
+          github-token: ${{ secrets.TRAINING_BOT_TOKEN || secrets.GITHUB_TOKEN }}
