@@ -1,7 +1,55 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySchedulerState } from "@/shared/recording-schema";
 import { ReplayControls, type ReplayControlsProps } from "../ReplayControls";
+
+type SliderRootProps = {
+  value?: number[];
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+  "aria-label"?: string;
+  onValueChange?: (values: number[]) => void;
+  onValueCommit?: (values: number[]) => void;
+};
+
+vi.mock("@radix-ui/react-slider", () => ({
+  Root({
+    value = [0],
+    min = 0,
+    max = 100,
+    step = 1,
+    disabled,
+    "aria-label": ariaLabel,
+    onValueChange,
+    onValueCommit,
+  }: SliderRootProps) {
+    const currentValue = value[0] ?? min;
+    return (
+      <input
+        aria-label={ariaLabel}
+        type="range"
+        value={currentValue}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={(event) => onValueChange?.([Number(event.currentTarget.value)])}
+        onMouseUp={(event) => onValueCommit?.([Number(event.currentTarget.value)])}
+      />
+    );
+  },
+  Track() {
+    return null;
+  },
+  Range() {
+    return null;
+  },
+  Thumb() {
+    return null;
+  },
+}));
 
 function state(
   status: ReplaySchedulerState["status"],
@@ -17,6 +65,10 @@ function state(
     ...patch,
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderControls(overrides: Partial<ReplayControlsProps> = {}) {
   const props: ReplayControlsProps = {
@@ -36,6 +88,14 @@ function renderControls(overrides: Partial<ReplayControlsProps> = {}) {
     props,
     ...render(<ReplayControls {...props} />),
   };
+}
+
+function openHoverPopover(buttonName: string | RegExp) {
+  const trigger = screen.getByRole("button", { name: buttonName });
+  fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+  act(() => {
+    vi.advanceTimersByTime(200);
+  });
 }
 
 describe("ReplayControls", () => {
@@ -81,38 +141,119 @@ describe("ReplayControls", () => {
 
   it("handles zero duration gracefully", () => {
     renderControls({ durationMs: 0 });
+    expect(screen.getByRole("slider", { name: "播放进度" })).toBeDisabled();
+    expect(screen.getAllByText("00:00")).toHaveLength(2);
   });
 
   describe("handleSliderCommit logic", () => {
-    it("accepts onPlay prop and renders without errors", () => {
+    it("updates preview locally while dragging and seeks only on commit", async () => {
+      const onSeek = vi.fn();
       const onPlay = vi.fn();
-      renderControls({ onPlay });
-      expect(true).toBe(true);
+      renderControls({ durationMs: 100_000, onSeek, onPlay });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "25" } });
+
+      expect(screen.getByText("00:25")).toBeInTheDocument();
+      expect(onSeek).not.toHaveBeenCalled();
+
+      fireEvent.mouseUp(progressSlider);
+
+      await waitFor(() => expect(onSeek).toHaveBeenCalledWith(25_000));
+      expect(onPlay).toHaveBeenCalledTimes(1);
     });
 
-    it("accepts onSeek as Promise<void> and renders without errors", () => {
-      const onSeek = vi.fn().mockResolvedValue(undefined);
-      renderControls({ onSeek });
-      expect(true).toBe(true);
+    it("waits for async seek before auto-playing", async () => {
+      let resolveSeek: () => void = () => {};
+      const onSeek = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSeek = resolve;
+          }),
+      );
+      const onPlay = vi.fn();
+      renderControls({ durationMs: 120_000, onSeek, onPlay });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "50" } });
+      fireEvent.mouseUp(progressSlider);
+
+      expect(onSeek).toHaveBeenCalledWith(60_000);
+      expect(onPlay).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSeek();
+      });
+
+      expect(onPlay).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("volume control logic", () => {
-    it("renders volume slider when muted", () => {
+    it("renders the muted volume slider when the popover opens", () => {
+      vi.useFakeTimers();
       renderControls({ muted: true, volume: 0 });
-      expect(true).toBe(true);
+
+      openHoverPopover("取消静音");
+
+      expect(screen.getByText("0")).toBeInTheDocument();
+      expect(screen.getByRole("slider", { name: "音量" })).toHaveValue("0");
     });
 
-    it("renders volume slider when not muted", () => {
-      renderControls({ muted: false, volume: 50 });
-      expect(true).toBe(true);
+    it("unmutes when volume is raised while muted", () => {
+      const onMuted = vi.fn();
+      const onVolume = vi.fn();
+      vi.useFakeTimers();
+      renderControls({ muted: true, volume: 0, onMuted, onVolume });
+
+      openHoverPopover("取消静音");
+      fireEvent.change(screen.getByRole("slider", { name: "音量" }), { target: { value: "35" } });
+
+      expect(onMuted).toHaveBeenCalledWith(false);
+      expect(onVolume).toHaveBeenCalledWith(35);
+    });
+
+    it("mutes when volume reaches zero", () => {
+      const onMuted = vi.fn();
+      const onVolume = vi.fn();
+      vi.useFakeTimers();
+
+      renderControls({ muted: false, volume: 50, onMuted, onVolume });
+      openHoverPopover("静音");
+      fireEvent.change(screen.getByRole("slider", { name: "音量" }), { target: { value: "0" } });
+
+      expect(onMuted).toHaveBeenCalledWith(true);
+      expect(onVolume).toHaveBeenCalledWith(0);
     });
   });
 
   describe("playback rate control", () => {
-    it("renders rate button", () => {
+    it("calls onRate when a playback rate is selected", () => {
+      vi.useFakeTimers();
+      const { props } = renderControls();
+
+      openHoverPopover("倍速");
+
+      fireEvent.click(screen.getByRole("option", { name: "1.5x" }));
+
+      expect(props.onRate).toHaveBeenCalledWith(1.5);
+    });
+
+    it("keeps the rate popover open when moving from trigger to portal content", () => {
+      vi.useFakeTimers();
       renderControls();
-      expect(screen.getByLabelText("倍速")).toBeInTheDocument();
+      const rateButton = screen.getByLabelText("倍速");
+
+      openHoverPopover("倍速");
+
+      const rateList = screen.getByRole("listbox");
+      fireEvent.mouseLeave(rateButton.parentElement as HTMLElement);
+      fireEvent.mouseEnter(rateList.parentElement as HTMLElement);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+
+      expect(screen.getByRole("option", { name: "1.5x" })).toBeInTheDocument();
     });
   });
 });

@@ -36,8 +36,8 @@ export function ReplayControls({
   const [ratePopoverOpen, setRatePopoverOpen] = useState(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
   const [pendingProgressPercent, setPendingProgressPercent] = useState<number | null>(null);
-  const rateCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const volumeCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const rateCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const volumeCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlaying = state.status === "playing";
   const safeDuration = Math.max(0, durationMs);
   const baseCurrentTime = Math.min(Math.max(0, state.timelineTimeMs), safeDuration);
