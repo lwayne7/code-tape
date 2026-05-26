@@ -64,6 +64,7 @@ type ReplayOverlayState = {
 
 const EMPTY_OVERLAY_STATE: ReplayOverlayState = { pointer: null, shortcut: null };
 const TRANSIENT_OVERLAY_TTL_MS = 900;
+type RecordedMedia = NonNullable<RecordingPackageV1["media"]>;
 
 /**
  * ReplayPage — wires the replay core (scheduler + clock + repository + runtime)
@@ -86,16 +87,15 @@ export function ReplayPage() {
   const pointerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentMedia = pkg?.media ?? null;
-  const mediaAdapter = useMemo(() => {
-    if (!currentMedia || !mediaBlob) return null;
+  const createRecordedMediaAdapter = useCallback((media: RecordedMedia) => {
     return createMediaClockAdapter({
       segments: [
         {
-          blobId: currentMedia.blobId,
-          timelineStartMs: currentMedia.timelineOffsetMs,
-          timelineEndMs: currentMedia.timelineOffsetMs + currentMedia.durationMs,
+          blobId: media.blobId,
+          timelineStartMs: media.timelineOffsetMs,
+          timelineEndMs: media.timelineOffsetMs + media.durationMs,
           mediaStartMs: 0,
-          mediaEndMs: currentMedia.durationMs,
+          mediaEndMs: media.durationMs,
         },
       ],
       currentTimeProvider: () => recordedMediaVideoRef.current?.currentTime ?? null,
@@ -110,7 +110,11 @@ export function ReplayPage() {
         if (recordedMediaVideoRef.current) recordedMediaVideoRef.current.playbackRate = rate;
       },
     });
-  }, [currentMedia, mediaBlob]);
+  }, []);
+  const mediaAdapter = useMemo(() => {
+    if (!currentMedia || !mediaBlob) return null;
+    return createRecordedMediaAdapter(currentMedia);
+  }, [createRecordedMediaAdapter, currentMedia, mediaBlob]);
   const clearOverlayTimers = useCallback(() => {
     if (pointerTimerRef.current) clearTimeout(pointerTimerRef.current);
     if (shortcutTimerRef.current) clearTimeout(shortcutTimerRef.current);
@@ -180,6 +184,11 @@ export function ReplayPage() {
         );
         return;
       }
+      const loadedMediaAdapter =
+        result.package.media && result.mediaBlob
+          ? createRecordedMediaAdapter(result.package.media)
+          : null;
+      scheduler.setMediaAdapter(loadedMediaAdapter);
       setPkg(result.package);
       setMediaBlob(result.mediaBlob);
       await scheduler.load(result.package);
@@ -187,7 +196,7 @@ export function ReplayPage() {
     return () => {
       cancelled = true;
     };
-  }, [clearOverlayTimers, id, repository, scheduler]);
+  }, [clearOverlayTimers, createRecordedMediaAdapter, id, repository, scheduler]);
 
   if (loadError) {
     return (

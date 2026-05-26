@@ -79,7 +79,10 @@ export function createMediaClockAdapter(options: MediaClockAdapterOptions): Repl
     async seek(targetMs) {
       seekGeneration += 1;
       const seg = findSegmentForTimeline(targetMs);
-      if (!seg) return;
+      if (!seg) {
+        pendingSeek = null;
+        return;
+      }
       const mediaTimeMs = seg.mediaStartMs + (targetMs - seg.timelineStartMs);
       if (!metadataReady()) {
         pendingSeek = { segment: seg, mediaTimeMs, generation: seekGeneration };

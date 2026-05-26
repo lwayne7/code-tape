@@ -74,4 +74,21 @@ describe("createMediaClockAdapter", () => {
     resolveSeek();
     await Promise.all([firstFlush, secondFlush]);
   });
+
+  it("cancels a pending seek when the latest seek lands outside media segments", async () => {
+    let metadataReady = false;
+    const seek = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments,
+      seekHandler: seek,
+      metadataReadyProvider: () => metadataReady,
+    });
+
+    await adapter.seek(500);
+    await adapter.seek(1200);
+    metadataReady = true;
+    await adapter.flushPendingSeek();
+
+    expect(seek).not.toHaveBeenCalled();
+  });
 });

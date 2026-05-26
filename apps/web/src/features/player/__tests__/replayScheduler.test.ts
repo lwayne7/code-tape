@@ -340,6 +340,45 @@ describe("createReplayScheduler", () => {
     expect(scheduler.getStableState().editor.code).toBe("");
   });
 
+  it("does not seek media to stale clock time when stalled media becomes ready", async () => {
+    let wall = 0;
+    let schedulerWall = 0;
+    let mediaStatus: ReplaySchedulerState["mediaStatus"] = "ready";
+    let mediaCurrentTimeSec = 1;
+    const seek = vi.fn(async () => {});
+    const adapter = testMediaAdapter({
+      currentTimeSec: () => mediaCurrentTimeSec,
+      seek,
+    });
+    adapter.getStatus = () => mediaStatus;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+      wallNow: () => schedulerWall,
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1500, "skipped")], [], 5000, true));
+
+    scheduler.play();
+    wall = 1000;
+    scheduler.tick();
+    mediaStatus = "stalled";
+    scheduler.tick();
+    wall = 2000;
+    schedulerWall = 700;
+    scheduler.tick();
+    mediaStatus = "ready";
+    mediaCurrentTimeSec = 1;
+    scheduler.setMediaAdapter(adapter as never);
+    scheduler.tick();
+
+    expect(seek).not.toHaveBeenCalled();
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(scheduler.getStableState().editor.code).toBe("");
+  });
+
   it("falls back to the timeline clock when package media is missing", async () => {
     let wall = 0;
     const clock = createTimelineClock({ nowProvider: () => wall });
@@ -383,6 +422,26 @@ describe("createReplayScheduler", () => {
     expect(latest().timelineTimeMs).toBe(1000);
     expect(latest().driftMs).toBe(600);
     expect(seek).toHaveBeenCalledWith(1600);
+  });
+
+  it("does not apply events beyond duration when ending after a clock overshoot", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1200, "past-duration")], [], 1000));
+
+    scheduler.play();
+    wall = 1500;
+    scheduler.tick();
+
+    expect(latest().status).toBe("ended");
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(latest().lastAppliedSeq).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("");
   });
 
   it("handles rejected async media operations during ready ticks", async () => {

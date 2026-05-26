@@ -180,6 +180,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
   } => {
     const clockTimeMs = Math.max(0, clock.now());
     const mediaStatus = currentMediaStatus();
+    const mediaWasBlocked = mediaBlockedSinceMs !== null;
     const blockedMs = noteMediaStatus(mediaStatus);
 
     if (mediaStatus === "stalled") {
@@ -220,13 +221,18 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       };
     }
 
-    const driftMs = clockTimeMs - mediaTimelineMs;
-    if (Math.abs(driftMs) > MEDIA_DRIFT_THRESHOLD_MS) {
+    const timelineTimeMs = Math.max(0, mediaTimelineMs);
+    const recoveringFromStalled = mediaWasBlocked;
+    let driftMs = clockTimeMs - timelineTimeMs;
+    if (recoveringFromStalled) {
+      clock.setBase(timelineTimeMs);
+      driftMs = 0;
+    } else if (Math.abs(driftMs) > MEDIA_DRIFT_THRESHOLD_MS) {
       runMediaOperation(() => readyMediaAdapter.seek(clockTimeMs));
     }
 
     return {
-      timelineTimeMs: Math.max(0, mediaTimelineMs),
+      timelineTimeMs,
       driftMs,
       mediaStatus,
       shouldAdvanceEvents: true,
@@ -284,8 +290,9 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       options.onTick?.(stableState, [], now);
       return;
     }
-    const { transientEvents, lastSeq } = applyEventsUntil(now);
     const ended = pkg.meta.durationMs > 0 && now >= pkg.meta.durationMs;
+    const eventTargetMs = ended ? pkg.meta.durationMs : now;
+    const { transientEvents, lastSeq } = applyEventsUntil(eventTargetMs);
     updateState({
       timelineTimeMs: ended ? pkg.meta.durationMs : now,
       lastAppliedSeq: lastSeq,

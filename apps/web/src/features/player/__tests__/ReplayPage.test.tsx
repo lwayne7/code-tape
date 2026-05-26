@@ -356,6 +356,29 @@ describe("ReplayPage", () => {
     pause.mockRestore();
   });
 
+  it("attaches a media adapter before loading a package with a media blob", async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() =>
+      expect(replayPageMock.scheduler.setMediaAdapter.mock.calls.some(([adapter]) => adapter)).toBe(
+        true,
+      ),
+    );
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    const firstAdapterCallIndex = replayPageMock.scheduler.setMediaAdapter.mock.calls.findIndex(
+      ([adapter]) => adapter,
+    );
+    const adapterAttachOrder =
+      replayPageMock.scheduler.setMediaAdapter.mock.invocationCallOrder[firstAdapterCallIndex];
+    const loadOrder = replayPageMock.scheduler.load.mock.invocationCallOrder[0];
+
+    expect(adapterAttachOrder).toBeLessThan(loadOrder);
+    pause.mockRestore();
+  });
+
   it("keeps the scheduler subscription alive when the replay id changes", async () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const { ReplayPage } = await import("../ReplayPage");
