@@ -210,6 +210,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       mediaCurrentTimeSec === null
         ? null
         : readyMediaAdapter.mediaToTimelineTime(mediaCurrentTimeSec);
+    const recoveringFromStalled = mediaWasBlocked;
 
     if (mediaTimelineMs === null) {
       return {
@@ -221,8 +222,17 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       };
     }
 
+    if (!recoveringFromStalled && readyMediaAdapter.timelineToMediaTime(clockTimeMs) === null) {
+      return {
+        timelineTimeMs: clockTimeMs,
+        driftMs: 0,
+        mediaStatus,
+        shouldAdvanceEvents: true,
+        status: schedulerState.status === "buffering" ? "playing" : schedulerState.status,
+      };
+    }
+
     const timelineTimeMs = Math.max(0, mediaTimelineMs);
-    const recoveringFromStalled = mediaWasBlocked;
     let driftMs = clockTimeMs - timelineTimeMs;
     if (recoveringFromStalled) {
       clock.setBase(timelineTimeMs);

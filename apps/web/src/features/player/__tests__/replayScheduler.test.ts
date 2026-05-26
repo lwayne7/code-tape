@@ -311,6 +311,76 @@ describe("createReplayScheduler", () => {
     expect(latest().driftMs).toBe(50);
   });
 
+  it("uses the timeline clock before an offset media segment starts", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 1000,
+          timelineEndMs: 2000,
+          mediaStartMs: 0,
+          mediaEndMs: 1000,
+        },
+      ],
+      currentTimeProvider: () => 0,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(
+      makePkg([content(1, 500, "before-media"), content(2, 1000, "media-start")], [], 5000, true),
+    );
+
+    scheduler.play();
+    wall = 500;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("ready");
+    expect(latest().timelineTimeMs).toBe(500);
+    expect(latest().driftMs).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("before-media");
+  });
+
+  it("keeps applying pure events after the media segment ends", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 1000,
+          timelineEndMs: 2000,
+          mediaStartMs: 0,
+          mediaEndMs: 1000,
+        },
+      ],
+      currentTimeProvider: () => 1,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 2400, "after-media")], [], 5000, true));
+
+    scheduler.play();
+    wall = 2500;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("ready");
+    expect(latest().timelineTimeMs).toBe(2500);
+    expect(latest().driftMs).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("after-media");
+  });
+
   it("rolls stable state back when media currentTime moves backward", async () => {
     let wall = 0;
     let mediaCurrentTimeSec = 0;
