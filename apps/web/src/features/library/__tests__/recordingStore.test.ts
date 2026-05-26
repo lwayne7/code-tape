@@ -52,6 +52,22 @@ function makeEvent(seq: number): RecordingEvent {
   };
 }
 
+function makeUnsupportedMediaWarning(seq: number): RecordingEvent {
+  return {
+    id: `e-${seq}`,
+    seq,
+    timestampMs: seq * 100,
+    source: "media",
+    track: "media",
+    type: "media-warning",
+    payload: {
+      target: "camera",
+      code: "unsupported",
+      message: "Camera is unsupported",
+    },
+  };
+}
+
 function emptyIndexes(): RecordingIndexes {
   return {
     generatedAt: "2026-05-24T00:00:00.000Z",
@@ -187,6 +203,29 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(imported.ok).toBe(true);
     const list = await sink.list();
     expect(list[0].id).toBe("rec-export");
+  });
+
+  it("importZip accepts packages with unsupported media-warning events", async () => {
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-unsupported-warning");
+    input.events = [makeUnsupportedMediaWarning(1)];
+    input.snapshots = [makeSnapshot(1)];
+    await store.saveDraft(input);
+    await store.commit("rec-unsupported-warning");
+    const zipBlob = await store.exportZip("rec-unsupported-warning");
+
+    const sink = createRecordingStore({ databaseName: uniqueDbName() });
+    const imported = await sink.importZip(zipBlob);
+    if (!imported.ok) throw new Error(imported.message);
+    const loaded = await sink.load("rec-unsupported-warning");
+
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      expect(loaded.package.events[0]).toMatchObject({
+        type: "media-warning",
+        payload: { code: "unsupported" },
+      });
+    }
   });
 
   it("importZip rejects packages whose original manifest checksum no longer matches", async () => {

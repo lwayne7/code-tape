@@ -225,7 +225,7 @@ function validateEventPayload(
       break;
     case "media-warning":
       expectOneOf(payload.target, ["audio", "camera", "recorder"], `${path}.target`, errors);
-      expectOneOf(payload.code, ["permission-denied", "not-found", "busy", "track-ended", "recorder-error"], `${path}.code`, errors);
+      expectOneOf(payload.code, ["permission-denied", "not-found", "busy", "unsupported", "track-ended", "recorder-error"], `${path}.code`, errors);
       expectString(payload.message, `${path}.message`, errors);
       break;
     case "camera-position":

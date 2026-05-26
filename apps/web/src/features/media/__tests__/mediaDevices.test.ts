@@ -68,6 +68,17 @@ describe("createMediaDevicesController", () => {
     expect(result.warnings[0].code).toBe("not-found");
   });
 
+  it("openStream maps unsupported errors to unsupported warning", async () => {
+    const md = setupNavigator(vi.fn(async () => {
+      const err = new Error("camera is unsupported");
+      (err as Error & { name: string }).name = "NotSupportedError";
+      throw err;
+    }));
+    const controller = createMediaDevicesController({ navigatorMediaDevices: md });
+    const result = await controller.openStream({ audioDeviceId: null, cameraDeviceId: "cam-1" });
+    expect(result.warnings[0].code).toBe("unsupported");
+  });
+
   it("openStream succeeds and capability tracks selected devices", async () => {
     const stream = makeFakeStream([makeFakeTrack("audio"), makeFakeTrack("video")]);
     const md = setupNavigator(vi.fn(async () => stream));

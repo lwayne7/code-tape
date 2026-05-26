@@ -139,9 +139,9 @@ export function createMediaDevicesController(
             ? "permission-denied"
             : code === "not-found"
               ? "not-found"
-              : code === "busy"
-                ? "busy"
-                : "recorder-error",
+            : code === "busy"
+              ? "busy"
+              : "unsupported",
           message: (err as Error).message,
         });
         return { stream: null, capability, warnings };

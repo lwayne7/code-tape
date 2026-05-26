@@ -60,7 +60,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
         case "not-found":
           return "not-found";
         case "unsupported":
-          return "not-found";
+          return "unsupported";
       }
     };
 

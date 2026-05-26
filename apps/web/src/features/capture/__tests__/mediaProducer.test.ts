@@ -127,7 +127,7 @@ describe("createMediaProducer", () => {
         type: "media-warning",
         payload: {
           target: "camera",
-          code: "not-found",
+          code: "unsupported",
           message: expect.stringContaining("unsupported"),
         },
       }),
