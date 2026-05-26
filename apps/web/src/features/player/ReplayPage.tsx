@@ -9,6 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import { Link, useParams } from "react-router-dom";
+import { CircleAlert } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
 import { createTimelineClock } from "./timelineClock";
 import { ReplayControls } from "./ReplayControls";
@@ -18,6 +19,7 @@ import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createRecordingStore } from "@/features/library/recordingStore";
 import type {
+  PackageWarning,
   RecordingEvent,
   RecordingPackageV1,
   ReplaySchedulerState,
@@ -65,6 +67,16 @@ type ReplayOverlayState = {
 const EMPTY_OVERLAY_STATE: ReplayOverlayState = { pointer: null, shortcut: null };
 const TRANSIENT_OVERLAY_TTL_MS = 900;
 const MEDIA_DRIFT_THRESHOLD_MS = 250;
+const EVENT_ONLY_REPLAY_NOTICE = "音视频不可用，已切换为纯事件流回放";
+
+function isEventOnlyMediaDegraded(
+  pkg: RecordingPackageV1,
+  mediaBlob: Blob | null,
+  warnings: PackageWarning[],
+): boolean {
+  if (!pkg.media || mediaBlob) return false;
+  return warnings.some((warning) => warning.code === "media-missing");
+}
 
 /**
  * ReplayPage — wires the replay core (scheduler + clock + repository + runtime)
@@ -81,6 +93,7 @@ export function ReplayPage() {
   const [pkg, setPkg] = useState<RecordingPackageV1 | null>(null);
   const [mediaBlob, setMediaBlob] = useState<Blob | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [eventOnlyNotice, setEventOnlyNotice] = useState(false);
   const [volume, setVolume] = useState(100);
   const [muted, setMuted] = useState(false);
   const recordedMediaVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -137,6 +150,7 @@ export function ReplayPage() {
     if (!id) return;
     let cancelled = false;
     setLoadError(null);
+    setEventOnlyNotice(false);
     setPkg(null);
     setMediaBlob(null);
     setStableState(INITIAL_STABLE_STATE);
@@ -154,6 +168,9 @@ export function ReplayPage() {
       }
       setPkg(result.package);
       setMediaBlob(result.mediaBlob);
+      setEventOnlyNotice(
+        isEventOnlyMediaDegraded(result.package, result.mediaBlob, result.warnings),
+      );
       await scheduler.load(result.package);
     })();
     return () => {
@@ -174,6 +191,18 @@ export function ReplayPage() {
 
   return (
     <div className="flex h-full flex-col">
+      {eventOnlyNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-foreground"
+        >
+          <div className="flex items-center gap-2">
+            <CircleAlert aria-hidden size={16} className="shrink-0 text-warning" />
+            <span>{EVENT_ONLY_REPLAY_NOTICE}</span>
+          </div>
+        </div>
+      ) : null}
       <div className="grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
         <div className="relative border-r border-border">
           <CodeEditor
