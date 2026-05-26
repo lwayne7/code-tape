@@ -365,6 +365,16 @@ test('contract diff filter includes deleted files', () => {
   assert.equal(CONTRACT_DIFF_FILTER.includes('D'), true);
 });
 
+test('contract check launches npx through cmd on Windows', () => {
+  const contractCheck = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
+
+  assert.match(contractCheck, /process\.platform === 'win32'/u);
+  assert.match(contractCheck, /command: 'cmd\.exe'/u);
+  assert.match(contractCheck, /'npx\.cmd'/u);
+  assert.match(contractCheck, /execFileSync\(command, args/u);
+  assert.doesNotMatch(contractCheck, /execFileSync\('npx'/u);
+});
+
 test('evaluateGitNexusContract blocks critical changes without tests and impact summary', () => {
   const result = evaluateGitNexusContract({
     changedFiles: ['apps/web/src/shared/recording-schema/validators.ts'],
