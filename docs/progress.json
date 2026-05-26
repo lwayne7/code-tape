@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-26T14:35:21Z",
+  "updatedAt": "2026-05-26T14:37:58Z",
   "students": {
     "ceilf6": {
       "activeIssue": 76,
@@ -46,7 +46,7 @@
       "totalScore": 7
     },
     "Suxian2001": {
-      "activeIssue": null,
+      "activeIssue": 79,
       "completedIssues": [
         5
       ],
@@ -353,6 +353,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-26T14:35:21Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "79": {
+      "number": 79,
+      "title": "[P0] 回放缺失媒体降级提示与纯事件流体验",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "Suxian2001",
+      "claimedAt": "2026-05-26T14:37:58Z",
       "closedAt": null,
       "mergedPr": null
     }
