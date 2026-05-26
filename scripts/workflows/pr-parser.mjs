@@ -25,6 +25,10 @@ function commentCreatedAt(comment) {
   return comment?.created_at || comment?.createdAt;
 }
 
+function hasCrPassFrom(items, login) {
+  return items.some((item) => commentLogin(item) === login && item?.body?.trim() === 'CR通过');
+}
+
 function isEligibleReviewerComment(comment, prAuthor) {
   const login = commentLogin(comment);
   const type = comment?.user?.type;
@@ -39,15 +43,16 @@ export function findClaimedReviewer({ comments = [], prAuthor }) {
   return commentLogin(claimedComment) ?? null;
 }
 
-export function findValidReviewer({ comments = [], prAuthor }) {
+export function findValidReviewer({ comments = [], reviews = [], reviewComments = [], prAuthor }) {
   const claimedReviewer = findClaimedReviewer({ comments, prAuthor });
   if (!claimedReviewer) {
     return null;
   }
 
-  const hasPass = comments.some(
-    (comment) => commentLogin(comment) === claimedReviewer && comment?.body?.trim() === 'CR通过',
-  );
+  const hasPass =
+    hasCrPassFrom(comments, claimedReviewer) ||
+    hasCrPassFrom(reviews, claimedReviewer) ||
+    hasCrPassFrom(reviewComments, claimedReviewer);
 
   return hasPass ? claimedReviewer : null;
 }

@@ -50,9 +50,10 @@ export async function loadPrGuardContextForPull(client, prNumber) {
   const closingIssues = parseClosingIssues(pr.body ?? '');
   const issueNumber = closingIssues.length === 1 ? closingIssues[0] : null;
   const issue = issueNumber ? await client.getIssue(issueNumber) : null;
-  const [changedFiles, reviews, comments, commit, progress] = await Promise.all([
+  const [changedFiles, reviews, reviewComments, comments, commit, progress] = await Promise.all([
     client.listPullFiles(prNumber),
     client.listPullReviews(prNumber),
+    client.listPullReviewComments(prNumber),
     client.listIssueComments(prNumber),
     client.getCommit(pr.head.sha),
     readProgress(),
@@ -82,6 +83,7 @@ export async function loadPrGuardContextForPull(client, prNumber) {
       : null,
     changedFiles,
     reviews,
+    reviewComments,
     comments,
   };
 }

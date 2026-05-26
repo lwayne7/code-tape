@@ -22,6 +22,7 @@ const context = await loadPrGuardContext(client, event);
 const score = parseScore(context.rawIssue.labels);
 const reviewer = findValidReviewer({
   reviews: context.reviews,
+  reviewComments: context.reviewComments,
   comments: context.comments,
   prAuthor: context.pr.author,
   latestCommitAt: context.pr.latestCommitAt,

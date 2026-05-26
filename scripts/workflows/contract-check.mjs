@@ -80,11 +80,12 @@ function getImpactSummary() {
 
 function runGitNexusAnalyze(mode) {
   const timeoutMs = resolveGitNexusAnalyzeTimeoutMs(mode);
+  const { command, args } = getGitNexusAnalyzeInvocation();
   console.log(
     `Running GitNexus ${GITNEXUS_VERSION} analyze --force --index-only (${mode}, timeout ${timeoutMs}ms)...`,
   );
   try {
-    execFileSync('npx', ['--yes', `gitnexus@${GITNEXUS_VERSION}`, 'analyze', '--force', '--index-only'], {
+    execFileSync(command, args, {
       stdio: 'inherit',
       timeout: timeoutMs,
     });
@@ -96,6 +97,14 @@ function runGitNexusAnalyze(mode) {
     }
     throw err;
   }
+}
+
+function getGitNexusAnalyzeInvocation() {
+  const args = ['--yes', `gitnexus@${GITNEXUS_VERSION}`, 'analyze', '--force', '--index-only'];
+  if (process.platform === 'win32') {
+    return { command: 'cmd.exe', args: ['/d', '/s', '/c', 'npx.cmd', ...args] };
+  }
+  return { command: 'npx', args };
 }
 
 function resolveGitNexusAnalyzeTimeoutMs(mode) {

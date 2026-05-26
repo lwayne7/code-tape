@@ -11,6 +11,7 @@ export function evaluatePrGuard({
   issue,
   changedFiles = [],
   reviews = [],
+  reviewComments = [],
   comments = [],
   now,
 }) {
@@ -46,6 +47,7 @@ export function evaluatePrGuard({
 
   const reviewer = findValidReviewer({
     reviews,
+    reviewComments,
     comments,
     prAuthor: pr.author,
     latestCommitAt: pr.latestCommitAt,

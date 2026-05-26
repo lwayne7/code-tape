@@ -115,6 +115,10 @@ export class GitHubClient {
     return this.paginate(this.pullPath(prNumber, '/reviews'));
   }
 
+  async listPullReviewComments(prNumber) {
+    return this.paginate(this.pullPath(prNumber, '/comments'));
+  }
+
   async listIssueComments(issueNumber) {
     return this.paginate(this.issuePath(issueNumber, '/comments'));
   }
