@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-26T06:53:35Z",
+  "updatedAt": "2026-05-26T14:35:21Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 76,
       "completedIssues": [
         11,
         10,
@@ -341,6 +341,20 @@
       "claimedAt": "2026-05-25T13:16:07Z",
       "closedAt": "2026-05-26T06:26:43Z",
       "mergedPr": 72
+    },
+    "76": {
+      "number": 76,
+      "title": "[P0] ReplayScheduler 接入媒体主时钟与 buffering 状态",
+      "score": 5,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-26T14:35:21Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
