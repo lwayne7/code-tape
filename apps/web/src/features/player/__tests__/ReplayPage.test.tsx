@@ -1,6 +1,9 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayControlsProps } from "../ReplayControls";
+import type { CodeEditorProps } from "@/features/editor/CodeEditor";
+import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
+import type { ReplayStableState } from "@/shared/recording-schema";
 import type * as ReactRouterDom from "react-router-dom";
 
 const replayPageMock = vi.hoisted(() => {
@@ -67,6 +70,9 @@ const replayPageMock = vi.hoisted(() => {
     repository,
     packageData,
     controlsProps: null as ReplayControlsProps | null,
+    codeEditorProps: null as CodeEditorProps | null,
+    previewPaneProps: null as PreviewPaneProps | null,
+    onTick: null as ((state: ReplayStableState) => void) | null,
     reset() {
       scheduler.load.mockClear();
       scheduler.play.mockClear();
@@ -79,6 +85,9 @@ const replayPageMock = vi.hoisted(() => {
       scheduler.subscribe.mockClear();
       repository.load.mockClear();
       this.controlsProps = null;
+      this.codeEditorProps = null;
+      this.previewPaneProps = null;
+      this.onTick = null;
     },
   };
 });
@@ -92,11 +101,17 @@ vi.mock("react-router-dom", async () => {
 });
 
 vi.mock("@/features/editor/CodeEditor", () => ({
-  CodeEditor: () => <div aria-label="Mock code editor" />,
+  CodeEditor: (props: CodeEditorProps) => {
+    replayPageMock.codeEditorProps = props;
+    return <div aria-label="Mock code editor" />;
+  },
 }));
 
 vi.mock("@/features/runtime-preview/PreviewPane", () => ({
-  PreviewPane: () => <div aria-label="Mock preview pane" />,
+  PreviewPane: (props: PreviewPaneProps) => {
+    replayPageMock.previewPaneProps = props;
+    return <div aria-label="Mock preview pane" />;
+  },
 }));
 
 vi.mock("@/features/runtime-preview/iframeRuntime", () => ({
@@ -108,7 +123,10 @@ vi.mock("@/features/library/recordingStore", () => ({
 }));
 
 vi.mock("../replayScheduler", () => ({
-  createReplayScheduler: vi.fn(() => replayPageMock.scheduler),
+  createReplayScheduler: vi.fn((options: { onTick?: (state: ReplayStableState) => void }) => {
+    replayPageMock.onTick = options.onTick ?? null;
+    return replayPageMock.scheduler;
+  }),
   defaultTickStrategy: vi.fn(() => ({})),
 }));
 
@@ -149,5 +167,64 @@ describe("ReplayPage", () => {
     expect(replayPageMock.scheduler.setMuted).toHaveBeenCalledWith(true);
     await waitFor(() => expect(replayPageMock.controlsProps?.volume).toBe(35));
     expect(replayPageMock.controlsProps?.muted).toBe(true);
+  });
+
+  it("renders scheduler stable state into the read-only editor and runtime panel", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.onTick?.({
+        editor: {
+          code: "console.log('replayed');",
+          language: "typescript",
+          cursor: { lineNumber: 1, column: 8 },
+          selection: {
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: 1,
+            endColumn: 8,
+          },
+          scrollTop: 88,
+          scrollLeft: 4,
+          fontSize: 16,
+          theme: "light",
+        },
+        pointer: null,
+        media: { microphoneEnabled: false, cameraEnabled: false, cameraPosition: { x: 0, y: 0 } },
+        runtime: {
+          status: "error",
+          stdout: ["hello"],
+          stderr: ["warn"],
+          previewHtml: "<main>preview</main>",
+          errorMessage: "boom",
+        },
+      });
+    });
+
+    expect(replayPageMock.codeEditorProps).toEqual(
+      expect.objectContaining({
+        language: "typescript",
+        value: "console.log('replayed');",
+        readOnly: true,
+        cursor: { lineNumber: 1, column: 8 },
+        selection: {
+          startLineNumber: 1,
+          startColumn: 1,
+          endLineNumber: 1,
+          endColumn: 8,
+        },
+        scrollTop: 88,
+        scrollLeft: 4,
+        fontSize: 16,
+        theme: "light",
+      }),
+    );
+    expect(replayPageMock.previewPaneProps?.previewHtml).toBe("<main>preview</main>");
+    expect(document.body).toHaveTextContent("hello");
+    expect(document.body).toHaveTextContent("warn");
+    expect(document.body).toHaveTextContent("boom");
   });
 });

@@ -11,6 +11,7 @@ import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { createPreviewCompiler } from "@/features/runtime-preview/previewCompiler";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createMediaDevicesController } from "@/features/media/mediaDevices";
+import { createMediaRecorderWrapper } from "@/features/media/mediaRecorder";
 import { createRecordingStore } from "@/features/library/recordingStore";
 import {
   createEditorProducer,
@@ -21,8 +22,13 @@ import {
 } from "@/features/capture";
 import type {
   CameraPositionPayload,
+  MediaCapability,
+  MediaDevicesController,
+  OpenStreamResult,
   RecordingControllerState,
+  RecordingControllerStatus,
   RecordingLanguage,
+  PackageBuildInput,
   RecordStartPayload,
   RunStartPayload,
 } from "@/shared/recording-schema";
@@ -47,15 +53,16 @@ const APP_VERSION = "0.0.0";
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
  * + repository + media + runtime) and renders the workshop layout.
- *
- * UI shell is intentionally minimal. The expressive UI (control bar, camera
- * dragging, shortcut badges, run/output panel) is delegated to issues. This
- * page guarantees the *infrastructure* is correctly wired so those issues can
- * focus on visual + interaction polish.
  */
 export function RecorderPage() {
   const navigate = useNavigate();
   const editorRef = useRef<CodeEditorHandle | null>(null);
+  const mediaRecorderRef = useRef<ReturnType<typeof createMediaRecorderWrapper> | null>(null);
+  const mountedRef = useRef(true);
+  const startInFlightRef = useRef(false);
+  const startTokenRef = useRef(0);
+  const stopTokenRef = useRef(0);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const stack = useMemo(() => {
     const clock = createRecordingClock();
@@ -65,6 +72,7 @@ export function RecorderPage() {
     const repository = createRecordingStore();
     const devices = createMediaDevicesController();
     let currentEditorLanguage: RecordingLanguage = "javascript";
+    let currentMediaCapability: MediaCapability = INITIAL_CONTROLLER_STATE.mediaCapability;
     const getCurrentRuntimeLanguage = (): RunStartPayload["language"] =>
       currentEditorLanguage === "typescript" ? "typescript" : "javascript";
     const editorProducer = createEditorProducer({
@@ -91,7 +99,7 @@ export function RecorderPage() {
       bus,
       clock,
       devices,
-      getCapability: () => INITIAL_CONTROLLER_STATE.mediaCapability,
+      getCapability: () => currentMediaCapability,
     });
     const runtimeProducer = createRuntimeProducer({ bus, clock, compiler, runtime });
     const packageBuilder = createPackageBuilder();
@@ -103,6 +111,27 @@ export function RecorderPage() {
       repository,
       appVersion: APP_VERSION,
       snapshotSource: () => editorProducer.takeSnapshot(),
+      mediaSource: async () => {
+        const recorder = mediaRecorderRef.current;
+        mediaRecorderRef.current = null;
+        try {
+          if (!recorder) return null;
+          const result = await recorder.stop();
+          return {
+            blob: result.blob,
+            durationMs: result.durationMs,
+            mimeType: result.mimeType,
+            hasAudio: result.hasAudio,
+            hasCamera: result.hasCamera,
+          } satisfies PackageBuildInput["media"];
+        } catch (err) {
+          console.warn("[recorder-page] media finalization failed:", err);
+          return null;
+        } finally {
+          devices.release();
+          if (mountedRef.current) setMediaStream(null);
+        }
+      },
     });
     return {
       controller,
@@ -113,6 +142,9 @@ export function RecorderPage() {
       editorProducer,
       mediaProducer,
       runtimeProducer,
+      setCurrentMediaCapability: (capability: MediaCapability) => {
+        currentMediaCapability = capability;
+      },
       getCurrentEditorLanguage: () => currentEditorLanguage,
       getCurrentRuntimeLanguage,
     };
@@ -127,27 +159,161 @@ export function RecorderPage() {
     INITIAL_CAMERA_POSITION,
   );
 
-  useEffect(() => stack.controller.subscribe(setControllerState), [stack.controller]);
+  useEffect(
+    () => {
+      mountedRef.current = true;
+      return stack.controller.subscribe((nextState) => {
+        if (mountedRef.current) setControllerState(nextState);
+      });
+    },
+    [stack.controller],
+  );
+  useEffect(
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        startInFlightRef.current = false;
+        startTokenRef.current += 1;
+        stopTokenRef.current += 1;
+        const isFinalizing = isFinalizingRecordingStatus(stack.controller.state.status);
+        if (!isFinalizing) {
+          stack.controller.reset();
+          const recorder = mediaRecorderRef.current;
+          mediaRecorderRef.current = null;
+          void recorder?.stop().catch((err) => {
+            console.warn("[recorder-page] cleanup media stop failed:", err);
+          });
+          stack.devices.release();
+        }
+      };
+    },
+    [stack.controller, stack.devices],
+  );
+
+  const isCurrentStart = (token: number) => mountedRef.current && startTokenRef.current === token;
 
   const handleStart = async () => {
-    const payload: RecordStartPayload = {
-      initialLanguage: stack.getCurrentEditorLanguage(),
-      initialFontSize: 14,
-      initialTheme: "dark",
-      selectedAudioDeviceId: null,
-      selectedCameraDeviceId: null,
-      mediaCapability: {
-        audio: "unsupported",
-        camera: "unsupported",
-        selectedAudioDeviceId: null,
-        selectedCameraDeviceId: null,
-      },
-    };
-    await stack.controller.start(payload);
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
+    const startToken = (startTokenRef.current += 1);
+    try {
+      let media = await openDefaultMedia(stack.devices);
+      if (!isCurrentStart(startToken)) {
+        stack.devices.release();
+        return;
+      }
+      if (media.stream) {
+        setMediaStream(media.stream);
+        let recorder: ReturnType<typeof createMediaRecorderWrapper> | null = null;
+        try {
+          recorder = createMediaRecorderWrapper();
+          mediaRecorderRef.current = recorder;
+          await recorder.start(media.stream);
+          if (!isCurrentStart(startToken)) {
+            if (mediaRecorderRef.current === recorder) {
+              mediaRecorderRef.current = null;
+              await recorder.stop().catch(() => undefined);
+            }
+            stack.devices.release();
+            return;
+          }
+        } catch (err) {
+          console.warn("[recorder-page] media recorder start failed:", err);
+          if (recorder && mediaRecorderRef.current === recorder) {
+            mediaRecorderRef.current = null;
+            await recorder.stop().catch((stopErr) => {
+              console.warn("[recorder-page] media recorder cleanup after start failed:", stopErr);
+            });
+          }
+          if (!isCurrentStart(startToken)) {
+            stack.devices.release();
+            return;
+          }
+          stack.devices.release();
+          setMediaStream(null);
+          media = eventOnlyMedia();
+        }
+      }
+      setMicrophoneEnabled(media.capability.audio === "available");
+      setCameraEnabled(media.capability.camera === "available");
+      stack.setCurrentMediaCapability(media.capability);
+
+      const payload: RecordStartPayload = {
+        initialLanguage: stack.getCurrentEditorLanguage(),
+        initialFontSize: 14,
+        initialTheme: "dark",
+        selectedAudioDeviceId: media.capability.selectedAudioDeviceId,
+        selectedCameraDeviceId: media.capability.selectedCameraDeviceId,
+        mediaCapability: media.capability,
+      };
+      try {
+        await stack.controller.start(payload);
+        if (!isCurrentStart(startToken) && isActiveRecordingStatus(stack.controller.state.status)) {
+          stack.controller.reset();
+        }
+      } catch (error) {
+        const recorder = mediaRecorderRef.current;
+        mediaRecorderRef.current = null;
+        await recorder?.stop().catch(() => undefined);
+        stack.devices.release();
+        if (isCurrentStart(startToken)) {
+          setMediaStream(null);
+          setMicrophoneEnabled(false);
+          setCameraEnabled(false);
+          stack.setCurrentMediaCapability(INITIAL_CONTROLLER_STATE.mediaCapability);
+        }
+        throw error;
+      }
+    } finally {
+      startInFlightRef.current = false;
+    }
   };
   const handleStop = async () => {
-    const pkg = await stack.controller.stop("user");
-    navigate(`/replay/${pkg.meta.id}`);
+    const stopToken = (stopTokenRef.current += 1);
+    try {
+      const pkg = await stack.controller.stop("user");
+      if (mountedRef.current && stopTokenRef.current === stopToken) {
+        navigate(`/replay/${pkg.meta.id}`);
+      } else {
+        stack.controller.reset();
+      }
+    } catch (error) {
+      if (mountedRef.current && stopTokenRef.current === stopToken) throw error;
+      stack.controller.reset();
+      console.warn("[recorder-page] stop ignored after unmount:", error);
+    }
+  };
+  const handlePause = () => {
+    if (stack.controller.state.status !== "recording") return;
+    const recorder = mediaRecorderRef.current;
+    stack.controller.pause();
+    try {
+      recorder?.pause();
+    } catch (err) {
+      console.warn("[recorder-page] media pause failed:", err);
+      void stack.controller.resume().catch((rollbackErr) => {
+        console.warn("[recorder-page] controller pause rollback failed:", rollbackErr);
+      });
+    }
+  };
+  const handleResume = () => {
+    if (stack.controller.state.status !== "paused") return;
+    const recorder = mediaRecorderRef.current;
+    try {
+      recorder?.resume();
+    } catch (err) {
+      console.warn("[recorder-page] media resume failed:", err);
+      return;
+    }
+    void stack.controller.resume().catch((err) => {
+      console.warn("[recorder-page] controller resume failed:", err);
+      try {
+        recorder?.pause();
+      } catch (rollbackErr) {
+        console.warn("[recorder-page] media resume rollback failed:", rollbackErr);
+      }
+    });
   };
   const handleRun = async () => {
     const editor = editorRef.current?.getEditor();
@@ -166,15 +332,21 @@ export function RecorderPage() {
         microphoneEnabled={microphoneEnabled}
         cameraEnabled={cameraEnabled}
         onStart={handleStart}
-        onPause={() => stack.controller.pause()}
-        onResume={() => void stack.controller.resume()}
+        onPause={handlePause}
+        onResume={handleResume}
         onStop={handleStop}
         onToggleMicrophone={(next) => {
           setMicrophoneEnabled(next);
+          if (stack.controller.state.status === "paused") {
+            stack.devices.setTrackEnabled("audio", next);
+          }
           stack.mediaProducer.setMicrophoneEnabled(next);
         }}
         onToggleCamera={(next) => {
           setCameraEnabled(next);
+          if (stack.controller.state.status === "paused") {
+            stack.devices.setTrackEnabled("camera", next);
+          }
           stack.mediaProducer.setCameraEnabled(next);
         }}
         onRun={handleRun}
@@ -189,7 +361,7 @@ export function RecorderPage() {
             theme="dark"
           />
           <CameraPreview
-            stream={null}
+            stream={mediaStream}
             enabled={cameraEnabled}
             position={cameraPosition}
             draggable
@@ -203,4 +375,41 @@ export function RecorderPage() {
       </div>
     </div>
   );
+}
+
+async function openDefaultMedia(devices: MediaDevicesController): Promise<OpenStreamResult> {
+  try {
+    const available = await devices.enumerate();
+    const audioDeviceId = available.audio[0]?.deviceId ?? null;
+    const cameraDeviceId = available.camera[0]?.deviceId ?? null;
+
+    if (!audioDeviceId && !cameraDeviceId) return eventOnlyMedia();
+
+    const result = await devices.openStream({ audioDeviceId, cameraDeviceId });
+    if (!result.stream) {
+      devices.release();
+      return eventOnlyMedia(result.warnings);
+    }
+    return result;
+  } catch (err) {
+    console.warn("[recorder-page] media devices unavailable:", err);
+    devices.release();
+    return eventOnlyMedia();
+  }
+}
+
+function eventOnlyMedia(warnings: OpenStreamResult["warnings"] = []): OpenStreamResult {
+  return {
+    stream: null,
+    warnings,
+    capability: INITIAL_CONTROLLER_STATE.mediaCapability,
+  };
+}
+
+function isActiveRecordingStatus(status: RecordingControllerStatus): boolean {
+  return status === "requestingPermission" || status === "recording" || status === "paused";
+}
+
+function isFinalizingRecordingStatus(status: RecordingControllerStatus): boolean {
+  return status === "stopping" || status === "processing";
 }

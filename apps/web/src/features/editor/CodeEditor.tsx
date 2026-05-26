@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
-import type { RecordingLanguage } from "@/shared/recording-schema";
+import type { RecordingLanguage, ReplayStableState } from "@/shared/recording-schema";
 
 export type CodeEditorHandle = {
   /** Lazy accessor — null until the editor has mounted. */
@@ -11,8 +11,14 @@ export type CodeEditorHandle = {
 export type CodeEditorProps = {
   language: RecordingLanguage;
   initialValue: string;
+  value?: string;
   fontSize: number;
   theme: "light" | "dark";
+  readOnly?: boolean;
+  cursor?: ReplayStableState["editor"]["cursor"];
+  selection?: ReplayStableState["editor"]["selection"];
+  scrollTop?: number;
+  scrollLeft?: number;
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
 };
 
@@ -124,7 +130,19 @@ async function loadMonaco() {
 }
 
 export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEditor(
-  { language, initialValue, fontSize, theme, onMount },
+  {
+    language,
+    initialValue,
+    value,
+    fontSize,
+    theme,
+    readOnly = false,
+    cursor,
+    selection,
+    scrollTop,
+    scrollLeft,
+    onMount,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -132,11 +150,31 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const modelRef = useRef<Monaco.editor.ITextModel | null>(null);
   const monacoRef = useRef<MonacoModule | null>(null);
   const initialValueRef = useRef(initialValue);
-  const latestPropsRef = useRef({ language, fontSize, theme });
+  const latestPropsRef = useRef({
+    language,
+    value,
+    fontSize,
+    theme,
+    readOnly,
+    cursor,
+    selection,
+    scrollTop,
+    scrollLeft,
+  });
   const onMountRef = useRef(onMount);
   const [loadError, setLoadError] = useState<unknown>(null);
 
-  latestPropsRef.current = { language, fontSize, theme };
+  latestPropsRef.current = {
+    language,
+    value,
+    fontSize,
+    theme,
+    readOnly,
+    cursor,
+    selection,
+    scrollTop,
+    scrollLeft,
+  };
   onMountRef.current = onMount;
 
   useImperativeHandle(
@@ -169,6 +207,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
           automaticLayout: true,
           fontSize: currentProps.fontSize,
           minimap: { enabled: false },
+          readOnly: currentProps.readOnly,
           scrollBeyondLastLine: false,
           tabSize: 2,
           theme: monacoTheme(currentProps.theme),
@@ -177,6 +216,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         monacoRef.current = monaco;
         modelRef.current = model;
         editorRef.current = editor;
+        applyControlledEditorState(editor, currentProps);
         onMountRef.current?.(editor);
       })
       .catch((error: unknown) => {
@@ -210,8 +250,40 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   }, [fontSize]);
 
   useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly });
+  }, [readOnly]);
+
+  useEffect(() => {
     monacoRef.current?.editor.setTheme(monacoTheme(theme));
   }, [theme]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || value === undefined || editor.getValue() === value) return;
+    editor.setValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (selection) {
+      editor.setSelection(selection);
+    } else if (cursor) {
+      editor.setPosition(cursor);
+    }
+  }, [cursor, selection]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || scrollTop === undefined) return;
+    editor.setScrollTop(scrollTop);
+  }, [scrollTop]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || scrollLeft === undefined) return;
+    editor.setScrollLeft(scrollLeft);
+  }, [scrollLeft]);
 
   return (
     <div className="relative h-full min-h-[320px] w-full bg-surface" data-code-editor>
@@ -227,3 +299,25 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     </div>
   );
 });
+
+function applyControlledEditorState(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  props: {
+    value?: string;
+    cursor?: ReplayStableState["editor"]["cursor"];
+    selection?: ReplayStableState["editor"]["selection"];
+    scrollTop?: number;
+    scrollLeft?: number;
+  },
+) {
+  if (props.value !== undefined && editor.getValue() !== props.value) {
+    editor.setValue(props.value);
+  }
+  if (props.selection) {
+    editor.setSelection(props.selection);
+  } else if (props.cursor) {
+    editor.setPosition(props.cursor);
+  }
+  if (props.scrollTop !== undefined) editor.setScrollTop(props.scrollTop);
+  if (props.scrollLeft !== undefined) editor.setScrollLeft(props.scrollLeft);
+}

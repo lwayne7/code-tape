@@ -1,9 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EditorProducerDeps, EditorProducerHandle } from "@/features/capture/types";
+import type {
+  EditorProducerDeps,
+  EditorProducerHandle,
+  MediaProducerDeps,
+} from "@/features/capture/types";
 import type { CodeEditorHandle } from "@/features/editor/CodeEditor";
-import type { RecordingLanguage } from "@/shared/recording-schema";
+import type { CameraPreviewProps } from "@/features/media/CameraPreview";
+import type {
+  MediaDevicesController,
+  OpenStreamResult,
+  RecordingLanguage,
+  SaveDraftInput,
+} from "@/shared/recording-schema";
 import type * as ReactRouterDom from "react-router-dom";
 
 const recorderPageMock = vi.hoisted(() => {
@@ -45,7 +55,82 @@ const recorderPageMock = vi.hoisted(() => {
     setCameraEnabled: vi.fn(),
     reportCameraPosition: vi.fn(),
   };
+  const pointerProducer = {
+    start: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const runtimeProducer = {
+    start: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(),
+    trigger,
+  };
+  const shortcutProducer = {
+    start: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const stream = {
+    getTracks: vi.fn(() => []),
+    getAudioTracks: vi.fn(() => []),
+    getVideoTracks: vi.fn(() => []),
+  } as unknown as MediaStream;
+  const devices = {
+    enumerate: vi.fn(async () => ({
+      audio: [{ deviceId: "mic-1", label: "Mic", kind: "audioinput" as const }],
+      camera: [{ deviceId: "cam-1", label: "Camera", kind: "videoinput" as const }],
+    })),
+    requestPermission: vi.fn(),
+    openStream: vi.fn<MediaDevicesController["openStream"]>(async () => ({
+      stream,
+      warnings: [],
+      capability: {
+        audio: "available" as const,
+        camera: "available" as const,
+        selectedAudioDeviceId: "mic-1",
+        selectedCameraDeviceId: "cam-1",
+      },
+    })),
+    setTrackEnabled: vi.fn(),
+    release: vi.fn(),
+    subscribe: vi.fn(() => vi.fn()),
+  };
+  const mediaRecorder = {
+    start: vi.fn(async () => {}),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stop: vi.fn(async () => ({
+      blob: new Blob(["media"], { type: "video/webm" }),
+      mimeType: "video/webm",
+      durationMs: 1_000,
+      hasAudio: true,
+      hasCamera: true,
+    })),
+    onChunk: vi.fn(() => vi.fn()),
+    onError: vi.fn(() => vi.fn()),
+  };
+  const createMediaRecorderWrapper = vi.fn(() => mediaRecorder);
+  const repository = {
+    saveDraft: vi.fn(async (input: SaveDraftInput) => ({ ok: true as const, recordingId: input.meta.id })),
+    commit: vi.fn(async (id: string) => ({ ok: true as const, recordingId: id })),
+    list: vi.fn(),
+    load: vi.fn(),
+    rename: vi.fn(),
+    remove: vi.fn(),
+    exportZip: vi.fn(),
+    importZip: vi.fn(),
+    sweep: vi.fn(),
+    estimateQuota: vi.fn(),
+  };
   let editorProducerDeps: EditorProducerDeps | null = null;
+  let mediaProducerDeps: MediaProducerDeps | null = null;
 
   return {
     editor,
@@ -56,11 +141,26 @@ const recorderPageMock = vi.hoisted(() => {
     flushPending,
     editorProducer,
     mediaProducer,
+    pointerProducer,
+    runtimeProducer,
+    shortcutProducer,
+    stream,
+    devices,
+    mediaRecorder,
+    createMediaRecorderWrapper,
+    repository,
+    cameraPreviewProps: null as CameraPreviewProps | null,
     get editorProducerDeps() {
       return editorProducerDeps;
     },
+    get mediaProducerDeps() {
+      return mediaProducerDeps;
+    },
     setEditorProducerDeps(next: EditorProducerDeps) {
       editorProducerDeps = next;
+    },
+    setMediaProducerDeps(next: MediaProducerDeps) {
+      mediaProducerDeps = next;
     },
     reset() {
       editorValue.current = "";
@@ -85,7 +185,36 @@ const recorderPageMock = vi.hoisted(() => {
       mediaProducer.setMicrophoneEnabled.mockClear();
       mediaProducer.setCameraEnabled.mockClear();
       mediaProducer.reportCameraPosition.mockClear();
+      pointerProducer.start.mockClear();
+      pointerProducer.pause.mockClear();
+      pointerProducer.resume.mockClear();
+      pointerProducer.stop.mockClear();
+      pointerProducer.dispose.mockClear();
+      runtimeProducer.start.mockClear();
+      runtimeProducer.pause.mockClear();
+      runtimeProducer.resume.mockClear();
+      runtimeProducer.stop.mockClear();
+      runtimeProducer.dispose.mockClear();
+      shortcutProducer.start.mockClear();
+      shortcutProducer.pause.mockClear();
+      shortcutProducer.resume.mockClear();
+      shortcutProducer.stop.mockClear();
+      shortcutProducer.dispose.mockClear();
+      devices.enumerate.mockClear();
+      devices.openStream.mockClear();
+      devices.setTrackEnabled.mockClear();
+      devices.release.mockClear();
+      createMediaRecorderWrapper.mockClear();
+      createMediaRecorderWrapper.mockImplementation(() => mediaRecorder);
+      mediaRecorder.start.mockClear();
+      mediaRecorder.pause.mockClear();
+      mediaRecorder.resume.mockClear();
+      mediaRecorder.stop.mockClear();
+      repository.saveDraft.mockClear();
+      repository.commit.mockClear();
+      this.cameraPreviewProps = null;
       editorProducerDeps = null;
+      mediaProducerDeps = null;
     },
   };
 });
@@ -109,15 +238,26 @@ vi.mock("@/features/editor/CodeEditor", () => ({
 }));
 
 vi.mock("@/features/media/CameraPreview", () => ({
-  CameraPreview: ({
-    onPositionChange,
-  }: {
-    onPositionChange?: (position: { x: number; y: number }) => void;
-  }) => (
-    <button type="button" onClick={() => onPositionChange?.({ x: 0.25, y: 0.75 })}>
-      Move camera preview
-    </button>
-  ),
+  CameraPreview: (props: CameraPreviewProps) => {
+    recorderPageMock.cameraPreviewProps = props;
+    return (
+      <button type="button" onClick={() => props.onPositionChange?.({ x: 0.25, y: 0.75 })}>
+        Move camera preview
+      </button>
+    );
+  },
+}));
+
+vi.mock("@/features/media/mediaDevices", () => ({
+  createMediaDevicesController: vi.fn(() => recorderPageMock.devices),
+}));
+
+vi.mock("@/features/media/mediaRecorder", () => ({
+  createMediaRecorderWrapper: recorderPageMock.createMediaRecorderWrapper,
+}));
+
+vi.mock("@/features/library/recordingStore", () => ({
+  createRecordingStore: vi.fn(() => recorderPageMock.repository),
 }));
 
 vi.mock("@/features/capture", () => ({
@@ -125,28 +265,18 @@ vi.mock("@/features/capture", () => ({
     recorderPageMock.setEditorProducerDeps(deps);
     return recorderPageMock.editorProducer;
   }),
-  createMediaProducer: vi.fn(() => recorderPageMock.mediaProducer),
+  createMediaProducer: vi.fn((deps: MediaProducerDeps) => {
+    recorderPageMock.setMediaProducerDeps(deps);
+    return recorderPageMock.mediaProducer;
+  }),
   createPointerProducer: vi.fn(() => ({
-    start: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    stop: vi.fn(),
-    dispose: vi.fn(),
+    ...recorderPageMock.pointerProducer,
   })),
   createRuntimeProducer: vi.fn(() => ({
-    start: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    stop: vi.fn(),
-    dispose: vi.fn(),
-    trigger: recorderPageMock.trigger,
+    ...recorderPageMock.runtimeProducer,
   })),
   createShortcutProducer: vi.fn(() => ({
-    start: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    stop: vi.fn(),
-    dispose: vi.fn(),
+    ...recorderPageMock.shortcutProducer,
   })),
 }));
 
@@ -189,5 +319,425 @@ describe("RecorderPage", () => {
       x: 0.25,
       y: 0.75,
     });
+  });
+
+  it("opens the selected media stream and starts media recording before controller start", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() =>
+      expect(recorderPageMock.devices.openStream).toHaveBeenCalledWith({
+        audioDeviceId: "mic-1",
+        cameraDeviceId: "cam-1",
+      }),
+    );
+    expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream);
+    expect(recorderPageMock.cameraPreviewProps?.stream).toBe(recorderPageMock.stream);
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual(
+      expect.objectContaining({
+        audio: "available",
+        camera: "available",
+        selectedAudioDeviceId: "mic-1",
+        selectedCameraDeviceId: "cam-1",
+      }),
+    );
+  });
+
+  it("falls back to event-only recording when the media recorder cannot start", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.mediaRecorder.start.mockRejectedValueOnce(new Error("MediaRecorder unsupported"));
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.mediaRecorder.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
+    expect(recorderPageMock.cameraPreviewProps?.stream).toBeNull();
+    warn.mockRestore();
+  });
+
+  it("falls back to event-only recording when the media recorder factory throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.createMediaRecorderWrapper.mockImplementationOnce(() => {
+      throw new Error("MediaRecorder constructor failed");
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
+    expect(recorderPageMock.mediaRecorder.start).not.toHaveBeenCalled();
+    expect(recorderPageMock.cameraPreviewProps?.stream).toBeNull();
+    warn.mockRestore();
+  });
+
+  it("delegates active media track toggles to the media producer", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭麦克风" }));
+    fireEvent.click(screen.getByRole("button", { name: "关闭摄像头" }));
+
+    expect(recorderPageMock.devices.setTrackEnabled).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducer.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+    expect(recorderPageMock.mediaProducer.setCameraEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it("syncs real media tracks directly while paused", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    fireEvent.click(screen.getByRole("button", { name: "暂停录制" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "继续录制" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "关闭麦克风" }));
+    fireEvent.click(screen.getByRole("button", { name: "关闭摄像头" }));
+
+    expect(recorderPageMock.devices.setTrackEnabled).toHaveBeenCalledWith("audio", false);
+    expect(recorderPageMock.devices.setTrackEnabled).toHaveBeenCalledWith("camera", false);
+    expect(recorderPageMock.mediaProducer.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+    expect(recorderPageMock.mediaProducer.setCameraEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it("pauses event producers before pausing the media recorder", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    fireEvent.click(screen.getByRole("button", { name: "暂停录制" }));
+
+    expect(recorderPageMock.editorProducer.pause).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.mediaRecorder.pause).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(recorderPageMock.editorProducer.pause).mock.invocationCallOrder[0]).toBeLessThan(
+      recorderPageMock.mediaRecorder.pause.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("rolls event producers back to recording when media pause fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.mediaRecorder.pause.mockImplementationOnce(() => {
+      throw new Error("pause failed");
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    fireEvent.click(screen.getByRole("button", { name: "暂停录制" }));
+
+    await waitFor(() => expect(recorderPageMock.editorProducer.resume).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "暂停录制" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "继续录制" })).toBeDisabled();
+    warn.mockRestore();
+  });
+
+  it("keeps event producers paused when media resume fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.mediaRecorder.resume.mockImplementationOnce(() => {
+      throw new Error("resume failed");
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    fireEvent.click(screen.getByRole("button", { name: "暂停录制" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "继续录制" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "继续录制" }));
+
+    expect(recorderPageMock.mediaRecorder.resume).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.editorProducer.resume).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "继续录制" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "暂停录制" })).toBeDisabled();
+    warn.mockRestore();
+  });
+
+  it("releases media resources when the recorder page unmounts", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    const { unmount } = render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    unmount();
+
+    expect(recorderPageMock.mediaRecorder.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.editorProducer.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.editorProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.pointerProducer.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.pointerProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.shortcutProducer.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.shortcutProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.mediaProducer.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.mediaProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.runtimeProducer.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.runtimeProducer.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes producers when the recorder page unmounts after completion", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    const { unmount } = render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止录制" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "停止录制" }));
+    await waitFor(() => expect(recorderPageMock.navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/replay\/rec-/)));
+
+    unmount();
+
+    expect(recorderPageMock.editorProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.pointerProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.shortcutProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.mediaProducer.dispose).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.runtimeProducer.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not continue starting recording when media opening resolves after unmount", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    let resolveOpenStream!: (result: OpenStreamResult) => void;
+    const openStream = new Promise<OpenStreamResult>((resolve) => {
+      resolveOpenStream = resolve;
+    });
+    recorderPageMock.devices.openStream.mockReturnValueOnce(openStream);
+
+    const { unmount } = render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.devices.openStream).toHaveBeenCalledTimes(1));
+
+    unmount();
+    expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveOpenStream({
+        stream: recorderPageMock.stream,
+        warnings: [],
+        capability: {
+          audio: "available",
+          camera: "available",
+          selectedAudioDeviceId: "mic-1",
+          selectedCameraDeviceId: "cam-1",
+        },
+      });
+      await openStream;
+    });
+
+    expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(2);
+    expect(recorderPageMock.mediaRecorder.start).not.toHaveBeenCalled();
+    expect(recorderPageMock.editorProducer.start).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducer.start).not.toHaveBeenCalled();
+  });
+
+  it("ignores repeated starts while media opening is pending", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    let resolveOpenStream!: (result: OpenStreamResult) => void;
+    const openStream = new Promise<OpenStreamResult>((resolve) => {
+      resolveOpenStream = resolve;
+    });
+    recorderPageMock.devices.openStream.mockReturnValueOnce(openStream);
+
+    render(<RecorderPage />);
+    const startButton = screen.getByRole("button", { name: "开始录制" });
+    fireEvent.click(startButton);
+    fireEvent.click(startButton);
+
+    await waitFor(() => expect(recorderPageMock.devices.openStream).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveOpenStream({
+        stream: recorderPageMock.stream,
+        warnings: [],
+        capability: {
+          audio: "available",
+          camera: "available",
+          selectedAudioDeviceId: "mic-1",
+          selectedCameraDeviceId: "cam-1",
+        },
+      });
+      await openStream;
+    });
+
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.editorProducer.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start the controller when media recorder start resolves after unmount", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    let resolveStart!: () => void;
+    const recorderStart = new Promise<void>((resolve) => {
+      resolveStart = resolve;
+    });
+    recorderPageMock.mediaRecorder.start.mockReturnValueOnce(recorderStart);
+
+    const { unmount } = render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() =>
+      expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream),
+    );
+
+    unmount();
+
+    await act(async () => {
+      resolveStart();
+      await recorderStart;
+    });
+
+    expect(recorderPageMock.mediaRecorder.stop).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.devices.release).toHaveBeenCalled();
+    expect(recorderPageMock.editorProducer.start).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducer.start).not.toHaveBeenCalled();
+  });
+
+  it("saves without navigating when stop finishes after unmount", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { RecorderPage } = await import("../RecorderPage");
+    let resolveStop!: (result: Awaited<ReturnType<typeof recorderPageMock.mediaRecorder.stop>>) => void;
+    const stopPromise = new Promise<Awaited<ReturnType<typeof recorderPageMock.mediaRecorder.stop>>>(
+      (resolve) => {
+        resolveStop = resolve;
+      },
+    );
+    recorderPageMock.mediaRecorder.stop.mockReturnValueOnce(stopPromise);
+
+    const { unmount } = render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止录制" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "停止录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.stop).toHaveBeenCalledTimes(1));
+
+    unmount();
+    expect(recorderPageMock.devices.release).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveStop({
+        blob: new Blob(["media"], { type: "video/webm" }),
+        mimeType: "video/webm",
+        durationMs: 1_000,
+        hasAudio: true,
+        hasCamera: true,
+      });
+      await stopPromise;
+    });
+
+    await waitFor(() => expect(recorderPageMock.repository.saveDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.repository.commit).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.navigate).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith("[recorder-page] stop ignored after unmount:", expect.any(Error));
+    warn.mockRestore();
+  });
+
+  it("continues event-only recording when opening media fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.devices.openStream.mockRejectedValueOnce(new Error("device busy"));
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
+    expect(recorderPageMock.cameraPreviewProps?.stream).toBeNull();
+    warn.mockRestore();
+  });
+
+  it("continues event-only recording when opening media returns no stream", async () => {
+    recorderPageMock.devices.openStream.mockResolvedValueOnce({
+      stream: null,
+      warnings: [],
+      capability: {
+        audio: "available",
+        camera: "available",
+        selectedAudioDeviceId: "mic-1",
+        selectedCameraDeviceId: "cam-1",
+      },
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.mediaRecorder.start).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
+    expect(recorderPageMock.cameraPreviewProps?.stream).toBeNull();
+  });
+
+  it("continues event-only recording when device enumeration fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.devices.enumerate.mockRejectedValueOnce(new Error("blocked"));
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.devices.openStream).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
+    warn.mockRestore();
+  });
+
+  it("saves the event recording when media finalization fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recorderPageMock.mediaRecorder.stop.mockRejectedValueOnce(new Error("InvalidStateError"));
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止录制" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "停止录制" }));
+
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.stop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(recorderPageMock.navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/replay\/rec-/)));
+    expect(recorderPageMock.devices.release).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

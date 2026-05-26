@@ -5,6 +5,7 @@ import { createPackageBuilder } from "../packageBuilder";
 import { createRecordingController } from "../recordingController";
 import type {
   EventProducer,
+  PackageBuildInput,
   RecordingPackageV1,
   RecordingRepository,
   RecordStartPayload,
@@ -67,7 +68,7 @@ function makeStartPayload(): RecordStartPayload {
   };
 }
 
-function setup() {
+function setup(options: { mediaSource?: () => Promise<PackageBuildInput["media"]> } = {}) {
   let wall = 1_000;
   const clock = createRecordingClock({ nowProvider: () => wall });
   const bus = createEventBus({ clock, wallTimeProvider: () => "T" });
@@ -81,6 +82,7 @@ function setup() {
     repository,
     appVersion: "0.0.0",
     generateTitle: () => "title-x",
+    mediaSource: options.mediaSource,
   });
   return {
     controller,
@@ -152,6 +154,49 @@ describe("createRecordingController", () => {
     expect(repository.commits.length).toBe(1);
   });
 
+  it("includes finalized media from mediaSource in the saved package", async () => {
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const mediaSource = vi.fn(async () => ({
+      blob: mediaBlob,
+      durationMs: 1_500,
+      mimeType: "video/webm",
+      hasAudio: true,
+      hasCamera: true,
+    }));
+    const { controller, repository } = setup({ mediaSource });
+
+    await controller.start(makeStartPayload());
+    const pkg = await controller.stop("user");
+
+    expect(mediaSource).toHaveBeenCalledTimes(1);
+    expect(pkg.media).toEqual(
+      expect.objectContaining({
+        durationMs: 1_500,
+        mimeType: "video/webm",
+        hasAudio: true,
+        hasCamera: true,
+      }),
+    );
+    expect(repository.drafts[0].mediaBlob).toBe(mediaBlob);
+  });
+
+  it("saves the package without media when mediaSource fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mediaSource = vi.fn(async () => {
+      throw new Error("InvalidStateError");
+    });
+    const { controller, repository } = setup({ mediaSource });
+
+    await controller.start(makeStartPayload());
+    const pkg = await controller.stop("user");
+
+    expect(mediaSource).toHaveBeenCalledTimes(1);
+    expect(pkg.media).toBeNull();
+    expect(repository.drafts[0].mediaBlob).toBeNull();
+    expect(controller.state.status).toBe("completed");
+    warn.mockRestore();
+  });
+
   it("does not complete when saveDraft fails", async () => {
     const { controller, repository } = setup();
     vi.mocked(repository.saveDraft).mockResolvedValueOnce({
@@ -166,6 +211,41 @@ describe("createRecordingController", () => {
     expect(controller.state.status).toBe("failed");
     expect(controller.state.lastError?.code).toBe("save-draft-failed");
     expect(repository.commits.length).toBe(0);
+  });
+
+  it("reuses finalized media when saveDraft fails and stop is retried", async () => {
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const mediaSource = vi.fn(async () => ({
+      blob: mediaBlob,
+      durationMs: 1_500,
+      mimeType: "video/webm",
+      hasAudio: true,
+      hasCamera: true,
+    }));
+    const { controller, repository } = setup({ mediaSource });
+    vi.mocked(repository.saveDraft).mockResolvedValueOnce({
+      ok: false,
+      reason: "quota-exceeded",
+      message: "IndexedDB quota exceeded",
+    });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/save-draft-failed/);
+    const pkg = await controller.stop("user");
+
+    expect(mediaSource).toHaveBeenCalledTimes(1);
+    expect(repository.saveDraft).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(repository.saveDraft).mock.calls[0][0].mediaBlob).toBe(mediaBlob);
+    expect(vi.mocked(repository.saveDraft).mock.calls[1][0].mediaBlob).toBe(mediaBlob);
+    expect(repository.drafts).toHaveLength(1);
+    expect(repository.drafts[0].mediaBlob).toBe(mediaBlob);
+    expect(pkg.media).toEqual(
+      expect.objectContaining({
+        durationMs: 1_500,
+        mimeType: "video/webm",
+      }),
+    );
+    expect(controller.state.status).toBe("completed");
   });
 
   it("does not complete when commit fails", async () => {
@@ -188,6 +268,7 @@ describe("createRecordingController", () => {
     await controller.start(makeStartPayload());
     controller.reset();
     expect(controller.state.status).toBe("idle");
+    expect(producers[0].calls).toContain("p1:stop");
     expect(producers[0].calls).toContain("p1:dispose");
   });
 });

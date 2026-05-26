@@ -1,6 +1,7 @@
 import { generateId } from "@/shared/util/ids";
 import type {
   EventProducer,
+  PackageBuildInput,
   RecordingController,
   RecordingControllerDeps,
   RecordingControllerState,
@@ -19,6 +20,7 @@ export type RecordingControllerOptions = RecordingControllerDeps & {
    * The recorder's editorProducer is the natural source.
    */
   snapshotSource?: () => Promise<RecordingSnapshot | null>;
+  mediaSource?: () => Promise<PackageBuildInput["media"]>;
 };
 
 const VALID_TRANSITIONS: Record<RecordingControllerStatus, RecordingControllerStatus[]> = {
@@ -29,8 +31,10 @@ const VALID_TRANSITIONS: Record<RecordingControllerStatus, RecordingControllerSt
   stopping: ["processing", "failed"],
   processing: ["completed", "failed"],
   completed: ["idle"],
-  failed: ["idle"],
+  failed: ["idle", "stopping"],
 };
+
+type PendingPackageSave = { pkg: RecordingPackageV1; mediaBlob: Blob | null };
 
 /**
  * RecordingController — central state machine that wires clock + bus + producers
@@ -64,6 +68,8 @@ export function createRecordingController(options: RecordingControllerOptions): 
   };
 
   let startPayload: RecordStartPayload | null = null;
+  let finalizedMedia: PackageBuildInput["media"] | undefined;
+  let pendingPackageSave: PendingPackageSave | null = null;
 
   const publish = () => listeners.forEach((fn) => fn(state));
   const transitionTo = (next: RecordingControllerStatus, patch: Partial<RecordingControllerState> = {}) => {
@@ -138,70 +144,64 @@ export function createRecordingController(options: RecordingControllerOptions): 
       transitionTo("recording", { durationMs: clock.durationMs() });
     },
     async stop(reason): Promise<RecordingPackageV1> {
-      transitionTo("stopping");
+      if (state.status === "failed" && !pendingPackageSave) {
+        throw new Error("No pending recording package is available to retry.");
+      }
+      transitionTo("stopping", { lastError: null });
       try {
-        forEachProducer((p) => p.stop());
-        const durationMs = clock.durationMs();
-        bus.emit({
-          type: "record-stop",
-          source: "recorder",
-          track: "main",
-          payload: { durationMs, reason },
-        });
-        clock.stop();
-        transitionTo("processing", { durationMs });
+        if (!pendingPackageSave) {
+          forEachProducer((p) => p.stop());
+          const durationMs = clock.durationMs();
+          bus.emit({
+            type: "record-stop",
+            source: "recorder",
+            track: "main",
+            payload: { durationMs, reason },
+          });
+          clock.stop();
+          transitionTo("processing", { durationMs });
 
-        const events = bus.drain();
-        const snapshot = options.snapshotSource ? await options.snapshotSource() : null;
-        const snapshots: RecordingSnapshot[] = snapshot ? [snapshot] : [];
+          const events = bus.drain();
+          const snapshot = options.snapshotSource ? await options.snapshotSource() : null;
+          const snapshots: RecordingSnapshot[] = snapshot ? [snapshot] : [];
+          if (!startPayload) {
+            throw new Error("RecordingController.start() must be called before stop().");
+          }
+          if (finalizedMedia === undefined) {
+            finalizedMedia = await resolveMedia(options.mediaSource);
+          }
 
-        if (!startPayload) {
-          throw new Error("RecordingController.start() must be called before stop().");
+          const titleProvider = options.generateTitle ?? (() => `录制 ${new Date().toLocaleString()}`);
+
+          pendingPackageSave = await packageBuilder.build({
+            meta: {
+              id: generateId("rec"),
+              title: titleProvider(),
+              createdAt: state.startedAt ?? new Date().toISOString(),
+              durationMs,
+              appVersion: options.appVersion,
+              ownerId: null,
+              creatorInfo: null,
+              initialLanguage: startPayload.initialLanguage,
+              initialFontSize: startPayload.initialFontSize,
+              initialTheme: startPayload.initialTheme,
+              mediaCapability: startPayload.mediaCapability,
+            },
+            events,
+            snapshots,
+            media: finalizedMedia,
+          });
+        } else {
+          transitionTo("processing", { durationMs: pendingPackageSave.pkg.meta.durationMs });
         }
 
-        const titleProvider = options.generateTitle ?? (() => `录制 ${new Date().toLocaleString()}`);
-
-        const { pkg, mediaBlob } = await packageBuilder.build({
-          meta: {
-            id: generateId("rec"),
-            title: titleProvider(),
-            createdAt: state.startedAt ?? new Date().toISOString(),
-            durationMs,
-            appVersion: options.appVersion,
-            ownerId: null,
-            creatorInfo: null,
-            initialLanguage: startPayload.initialLanguage,
-            initialFontSize: startPayload.initialFontSize,
-            initialTheme: startPayload.initialTheme,
-            mediaCapability: startPayload.mediaCapability,
-          },
-          events,
-          snapshots,
-          media: null,
-        });
-
-        const saveResult = await repository.saveDraft({
-          meta: pkg.meta,
-          events: pkg.events,
-          snapshots: pkg.snapshots,
-          indexes: pkg.indexes ?? {
-            generatedAt: new Date().toISOString(),
-            eventsByType: {} as Record<string, number[]>,
-            snapshotSeqsByTime: [],
-            markers: [],
-          },
-          mediaBlob,
-        });
-        if (!saveResult.ok) {
-          throw persistenceError("save-draft-failed", saveResult.reason, saveResult.message);
-        }
-
-        const commitResult = await repository.commit(pkg.meta.id);
-        if (!commitResult.ok) {
-          throw persistenceError("commit-failed", commitResult.reason, commitResult.message);
-        }
+        await persistPackage(repository, pendingPackageSave);
 
         transitionTo("completed");
+        const pkg = pendingPackageSave.pkg;
+        pendingPackageSave = null;
+        finalizedMedia = undefined;
+        startPayload = null;
         return pkg;
       } catch (err) {
         transitionTo("failed", { lastError: errorToInfo(err) });
@@ -209,6 +209,10 @@ export function createRecordingController(options: RecordingControllerOptions): 
       }
     },
     reset() {
+      if (isActiveStatus(state.status)) {
+        forEachProducer((p) => p.stop());
+        clock.stop();
+      }
       forEachProducer((p) => p.dispose());
       bus.reset();
       state = {
@@ -219,6 +223,8 @@ export function createRecordingController(options: RecordingControllerOptions): 
         lastError: null,
       };
       startPayload = null;
+      finalizedMedia = undefined;
+      pendingPackageSave = null;
       publish();
     },
     subscribe(listener) {
@@ -229,9 +235,58 @@ export function createRecordingController(options: RecordingControllerOptions): 
   } satisfies RecordingController;
 }
 
+async function persistPackage(
+  repository: RecordingControllerDeps["repository"],
+  pending: PendingPackageSave,
+): Promise<void> {
+  const { pkg, mediaBlob } = pending;
+  const saveResult = await repository.saveDraft({
+    meta: pkg.meta,
+    events: pkg.events,
+    snapshots: pkg.snapshots,
+    indexes: pkg.indexes ?? {
+      generatedAt: new Date().toISOString(),
+      eventsByType: {} as Record<string, number[]>,
+      snapshotSeqsByTime: [],
+      markers: [],
+    },
+    mediaBlob,
+  });
+  if (!saveResult.ok) {
+    throw persistenceError("save-draft-failed", saveResult.reason, saveResult.message);
+  }
+
+  const commitResult = await repository.commit(pkg.meta.id);
+  if (!commitResult.ok) {
+    throw persistenceError("commit-failed", commitResult.reason, commitResult.message);
+  }
+}
+
+function isActiveStatus(status: RecordingControllerStatus): boolean {
+  return (
+    status === "requestingPermission" ||
+    status === "recording" ||
+    status === "paused" ||
+    status === "stopping" ||
+    status === "processing"
+  );
+}
+
 function errorToInfo(err: unknown): { code: string; message: string } {
   if (err instanceof Error) return { code: err.name, message: err.message };
   return { code: "unknown", message: String(err) };
+}
+
+async function resolveMedia(
+  mediaSource: RecordingControllerOptions["mediaSource"],
+): Promise<PackageBuildInput["media"]> {
+  if (!mediaSource) return null;
+  try {
+    return await mediaSource();
+  } catch (err) {
+    console.warn("[recording-controller] mediaSource threw:", err);
+    return null;
+  }
 }
 
 function persistenceError(code: string, reason: string, message: string): Error {

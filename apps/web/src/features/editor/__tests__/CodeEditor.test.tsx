@@ -19,6 +19,10 @@ const monacoMock = vi.hoisted(() => {
       return this.value;
     }
 
+    setValue(next: string) {
+      this.value = next;
+    }
+
     dispose() {
       this.disposed = true;
     }
@@ -29,6 +33,13 @@ const monacoMock = vi.hoisted(() => {
     updateOptions = vi.fn((nextOptions: Record<string, unknown>) => {
       Object.assign(this.options, nextOptions);
     });
+    setValue = vi.fn((next: string) => {
+      this.options.model.setValue(next);
+    });
+    setPosition = vi.fn();
+    setSelection = vi.fn();
+    setScrollTop = vi.fn();
+    setScrollLeft = vi.fn();
 
     constructor(
       public host: HTMLElement,
@@ -177,6 +188,66 @@ describe("CodeEditor", () => {
     expect(monacoMock.editor.setModelLanguage).toHaveBeenCalledWith(model, "typescript");
     expect(editor.updateOptions).toHaveBeenCalledWith({ fontSize: 18 });
     expect(monacoMock.editor.setTheme).toHaveBeenCalledWith("code-tape-light");
+  });
+
+  it("applies controlled replay state without changing initialValue semantics", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const { rerender } = render(
+      <CodeEditor
+        language="javascript"
+        initialValue="const first = true;"
+        value="const replay = 1;"
+        fontSize={14}
+        theme="dark"
+        readOnly
+        cursor={{ lineNumber: 2, column: 3 }}
+        selection={null}
+        scrollTop={120}
+        scrollLeft={8}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    expect(editor.getValue()).toBe("const replay = 1;");
+    expect(editor.options.readOnly).toBe(true);
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 3 });
+    expect(editor.setScrollTop).toHaveBeenCalledWith(120);
+    expect(editor.setScrollLeft).toHaveBeenCalledWith(8);
+
+    await act(async () => {
+      rerender(
+        <CodeEditor
+          language="javascript"
+          initialValue="const ignored = true;"
+          value="const replay = 2;"
+          fontSize={14}
+          theme="dark"
+          readOnly={false}
+          cursor={null}
+          selection={{
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: 1,
+            endColumn: 5,
+          }}
+          scrollTop={240}
+          scrollLeft={16}
+        />,
+      );
+    });
+
+    expect(editor.getValue()).toBe("const replay = 2;");
+    expect(editor.setValue).toHaveBeenCalledWith("const replay = 2;");
+    expect(editor.updateOptions).toHaveBeenCalledWith({ readOnly: false });
+    expect(editor.setSelection).toHaveBeenCalledWith({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 5,
+    });
+    expect(editor.setScrollTop).toHaveBeenCalledWith(240);
+    expect(editor.setScrollLeft).toHaveBeenCalledWith(16);
   });
 
   it("configures JS/TS workers and disposes editor resources on unmount", async () => {
