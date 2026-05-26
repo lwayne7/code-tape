@@ -279,7 +279,11 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
   return {
     setMediaAdapter(adapter) {
       mediaAdapter = adapter;
-      updateState({ mediaStatus: currentMediaStatus() });
+      const mediaStatus = currentMediaStatus();
+      if (mediaStatus === "ready") {
+        void mediaAdapter?.flushPendingSeek();
+      }
+      updateState({ mediaStatus });
     },
     async load(input) {
       pkg = input;

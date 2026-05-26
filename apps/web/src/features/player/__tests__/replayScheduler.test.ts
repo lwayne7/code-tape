@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createMediaClockAdapter } from "../mediaClockAdapter";
 import { createReplayScheduler } from "../replayScheduler";
 import { createTimelineClock } from "../timelineClock";
 import { buildInitialState } from "../initialState";
@@ -278,6 +279,38 @@ describe("createReplayScheduler", () => {
     expect(scheduler.getStableState().editor.code).toBe("media-driven");
   });
 
+  it("uses the production media adapter to map HTMLMediaElement seconds to timeline milliseconds", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 0,
+          timelineEndMs: 5000,
+          mediaStartMs: 0,
+          mediaEndMs: 5000,
+        },
+      ],
+      currentTimeProvider: () => 1.2,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.play();
+    wall = 1250;
+    scheduler.tick();
+
+    expect(latest().timelineTimeMs).toBe(1200);
+    expect(latest().driftMs).toBe(50);
+  });
+
   it("falls back to the timeline clock when package media is missing", async () => {
     let wall = 0;
     const clock = createTimelineClock({ nowProvider: () => wall });
@@ -375,5 +408,37 @@ describe("createReplayScheduler", () => {
     scheduler.tick();
 
     expect(onMediaFallbackReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes a pending media seek when metadata becomes ready while replay is paused", async () => {
+    let metadataReady = false;
+    const seekHandler = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 0,
+          timelineEndMs: 5000,
+          mediaStartMs: 0,
+          mediaEndMs: 5000,
+        },
+      ],
+      metadataReadyProvider: () => metadataReady,
+      statusProvider: () => (metadataReady ? "ready" : "loading"),
+      seekHandler,
+    });
+    const scheduler = createReplayScheduler({
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    await scheduler.seek(1800);
+    expect(seekHandler).not.toHaveBeenCalled();
+
+    metadataReady = true;
+    scheduler.setMediaAdapter(adapter);
+
+    expect(seekHandler).toHaveBeenCalledWith(adapter.segments[0], 1800);
   });
 });
