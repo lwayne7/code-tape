@@ -9,7 +9,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
   let microphoneEnabled = true;
   let cameraEnabled = true;
 
-  let lastPositionTime = 0;
+  let lastPositionTime = -Infinity;
   let pendingPosition: { x: number; y: number } | null = null;
   let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -52,6 +52,7 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
 
   return {
     start() {
+      if (!isStopped || unsubscribeDevices) return;
       isStopped = false;
       isPaused = false;
       unsubscribeDevices = deps.devices.subscribe(handleCapability);

@@ -176,4 +176,24 @@ describe("createMediaProducer", () => {
     expect(listeners.length).toBe(0);
     expect(mockDevices.release).toHaveBeenCalled();
   });
+
+  it("should be idempotent on start and not leak subscriptions on multiple starts", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+    producer.start();
+    producer.start();
+    
+    expect(mockDevices.subscribe).toHaveBeenCalledTimes(1);
+    expect(listeners.length).toBe(1);
+
+    producer.stop();
+    expect(listeners.length).toBe(0);
+
+    producer.start();
+    expect(mockDevices.subscribe).toHaveBeenCalledTimes(2);
+    expect(listeners.length).toBe(1);
+
+    producer.stop();
+    expect(listeners.length).toBe(0);
+  });
 });
