@@ -12,7 +12,6 @@ type ResolvedShortcut = {
 export const createShortcutProducer: CreateShortcutProducer = (deps) => {
   let active = false;
   let disposed = false;
-  let stopped = false;
   let listening = false;
   const lastEmittedAtBySignature = new Map<string, number>();
   const keydownListener: EventListener = (event) => {
@@ -78,7 +77,7 @@ export const createShortcutProducer: CreateShortcutProducer = (deps) => {
 
   return {
     start() {
-      if (stopped || disposed) return;
+      if (disposed) return;
       active = true;
       attach();
     },
@@ -87,12 +86,11 @@ export const createShortcutProducer: CreateShortcutProducer = (deps) => {
       detach();
     },
     resume() {
-      if (stopped || disposed) return;
+      if (disposed) return;
       active = true;
       attach();
     },
     stop() {
-      stopped = true;
       active = false;
       detach();
       lastEmittedAtBySignature.clear();

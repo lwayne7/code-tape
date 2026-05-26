@@ -155,17 +155,22 @@ describe("createShortcutProducer", () => {
     ]);
   });
 
-  it("stops and disposes listeners without leaking future shortcuts", () => {
+  it("stops current capture, restarts, and only dispose permanently disables shortcuts", () => {
     const { bus, producer } = setup();
     producer.start();
+
     producer.stop();
     keydown(window, { key: "s", ctrlKey: true });
+
     producer.start();
     keydown(window, { key: "Enter", ctrlKey: true, timeStamp: 600 });
+
     producer.dispose();
     keydown(window, { key: "z", ctrlKey: true, timeStamp: 1200 });
 
-    expect(bus.drain()).toEqual([]);
+    expect(bus.drain().map((event) => event.payload)).toEqual([
+      { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
+    ]);
   });
 
   it("does not attach when getRoot returns null", () => {
