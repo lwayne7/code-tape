@@ -186,6 +186,8 @@ export function RecorderPage() {
   });
   const deviceOptionsRef = useRef<DeviceOptions>(deviceOptions);
   const deviceLoadPromiseRef = useRef<Promise<DeviceList> | null>(null);
+  const audioDeviceSelectionTouchedRef = useRef(false);
+  const cameraDeviceSelectionTouchedRef = useRef(false);
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string | null>(null);
   const [selectedCameraDeviceId, setSelectedCameraDeviceId] = useState<string | null>(null);
   const [cameraPosition, setCameraPosition] = useState<CameraPositionPayload>(
@@ -201,8 +203,12 @@ export function RecorderPage() {
         const nextOptions = { ...available, loaded: true };
         deviceOptionsRef.current = nextOptions;
         setDeviceOptions(nextOptions);
-        setSelectedAudioDeviceId((current) => current ?? available.audio[0]?.deviceId ?? null);
-        setSelectedCameraDeviceId((current) => current ?? available.camera[0]?.deviceId ?? null);
+        setSelectedAudioDeviceId((current) =>
+          audioDeviceSelectionTouchedRef.current ? current : available.audio[0]?.deviceId ?? null,
+        );
+        setSelectedCameraDeviceId((current) =>
+          cameraDeviceSelectionTouchedRef.current ? current : available.camera[0]?.deviceId ?? null,
+        );
         return available;
       } catch (err) {
         console.warn("[recorder-page] media devices unavailable:", err);
@@ -262,6 +268,14 @@ export function RecorderPage() {
   );
 
   const isCurrentStart = (token: number) => mountedRef.current && startTokenRef.current === token;
+  const handleAudioDeviceChange = useCallback((deviceId: string | null) => {
+    audioDeviceSelectionTouchedRef.current = true;
+    setSelectedAudioDeviceId(deviceId);
+  }, []);
+  const handleCameraDeviceChange = useCallback((deviceId: string | null) => {
+    cameraDeviceSelectionTouchedRef.current = true;
+    setSelectedCameraDeviceId(deviceId);
+  }, []);
 
   const handleStart = async () => {
     if (startInFlightRef.current) return;
@@ -272,8 +286,12 @@ export function RecorderPage() {
       const available = currentDeviceOptions.loaded
         ? { audio: currentDeviceOptions.audio, camera: currentDeviceOptions.camera }
         : await loadDevices();
-      const audioDeviceId = selectedAudioDeviceId ?? available.audio[0]?.deviceId ?? null;
-      const cameraDeviceId = selectedCameraDeviceId ?? available.camera[0]?.deviceId ?? null;
+      const audioDeviceId = audioDeviceSelectionTouchedRef.current
+        ? selectedAudioDeviceId
+        : selectedAudioDeviceId ?? available.audio[0]?.deviceId ?? null;
+      const cameraDeviceId = cameraDeviceSelectionTouchedRef.current
+        ? selectedCameraDeviceId
+        : selectedCameraDeviceId ?? available.camera[0]?.deviceId ?? null;
       let media = await openSelectedMedia(stack.devices, { audioDeviceId, cameraDeviceId });
       if (!isCurrentStart(startToken)) {
         stack.devices.release();
@@ -462,8 +480,8 @@ export function RecorderPage() {
         disabled={controllerState.status !== "idle"}
         onLanguageChange={handleLanguageChange}
         onFontSizeChange={setEditorFontSize}
-        onAudioDeviceChange={setSelectedAudioDeviceId}
-        onCameraDeviceChange={setSelectedCameraDeviceId}
+        onAudioDeviceChange={handleAudioDeviceChange}
+        onCameraDeviceChange={handleCameraDeviceChange}
       />
       <div className="grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
         <div className="relative border-r border-border">

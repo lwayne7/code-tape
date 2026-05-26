@@ -3,19 +3,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayControlsProps } from "../ReplayControls";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
-import type { RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
+import type {
+  RecordingEvent,
+  RecordingPackageV1,
+  RecordingRepository,
+  ReplaySchedulerState,
+  ReplayStableState,
+} from "@/shared/recording-schema";
 import type * as ReactRouterDom from "react-router-dom";
 
 const replayPageMock = vi.hoisted(() => {
-  const schedulerState = {
-    status: "ready" as const,
+  const schedulerState: ReplaySchedulerState = {
+    status: "ready",
     timelineTimeMs: 0,
-    playbackRate: 1 as const,
+    playbackRate: 1,
     lastAppliedSeq: 0,
-    mediaStatus: "none" as const,
+    mediaStatus: "none",
     driftMs: 0,
   };
-  const packageData = {
+  const packageData: RecordingPackageV1 = {
     schemaVersion: "0.1.0",
     manifest: {
       packageId: "recording-1",
@@ -70,7 +76,7 @@ const replayPageMock = vi.hoisted(() => {
     }),
   };
   const repository = {
-    load: vi.fn(async () => ({
+    load: vi.fn<RecordingRepository["load"]>(async () => ({
       ok: true as const,
       package: packageData,
       mediaBlob: new Blob(["webm"], { type: "video/webm" }),
@@ -80,6 +86,7 @@ const replayPageMock = vi.hoisted(() => {
 
   return {
     scheduler,
+    schedulerState,
     repository,
     packageData,
     routeId: "recording-1",
@@ -97,6 +104,12 @@ const replayPageMock = vi.hoisted(() => {
       scheduler.setMuted.mockClear();
       scheduler.destroy.mockClear();
       scheduler.subscribe.mockClear();
+      schedulerState.status = "ready";
+      schedulerState.timelineTimeMs = 0;
+      schedulerState.playbackRate = 1;
+      schedulerState.lastAppliedSeq = 0;
+      schedulerState.mediaStatus = "none";
+      schedulerState.driftMs = 0;
       repository.load.mockClear();
       this.routeId = "recording-1";
       this.controlsProps = null;
@@ -295,6 +308,7 @@ describe("ReplayPage", () => {
   });
 
   it("renders recorded camera media when the package has a camera track", async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     if (typeof URL.createObjectURL !== "function") {
       Object.defineProperty(URL, "createObjectURL", {
         writable: true,
@@ -337,9 +351,11 @@ describe("ReplayPage", () => {
     expect(createObjectURL).toHaveBeenCalled();
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
+    pause.mockRestore();
   });
 
   it("keeps the scheduler subscription alive when the replay id changes", async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const { ReplayPage } = await import("../ReplayPage");
 
     const { rerender } = render(<ReplayPage />);
@@ -351,6 +367,36 @@ describe("ReplayPage", () => {
     await waitFor(() => expect(replayPageMock.repository.load).toHaveBeenCalledWith("recording-2"));
     expect(replayPageMock.scheduler.destroy).not.toHaveBeenCalled();
     expect(replayPageMock.scheduler.subscribe).toHaveBeenCalledTimes(1);
+    pause.mockRestore();
+  });
+
+  it("clears a load error when navigating to another replay id", async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    replayPageMock.repository.load.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "invalid-manifest", message: "missing package" },
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+    const { MemoryRouter } = await import("react-router-dom");
+
+    const { rerender } = render(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <ReplayPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/加载失败：invalid-manifest/)).toBeInTheDocument());
+    replayPageMock.routeId = "recording-2";
+    rerender(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <ReplayPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(replayPageMock.repository.load).toHaveBeenCalledWith("recording-2"));
+    await waitFor(() => expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument());
+    expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData);
+    pause.mockRestore();
   });
 
   it("starts recorded media from the replay control gesture", async () => {
@@ -400,6 +446,38 @@ describe("ReplayPage", () => {
 
     expect(play).toHaveBeenCalledTimes(1);
     expect(replayPageMock.scheduler.play).toHaveBeenCalledTimes(1);
+
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
+    play.mockRestore();
+    pause.mockRestore();
+  });
+
+  it("starts recorded media when the video becomes ready after scheduler playback has begun", async () => {
+    replayPageMock.schedulerState.status = "playing";
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    if (typeof URL.createObjectURL !== "function") {
+      Object.defineProperty(URL, "createObjectURL", {
+        writable: true,
+        value: vi.fn(() => "blob:replay-media"),
+      });
+    }
+    if (typeof URL.revokeObjectURL !== "function") {
+      Object.defineProperty(URL, "revokeObjectURL", {
+        writable: true,
+        value: vi.fn(),
+      });
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:late-media");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(screen.getByLabelText("录制摄像头视频")).toBeInTheDocument());
+    await waitFor(() => expect(play).toHaveBeenCalled());
+    expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData);
 
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();

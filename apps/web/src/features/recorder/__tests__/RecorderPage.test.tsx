@@ -85,7 +85,7 @@ const recorderPageMock = vi.hoisted(() => {
     getVideoTracks: vi.fn(() => []),
   } as unknown as MediaStream;
   const devices = {
-    enumerate: vi.fn(async () => ({
+    enumerate: vi.fn<MediaDevicesController["enumerate"]>(async () => ({
       audio: [
         { deviceId: "mic-1", label: "Mic", kind: "audioinput" as const },
         { deviceId: "mic-2", label: "Desk Mic", kind: "audioinput" as const },
@@ -436,6 +436,45 @@ describe("RecorderPage", () => {
     await waitFor(() =>
       expect(recorderPageMock.trigger).not.toHaveBeenCalled(),
     );
+  });
+
+  it("does not overwrite an explicit no-device selection when enumeration finishes", async () => {
+    let resolveDevices!: (devices: Awaited<ReturnType<MediaDevicesController["enumerate"]>>) => void;
+    const enumeratePromise = new Promise<Awaited<ReturnType<MediaDevicesController["enumerate"]>>>(
+      (resolve) => {
+        resolveDevices = resolve;
+      },
+    );
+    recorderPageMock.devices.enumerate.mockReturnValueOnce(enumeratePromise);
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    const audioSelect = screen.getByRole("combobox", { name: "麦克风设备" });
+    const cameraSelect = screen.getByRole("combobox", { name: "摄像头设备" });
+
+    fireEvent.change(audioSelect, { target: { value: "" } });
+    fireEvent.change(cameraSelect, { target: { value: "" } });
+    await act(async () => {
+      resolveDevices({
+        audio: [{ deviceId: "mic-late", label: "Late Mic", kind: "audioinput" }],
+        camera: [{ deviceId: "cam-late", label: "Late Camera", kind: "videoinput" }],
+      });
+      await enumeratePromise;
+    });
+
+    await waitFor(() => expect(audioSelect).toHaveValue(""));
+    expect(cameraSelect).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    await waitFor(() => expect(recorderPageMock.mediaProducer.start).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.devices.openStream).not.toHaveBeenCalled();
+    expect(recorderPageMock.mediaProducerDeps?.getCapability()).toEqual({
+      audio: "unsupported",
+      camera: "unsupported",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+    });
   });
 
   it("falls back to event-only recording when the media recorder cannot start", async () => {

@@ -127,6 +127,13 @@ export function ReplayPage() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    setLoadError(null);
+    setPkg(null);
+    setMediaBlob(null);
+    setStableState(INITIAL_STABLE_STATE);
+    setOverlayState(EMPTY_OVERLAY_STATE);
+    clearOverlayTimers();
+    recordedMediaVideoRef.current?.pause();
     (async () => {
       const result = await repository.load(id);
       if (cancelled) return;
@@ -143,7 +150,7 @@ export function ReplayPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, repository, scheduler]);
+  }, [clearOverlayTimers, id, repository, scheduler]);
 
   if (loadError) {
     return (
@@ -360,10 +367,14 @@ function RecordedMediaOverlay({
     if (targetMs !== null && Math.abs(video.currentTime * 1000 - targetMs) > MEDIA_DRIFT_THRESHOLD_MS) {
       video.currentTime = targetMs / 1000;
     }
-    if (schedulerState.status !== "playing") {
+    if (schedulerState.status === "playing") {
+      void video.play().catch((err) => {
+        console.warn("[replay-page] recorded media play failed:", err);
+      });
+    } else {
       video.pause();
     }
-  }, [mediaAdapter, schedulerState.status, schedulerState.timelineTimeMs, videoRef]);
+  }, [mediaAdapter, schedulerState.status, schedulerState.timelineTimeMs, src, videoRef]);
 
   if (!src || !hasMedia) return null;
 
