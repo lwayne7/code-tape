@@ -44,6 +44,7 @@ export function ReplayControls({
   const baseProgressPercent = safeDuration > 0 ? (baseCurrentTime / safeDuration) * 100 : 0;
   const currentProgressPercent = pendingProgressPercent ?? baseProgressPercent;
   const currentTime = (currentProgressPercent / 100) * safeDuration;
+  const displayedVolume = muted ? 0 : volume;
   const timelineDisabled =
     safeDuration === 0 ||
     state.status === "loading" ||
@@ -219,15 +220,14 @@ export function ReplayControls({
               )}
             >
               <div className="flex flex-col gap-2 items-center">
-                <span className="text-sm font-mono tabular-nums">{muted ? 0 : volume}</span>
+                <span className="text-sm font-mono tabular-nums">{displayedVolume}</span>
                 <RadixSlider.Root
                   className="relative flex h-24 w-full select-none items-center flex-col"
-                  value={[volume]}
+                  value={[displayedVolume]}
                   min={0}
                   max={100}
                   step={1}
                   onValueChange={(values) => handleVolumeChange(values[0] ?? 0)}
-                  onValueCommit={(values) => handleVolumeChange(values[0] ?? 0)}
                   aria-label="音量"
                   orientation="vertical"
                 >

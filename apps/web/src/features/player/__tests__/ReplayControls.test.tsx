@@ -213,9 +213,9 @@ describe("ReplayControls", () => {
   });
 
   describe("volume control logic", () => {
-    it("renders the muted volume slider when the popover opens", () => {
+    it("renders muted volume as zero in text and slider position", () => {
       vi.useFakeTimers();
-      renderControls({ muted: true, volume: 0 });
+      renderControls({ muted: true, volume: 80 });
 
       openHoverPopover("取消静音");
 
@@ -247,6 +247,22 @@ describe("ReplayControls", () => {
 
       expect(onMuted).toHaveBeenCalledWith(true);
       expect(onVolume).toHaveBeenCalledWith(0);
+    });
+
+    it("does not submit duplicate volume updates on commit", () => {
+      const onMuted = vi.fn();
+      const onVolume = vi.fn();
+      vi.useFakeTimers();
+
+      renderControls({ muted: false, volume: 50, onMuted, onVolume });
+      openHoverPopover("静音");
+      const volumeSlider = screen.getByRole("slider", { name: "音量" });
+      fireEvent.change(volumeSlider, { target: { value: "70" } });
+      fireEvent.mouseUp(volumeSlider);
+
+      expect(onMuted).not.toHaveBeenCalled();
+      expect(onVolume).toHaveBeenCalledOnce();
+      expect(onVolume).toHaveBeenCalledWith(70);
     });
   });
 
