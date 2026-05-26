@@ -35,6 +35,16 @@ const recorderPageMock = vi.hoisted(() => {
       editorProducerDeps?.setModelLanguage?.(editorModel as never, next);
     }),
   } as unknown as EditorProducerHandle;
+  const mediaProducer = {
+    start: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(),
+    setMicrophoneEnabled: vi.fn(),
+    setCameraEnabled: vi.fn(),
+    reportCameraPosition: vi.fn(),
+  };
   let editorProducerDeps: EditorProducerDeps | null = null;
 
   return {
@@ -45,6 +55,7 @@ const recorderPageMock = vi.hoisted(() => {
     trigger,
     flushPending,
     editorProducer,
+    mediaProducer,
     get editorProducerDeps() {
       return editorProducerDeps;
     },
@@ -66,6 +77,14 @@ const recorderPageMock = vi.hoisted(() => {
       vi.mocked(editorProducer.dispose).mockClear();
       vi.mocked(editorProducer.takeSnapshot).mockClear();
       vi.mocked(editorProducer.setLanguage).mockClear();
+      mediaProducer.start.mockClear();
+      mediaProducer.pause.mockClear();
+      mediaProducer.resume.mockClear();
+      mediaProducer.stop.mockClear();
+      mediaProducer.dispose.mockClear();
+      mediaProducer.setMicrophoneEnabled.mockClear();
+      mediaProducer.setCameraEnabled.mockClear();
+      mediaProducer.reportCameraPosition.mockClear();
       editorProducerDeps = null;
     },
   };
@@ -89,21 +108,24 @@ vi.mock("@/features/editor/CodeEditor", () => ({
   }),
 }));
 
+vi.mock("@/features/media/CameraPreview", () => ({
+  CameraPreview: ({
+    onPositionChange,
+  }: {
+    onPositionChange?: (position: { x: number; y: number }) => void;
+  }) => (
+    <button type="button" onClick={() => onPositionChange?.({ x: 0.25, y: 0.75 })}>
+      Move camera preview
+    </button>
+  ),
+}));
+
 vi.mock("@/features/capture", () => ({
   createEditorProducer: vi.fn((deps: EditorProducerDeps) => {
     recorderPageMock.setEditorProducerDeps(deps);
     return recorderPageMock.editorProducer;
   }),
-  createMediaProducer: vi.fn(() => ({
-    start: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    stop: vi.fn(),
-    dispose: vi.fn(),
-    setMicrophoneEnabled: vi.fn(),
-    setCameraEnabled: vi.fn(),
-    reportCameraPosition: vi.fn(),
-  })),
+  createMediaProducer: vi.fn(() => recorderPageMock.mediaProducer),
   createPointerProducer: vi.fn(() => ({
     start: vi.fn(),
     pause: vi.fn(),
@@ -155,5 +177,17 @@ describe("RecorderPage", () => {
     expect(recorderPageMock.flushPending.mock.invocationCallOrder[0]).toBeLessThan(
       recorderPageMock.trigger.mock.invocationCallOrder[0],
     );
+  });
+
+  it("reports camera preview position changes to the media producer", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Move camera preview" }));
+
+    expect(recorderPageMock.mediaProducer.reportCameraPosition).toHaveBeenCalledWith({
+      x: 0.25,
+      y: 0.75,
+    });
   });
 });

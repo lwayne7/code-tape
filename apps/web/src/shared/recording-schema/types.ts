@@ -169,7 +169,7 @@ export type MediaTogglePayload = { microphoneEnabled: boolean; cameraEnabled: bo
 
 export type MediaWarningPayload = {
   target: "audio" | "camera" | "recorder";
-  code: "permission-denied" | "not-found" | "busy" | "track-ended" | "recorder-error";
+  code: "permission-denied" | "not-found" | "busy" | "unsupported" | "track-ended" | "recorder-error";
   message: string;
 };
 

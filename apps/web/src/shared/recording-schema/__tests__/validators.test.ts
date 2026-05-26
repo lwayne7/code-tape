@@ -132,6 +132,30 @@ describe("validateRecordingPackageV1", () => {
     }
   });
 
+  it("accepts unsupported media-warning codes", () => {
+    const pkg = makePackage();
+    const result = validateRecordingPackageV1({
+      ...pkg,
+      events: [
+        {
+          id: "e-1",
+          seq: 1,
+          timestampMs: 100,
+          source: "media",
+          track: "media",
+          type: "media-warning",
+          payload: {
+            target: "camera",
+            code: "unsupported",
+            message: "Camera is unsupported",
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it("isRecordingPackageV1 narrows the type", () => {
     const input: unknown = makePackage();
     expect(isRecordingPackageV1(input)).toBe(true);
