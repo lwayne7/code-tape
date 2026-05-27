@@ -3,6 +3,17 @@ import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeEditorHandle } from "../CodeEditor";
 
+type MockKeyboardEvent = {
+  browserEvent: { key: string; code: string; isComposing: boolean; repeat: boolean };
+  code: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  preventDefault: ReturnType<typeof vi.fn>;
+  stopPropagation: ReturnType<typeof vi.fn>;
+};
+
 const monacoMock = vi.hoisted(() => {
   class MockEditorWorker {}
   class MockTsWorker {}
@@ -31,6 +42,7 @@ const monacoMock = vi.hoisted(() => {
   class MockEditor {
     disposed = false;
     commands: Array<{ keybinding: number; handler: () => void }> = [];
+    keyboardListeners: Array<(event: MockKeyboardEvent) => void> = [];
     updateOptions = vi.fn((nextOptions: Record<string, unknown>) => {
       Object.assign(this.options, nextOptions);
     });
@@ -45,6 +57,14 @@ const monacoMock = vi.hoisted(() => {
     addCommand = vi.fn((keybinding: number, handler: () => void) => {
       this.commands.push({ keybinding, handler });
       return `command-${this.commands.length}`;
+    });
+    onKeyDown = vi.fn((listener: (event: MockKeyboardEvent) => void) => {
+      this.keyboardListeners.push(listener);
+      return {
+        dispose: () => {
+          this.keyboardListeners = this.keyboardListeners.filter((candidate) => candidate !== listener);
+        },
+      };
     });
 
     constructor(
@@ -119,6 +139,9 @@ vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
 }));
 vi.mock("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution", () => ({}));
+vi.mock("monaco-editor/esm/vs/editor/contrib/comment/browser/comment", () => ({}));
+vi.mock("monaco-editor/esm/vs/editor/contrib/format/browser/formatActions", () => ({}));
+vi.mock("monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess", () => ({}));
 vi.mock("monaco-editor/esm/vs/language/typescript/monaco.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/editor/editor.worker?worker", () => ({
   get default() {
@@ -152,10 +175,27 @@ describe("CodeEditor", () => {
     vi.clearAllMocks();
   });
 
-  function runCommand(editor: { commands: Array<{ keybinding: number; handler: () => void }> }, keybinding: number) {
-    const command = editor.commands.find((candidate) => candidate.keybinding === keybinding);
-    if (!command) throw new Error(`Missing command for keybinding ${keybinding}`);
-    command.handler();
+  function pressEditorShortcut(
+    editor: { keyboardListeners: Array<(event: MockKeyboardEvent) => void> },
+    event: Partial<MockKeyboardEvent> & { key: string },
+  ) {
+    const keyboardEvent: MockKeyboardEvent = {
+      browserEvent: {
+        key: event.key,
+        code: event.browserEvent?.code ?? event.code ?? (event.key.length === 1 ? `Key${event.key.toUpperCase()}` : event.key),
+        isComposing: false,
+        repeat: false,
+      },
+      code: event.code ?? (event.key.length === 1 ? `Key${event.key.toUpperCase()}` : event.key),
+      ctrlKey: event.ctrlKey ?? false,
+      metaKey: event.metaKey ?? false,
+      shiftKey: event.shiftKey ?? false,
+      altKey: event.altKey ?? false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    editor.keyboardListeners.forEach((listener) => listener(keyboardEvent));
+    return keyboardEvent;
   }
 
   it("lazy-loads Monaco, creates the editor with initial props, and exposes it", async () => {
@@ -292,15 +332,41 @@ describe("CodeEditor", () => {
     await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
     const editor = monacoMock.editors[0];
 
-    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.Enter);
-    runCommand(editor, monacoMock.KeyMod.Shift | monacoMock.KeyMod.Alt | monacoMock.KeyCode.KeyF);
-    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.Slash);
-    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.KeyG);
+    const runEvent = pressEditorShortcut(editor, { key: "Enter", ctrlKey: true });
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+    pressEditorShortcut(editor, { key: "/", code: "Slash", metaKey: true });
+    pressEditorShortcut(editor, { key: "g", metaKey: true });
 
     expect(onCommand).toHaveBeenCalledWith("run");
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.commentLine", null);
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.gotoLine", null);
+    expect(runEvent.preventDefault).toHaveBeenCalled();
+    expect(runEvent.stopPropagation).toHaveBeenCalled();
+  });
+
+  it("formats from an Option-modified physical F key", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="function demo(){return 1;}"
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, {
+      key: "ƒ",
+      code: "",
+      browserEvent: { code: "KeyF", key: "ƒ", isComposing: false, repeat: false },
+      shiftKey: true,
+      altKey: true,
+    });
+
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
   });
 
   it("configures JS/TS workers and disposes editor resources on unmount", async () => {
