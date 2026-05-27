@@ -127,6 +127,20 @@ export function createCloudRecordingService(deps: {
       if (session.ownerId !== ownerId) {
         return { ok: false, error: { code: "forbidden", message: "upload session owner mismatch" } };
       }
+      if (session.status === "completed") {
+        const recording = await deps.metadata.getRecording(session.recordingId);
+        const status =
+          recording?.status === "ready" || recording?.status === "failed"
+            ? recording.status
+            : "processing";
+        return { ok: true, value: { recordingId: session.recordingId, status } };
+      }
+      if (session.status !== "open") {
+        return {
+          ok: false,
+          error: { code: "upload-session-conflict", message: "upload session is not open" },
+        };
+      }
       if (Date.parse(session.expiresAt) <= now().getTime()) {
         return {
           ok: false,

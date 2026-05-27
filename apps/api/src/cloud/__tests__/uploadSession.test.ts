@@ -52,6 +52,49 @@ test("createUploadSession rejects incomplete package asset sets", async () => {
   assert.match(result.error.message, /snapshots/);
 });
 
+test("completeUpload does not regress a completed recording back to processing", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const service = createCloudRecordingService({
+    metadata,
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const pkg = await makePackage();
+  const request = makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const first = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  assert.equal(first.ok, true);
+  const processing = await metadata.getRecording(created.value.recordingId);
+  assert.ok(processing);
+  await metadata.updateRecording({
+    ...processing,
+    status: "ready",
+    completedAt: "2026-05-27T00:02:00.000Z",
+    updatedAt: "2026-05-27T00:02:00.000Z",
+    eventCount: 0,
+    snapshotCount: 0,
+  });
+
+  const second = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  const recording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+  assert.equal(second.value.status, "ready");
+  assert.equal(recording?.status, "ready");
+  assert.equal(recording?.updatedAt, "2026-05-27T00:02:00.000Z");
+});
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

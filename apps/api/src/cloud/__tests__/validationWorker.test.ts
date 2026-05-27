@@ -123,6 +123,53 @@ test("validation worker validates media assets without text-decoding binary cont
   assert.equal(job.recording.status, "ready");
 });
 
+test("validation worker marks checksum-matching malformed JSON packages failed", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const malformedManifest = '{"packageId":';
+  const malformedManifestBytes = new TextEncoder().encode(malformedManifest);
+  const assets = await Promise.all(
+    request.assets.map(async (asset) =>
+      asset.kind === "manifest"
+        ? {
+            ...asset,
+            sha256: await sha256Hex(malformedManifest),
+            sizeBytes: malformedManifestBytes.byteLength,
+          }
+        : asset,
+    ),
+  );
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: { ...request, assets },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+  const manifestTarget = created.value.uploadTargets.find((target) => target.kind === "manifest");
+  assert.ok(manifestTarget);
+  await objectStorage.putBySignedUrl(manifestTarget.url, malformedManifestBytes, {
+    contentType: manifestTarget.headers["content-type"] ?? "application/json",
+  });
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: assets },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "invalid-manifest");
+  assert.match(job.recording.failureMessage ?? "", /malformed JSON/);
+});
+
 async function makePackage(input: { mediaSha256?: string } = {}): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

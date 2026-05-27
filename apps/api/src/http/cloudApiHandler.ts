@@ -8,6 +8,7 @@ import type {
 export type CloudApiHandler = (request: Request) => Promise<Response>;
 
 const STATUS_BY_ERROR: Record<CloudApiErrorCode, number> = {
+  "bad-request": 400,
   unauthorized: 401,
   forbidden: 403,
   "not-found": 404,
@@ -39,7 +40,9 @@ export function createCloudApiHandler(deps: {
           requestId,
         );
       }
-      const input = (await request.json()) as CreateUploadSessionRequest;
+      const parsed = await readJsonObject(request);
+      if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
+      const input = parsed.value as CreateUploadSessionRequest;
       const result = await deps.service.createUploadSession({ ownerId, input });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
       return jsonResponse(result.value, 201, requestId);
@@ -47,6 +50,28 @@ export function createCloudApiHandler(deps: {
 
     return jsonError({ code: "not-found", message: "route not found", requestId }, requestId);
   };
+}
+
+async function readJsonObject(
+  request: Request,
+): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: CloudApiError }> {
+  try {
+    const value = (await request.json()) as unknown;
+    if (!isJsonObject(value)) {
+      return { ok: false, error: badRequestError() };
+    }
+    return { ok: true, value };
+  } catch {
+    return { ok: false, error: badRequestError() };
+  }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function badRequestError(): CloudApiError {
+  return { code: "bad-request", message: "request body must be a valid JSON object" };
 }
 
 function readOwnerToken(request: Request): string | null {

@@ -38,45 +38,50 @@ export async function processNextRecordingValidationJob(deps: {
     return failRecording(deps.metadata, recording, now, "checksum-mismatch", checksumFailure);
   }
 
-  const manifest = await readJsonAsset<RecordingManifest>(
-    deps.objectStorage,
-    assetsByKind.get("manifest"),
-  );
-  const meta = await readJsonAsset<RecordingMeta>(deps.objectStorage, assetsByKind.get("meta"));
-  const events = await readJsonAsset<RecordingEvent[]>(
-    deps.objectStorage,
-    assetsByKind.get("events"),
-  );
-  const snapshots = await readJsonAsset<RecordingSnapshot[]>(
-    deps.objectStorage,
-    assetsByKind.get("snapshots"),
-  );
-  const mediaAsset = assetsByKind.get("media");
-  const mediaObject = mediaAsset ? await deps.objectStorage.getObject(mediaAsset.objectKey) : null;
-  const mediaBlob = mediaObject
-    ? new Blob([toArrayBuffer(mediaObject.body)], { type: mediaObject.contentType })
-    : null;
-  const media = mediaBlob
-    ? ({
-        blobId: mediaAsset?.objectKey ?? "cloud-media",
-        mimeType: mediaBlob.type,
-        durationMs: recording.durationMs,
-        sizeBytes: mediaBlob.size,
-        timelineOffsetMs: 0,
-        hasAudio: recording.hasAudio,
-        hasCamera: recording.hasCamera,
-      } satisfies RecordingMedia)
-    : null;
+  let integrity: Awaited<ReturnType<typeof verifyRecordingPackageIntegrity>>;
+  try {
+    const manifest = await readJsonAsset<RecordingManifest>(
+      deps.objectStorage,
+      assetsByKind.get("manifest"),
+    );
+    const meta = await readJsonAsset<RecordingMeta>(deps.objectStorage, assetsByKind.get("meta"));
+    const events = await readJsonAsset<RecordingEvent[]>(
+      deps.objectStorage,
+      assetsByKind.get("events"),
+    );
+    const snapshots = await readJsonAsset<RecordingSnapshot[]>(
+      deps.objectStorage,
+      assetsByKind.get("snapshots"),
+    );
+    const mediaAsset = assetsByKind.get("media");
+    const mediaObject = mediaAsset ? await deps.objectStorage.getObject(mediaAsset.objectKey) : null;
+    const mediaBlob = mediaObject
+      ? new Blob([toArrayBuffer(mediaObject.body)], { type: mediaObject.contentType })
+      : null;
+    const media = mediaBlob
+      ? ({
+          blobId: mediaAsset?.objectKey ?? "cloud-media",
+          mimeType: mediaBlob.type,
+          durationMs: recording.durationMs,
+          sizeBytes: mediaBlob.size,
+          timelineOffsetMs: 0,
+          hasAudio: recording.hasAudio,
+          hasCamera: recording.hasCamera,
+        } satisfies RecordingMedia)
+      : null;
 
-  const pkg = {
-    schemaVersion: recording.schemaVersion,
-    manifest,
-    meta,
-    events,
-    snapshots,
-    media,
-  } satisfies RecordingPackageV1;
-  const integrity = await verifyRecordingPackageIntegrity(pkg, mediaBlob);
+    const pkg = {
+      schemaVersion: recording.schemaVersion,
+      manifest,
+      meta,
+      events,
+      snapshots,
+      media,
+    } satisfies RecordingPackageV1;
+    integrity = await verifyRecordingPackageIntegrity(pkg, mediaBlob);
+  } catch (error) {
+    return failRecording(deps.metadata, recording, now, "invalid-manifest", errorMessage(error));
+  }
   if (!integrity.ok) {
     return failRecording(
       deps.metadata,
@@ -138,7 +143,15 @@ async function readJsonAsset<T>(
   if (!asset) throw new Error("missing required asset");
   const object = await objectStorage.getObject(asset.objectKey);
   if (!object) throw new Error(`missing object: ${asset.kind}`);
-  return JSON.parse(new TextDecoder().decode(object.body)) as T;
+  try {
+    return JSON.parse(new TextDecoder().decode(object.body)) as T;
+  } catch {
+    throw new Error(`malformed JSON: ${asset.kind}`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "invalid recording package";
 }
 
 async function failRecording(

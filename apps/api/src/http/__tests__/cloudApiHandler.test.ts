@@ -67,6 +67,45 @@ test("cloud API returns the unified error shape when owner token is missing", as
   });
 });
 
+for (const input of [
+  { name: "empty", body: undefined },
+  { name: "malformed JSON", body: '{"idempotencyKey":' },
+  { name: "non-object JSON", body: JSON.stringify(["not", "an", "object"]) },
+] as const) {
+  test(`cloud API returns the unified error shape for ${input.name} upload-session bodies`, async () => {
+    const handler = createCloudApiHandler({
+      service: createCloudRecordingService({
+        metadata: createMemoryMetadataRepository(),
+        objectStorage: createMemoryObjectStorage(),
+      }),
+      createRequestId: () => `req-${input.name}`,
+    });
+
+    const response = await handler(
+      new Request("http://localhost/api/recordings/upload-sessions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: input.body,
+      }),
+    );
+    const body = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(body, {
+      error: {
+        code: "bad-request",
+        message: "request body must be a valid JSON object",
+        requestId: `req-${input.name}`,
+      },
+    });
+  });
+}
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

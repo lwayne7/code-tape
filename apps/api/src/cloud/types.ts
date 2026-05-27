@@ -21,6 +21,7 @@ export type RecordingStatus =
 export type UploadSessionStatus = "open" | "completed" | "expired" | "failed";
 
 export type CloudApiErrorCode =
+  | "bad-request"
   | "unauthorized"
   | "forbidden"
   | "not-found"
@@ -85,7 +86,7 @@ export type CompleteUploadSessionRequest = {
 
 export type CompleteUploadSessionResponse = {
   recordingId: string;
-  status: "processing";
+  status: "processing" | "ready" | "failed";
 };
 
 export type CloudRecordingRecord = {
