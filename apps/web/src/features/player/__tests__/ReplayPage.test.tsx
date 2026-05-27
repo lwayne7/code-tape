@@ -318,6 +318,58 @@ describe("ReplayPage", () => {
     expect(screen.getByText("Comment")).toBeInTheDocument();
   });
 
+  it("keeps click pulse when a later pointer move arrives in the same scheduler tick", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.onTick?.(
+        {
+          editor: {
+            code: "",
+            language: "javascript",
+            cursor: null,
+            selection: null,
+            scrollTop: 0,
+            scrollLeft: 0,
+            fontSize: 14,
+            theme: "dark",
+          },
+          pointer: null,
+          media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+          runtime: { status: "idle", stdout: [], stderr: [], previewHtml: null, errorMessage: null },
+        },
+        [
+          {
+            id: "click-1",
+            seq: 1,
+            timestampMs: 100,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-click",
+            payload: { x: 30, y: 16, containerWidth: 100, containerHeight: 80, button: 0 },
+          },
+          {
+            id: "move-2",
+            seq: 2,
+            timestampMs: 120,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-move",
+            payload: { x: 70, y: 40, containerWidth: 100, containerHeight: 80 },
+          },
+        ],
+        120,
+      );
+    });
+
+    const pointer = screen.getByLabelText("回放鼠标位置");
+    expect(pointer).toHaveStyle({ left: "70%", top: "50%" });
+    expect(pointer.querySelector(".animate-ping")).toBeInTheDocument();
+  });
+
   it("defaults display toggles on and hides replay layers when toggled off", async () => {
     const { ReplayPage } = await import("../ReplayPage");
 

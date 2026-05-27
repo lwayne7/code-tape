@@ -307,18 +307,12 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       targetMs,
       SEEK_CLICK_WINDOW_MS,
     );
-    const latestPointer =
-      latestMove && latestClick
-        ? latestMove.timestampMs >= latestClick.timestampMs
-          ? latestMove
-          : latestClick
-        : latestMove ?? latestClick;
     const latestShortcut = latestEventInWindow(
       index.eventsByType.get("shortcut") ?? [],
       targetMs,
       SEEK_SHORTCUT_WINDOW_MS,
     );
-    return [latestPointer, latestShortcut]
+    return [latestMove, latestClick, latestShortcut]
       .filter((event): event is RecordingEvent => Boolean(event))
       .sort((left, right) => left.timestampMs - right.timestampMs || left.seq - right.seq);
   };

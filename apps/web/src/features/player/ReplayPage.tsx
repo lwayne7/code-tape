@@ -330,17 +330,17 @@ function overlayStateFromEvents(
   transientEvents: RecordingEvent[],
 ): ReplayOverlayState {
   let next = current;
+  let pointer: ReplayOverlayState["pointer"] = null;
+  let pointerClicked = false;
   for (const event of transientEvents) {
     if (event.type === "mouse-move" || event.type === "mouse-click") {
       const { x, y, containerWidth, containerHeight } = event.payload;
-      next = {
-        ...next,
-        pointer: {
-          id: event.id,
-          xPercent: containerWidth > 0 ? (x / containerWidth) * 100 : 0,
-          yPercent: containerHeight > 0 ? (y / containerHeight) * 100 : 0,
-          clicked: event.type === "mouse-click",
-        },
+      pointerClicked ||= event.type === "mouse-click";
+      pointer = {
+        id: event.id,
+        xPercent: containerWidth > 0 ? (x / containerWidth) * 100 : 0,
+        yPercent: containerHeight > 0 ? (y / containerHeight) * 100 : 0,
+        clicked: event.type === "mouse-click",
       };
     }
     if (event.type === "shortcut") {
@@ -352,6 +352,12 @@ function overlayStateFromEvents(
         },
       };
     }
+  }
+  if (pointer) {
+    next = {
+      ...next,
+      pointer: { ...pointer, clicked: pointer.clicked || pointerClicked },
+    };
   }
   return next;
 }

@@ -660,8 +660,33 @@ describe("createReplayScheduler", () => {
 
     await scheduler.seek(1_850);
 
-    expect(transientTicks.at(-1)?.map((event) => event.id)).toEqual(["s-2", "click-3"]);
+    expect(transientTicks.at(-1)?.map((event) => event.id)).toEqual(["move-1", "s-2", "click-3"]);
     expect(scheduler.getStableState().editor.code).toBe("after-stable");
+  });
+
+  it("keeps recent click and later pointer move overlays after seek", async () => {
+    const transientTicks: RecordingEvent[][] = [];
+    const scheduler = createReplayScheduler({
+      tickStrategy: { start: vi.fn(), stop: vi.fn() },
+      onTick: (_state, transientEvents) => {
+        transientTicks.push(transientEvents);
+      },
+    });
+    await scheduler.load(
+      makePkg(
+        [
+          pointerClick(1, 1_000),
+          pointerMove(2, 1_250, 70, 40),
+          content(3, 1_600, "after-stable"),
+        ],
+        [],
+        5_000,
+      ),
+    );
+
+    await scheduler.seek(1_450);
+
+    expect(transientTicks.at(-1)?.map((event) => event.id)).toEqual(["click-1", "move-2"]);
   });
 
   it("handles rejected async media operations during ready ticks", async () => {
