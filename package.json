@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "prepare": "npm run hooks:install",
@@ -13,14 +14,18 @@
     "contract:check": "node scripts/workflows/contract-check.mjs check",
     "contract:gitnexus": "node scripts/workflows/contract-check.mjs gitnexus",
     "quality:predev": "npm run hooks:install && npm run contract:local",
-    "quality:precommit": "npm test && npm run lint:web && npm run test:web && npm run build",
-    "quality:ci": "npm test && npm run lint:web && npm run test:web && npm run build && npm run e2e:web",
+    "quality:precommit": "npm test && npm run lint:web && npm run test:schema && npm run test:api && npm run test:web && npm run build",
+    "quality:ci": "npm test && npm run lint:web && npm run test:schema && npm run test:api && npm run test:web && npm run build && npm run e2e:web",
     "quality:local": "npm run contract:local && npm run quality:ci",
     "dev": "npm run dev -w apps/web -- --host 127.0.0.1",
     "dev:web": "npm run dev -w apps/web -- --host 127.0.0.1",
-    "build": "npm run build -w apps/web",
+    "build": "npm run build:schema && npm run build:api && npm run build -w apps/web",
+    "build:schema": "npm run build -w @code-tape/recording-schema",
+    "build:api": "npm run build -w apps/api",
     "preview": "npm run preview -w apps/web",
     "test:web": "npm run test -w apps/web",
+    "test:schema": "npm run test -w @code-tape/recording-schema",
+    "test:api": "npm run test -w apps/api",
     "lint:web": "npm run lint -w apps/web",
     "e2e:web": "npm run e2e -w apps/web",
     "test": "node --test scripts/tests/*.test.mjs"

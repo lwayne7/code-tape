@@ -5,7 +5,7 @@ import {
   type RecordingPackageV1,
   type SchemaValidationIssue,
   type SchemaValidationResult,
-} from "./types";
+} from "./types.js";
 
 const EVENT_TYPES = new Set<RecordingEventType>([
   "record-start",

@@ -1,0 +1,122 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash";
+import {
+  RECORDING_SCHEMA_VERSION,
+  type RecordingPackageV1,
+} from "@code-tape/recording-schema";
+import { createCloudRecordingService } from "../cloudRecordingService.js";
+import { createMemoryMetadataRepository } from "../memoryMetadataRepository.js";
+import { createMemoryObjectStorage } from "../memoryObjectStorage.js";
+import type { CreateUploadSessionRequest } from "../types.js";
+
+test("createUploadSession is idempotent per owner and idempotency key", async () => {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const pkg = await makePackage();
+  const request = makeCreateSessionRequest(pkg);
+
+  const first = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  const second = await service.createUploadSession({ ownerId: "owner-1", input: request });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  if (!first.ok || !second.ok) return;
+  assert.equal(second.value.sessionId, first.value.sessionId);
+  assert.equal(second.value.recordingId, first.value.recordingId);
+  assert.equal(second.value.uploadTargets.length, request.assets.length);
+  assert.ok(second.value.uploadTargets.every((target) => target.method === "PUT"));
+});
+
+test("createUploadSession rejects incomplete package asset sets", async () => {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const pkg = await makePackage();
+  const request = makeCreateSessionRequest(pkg);
+
+  const result = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: {
+      ...request,
+      assets: request.assets.filter((asset) => asset.kind !== "snapshots"),
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.code, "invalid-manifest");
+  assert.match(result.error.message, /snapshots/);
+});
+
+async function makePackage(): Promise<RecordingPackageV1> {
+  const events: RecordingPackageV1["events"] = [];
+  const snapshots: RecordingPackageV1["snapshots"] = [];
+  return {
+    schemaVersion: RECORDING_SCHEMA_VERSION,
+    manifest: {
+      packageId: "pkg-1",
+      schemaVersion: RECORDING_SCHEMA_VERSION,
+      status: "complete",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:01:00.000Z",
+      checksums: {
+        eventsSha256: await sha256Hex(canonicalStringify(events)),
+        snapshotsSha256: await sha256Hex(canonicalStringify(snapshots)),
+      },
+    },
+    meta: {
+      id: "rec-1",
+      title: "Cloud infra demo",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      durationMs: 1000,
+      appVersion: "0.0.0",
+      ownerId: null,
+      creatorInfo: null,
+      initialLanguage: "javascript",
+      initialFontSize: 14,
+      initialTheme: "dark",
+      mediaCapability: {
+        audio: "unsupported",
+        camera: "unsupported",
+        selectedAudioDeviceId: null,
+        selectedCameraDeviceId: null,
+      },
+    },
+    events,
+    snapshots,
+    media: null,
+  };
+}
+
+function makeCreateSessionRequest(pkg: RecordingPackageV1): CreateUploadSessionRequest {
+  return {
+    idempotencyKey: "idem-1",
+    localPackageId: pkg.manifest.packageId,
+    title: pkg.meta.title,
+    schemaVersion: pkg.schemaVersion,
+    durationMs: pkg.meta.durationMs,
+    initialLanguage: pkg.meta.initialLanguage,
+    hasAudio: false,
+    hasCamera: false,
+    assets: [
+      asset("manifest", pkg.manifest),
+      asset("meta", pkg.meta),
+      asset("events", pkg.events),
+      asset("snapshots", pkg.snapshots),
+    ],
+  };
+}
+
+function asset(kind: "manifest" | "meta" | "events" | "snapshots", value: unknown) {
+  const body = canonicalStringify(value);
+  return {
+    kind,
+    sha256: "sha256-placeholder",
+    sizeBytes: new TextEncoder().encode(body).byteLength,
+    mimeType: "application/json",
+  };
+}

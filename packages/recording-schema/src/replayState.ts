@@ -4,7 +4,7 @@ import type {
   RecordStartPayload,
   ReplayReducer,
   ReplayStableState,
-} from "./types";
+} from "./types.js";
 
 type InitialReplayStateInput = {
   initialLanguage: ReplayStableState["editor"]["language"];

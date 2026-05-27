@@ -3,10 +3,12 @@ import {
   buildInitialReplayStateFromPackage,
   buildInitialReplayStateFromRecordStart,
   cloneReplayStableState,
+  RECORDING_SCHEMA_VERSION,
   replayReducer,
   STABLE_EVENT_TYPES,
-} from "../replayState";
-import { RECORDING_SCHEMA_VERSION, type RecordingEvent, type RecordingPackageV1 } from "../types";
+  type RecordingEvent,
+  type RecordingPackageV1,
+} from "@/shared/recording-schema";
 
 describe("replay stable state contract", () => {
   it("builds the same initial state from package metadata and record-start payload", () => {

@@ -511,6 +511,9 @@ test('repository text does not reference the standalone cloud plan path', () => 
     if (!/\.(css|html|js|json|jsonc|md|mjs|ts|tsx|yml|yaml)$/u.test(filePath)) {
       return false;
     }
+    if (!existsSync(filePath)) {
+      return false;
+    }
     return readFileSync(filePath, 'utf8').includes(standaloneCloudPlanPath());
   });
 
@@ -928,8 +931,14 @@ test('root package exposes complete quality gate scripts', () => {
   assert.equal(pkg.scripts.prepare, 'npm run hooks:install');
   assert.equal(pkg.scripts['hooks:install'], 'node scripts/workflows/install-hooks.mjs');
   assert.equal(pkg.scripts['quality:predev'], 'npm run hooks:install && npm run contract:local');
-  assert.equal(pkg.scripts['quality:precommit'], 'npm test && npm run lint:web && npm run test:web && npm run build');
-  assert.equal(pkg.scripts['quality:ci'], 'npm test && npm run lint:web && npm run test:web && npm run build && npm run e2e:web');
+  assert.equal(
+    pkg.scripts['quality:precommit'],
+    'npm test && npm run lint:web && npm run test:schema && npm run test:api && npm run test:web && npm run build',
+  );
+  assert.equal(
+    pkg.scripts['quality:ci'],
+    'npm test && npm run lint:web && npm run test:schema && npm run test:api && npm run test:web && npm run build && npm run e2e:web',
+  );
   assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
 

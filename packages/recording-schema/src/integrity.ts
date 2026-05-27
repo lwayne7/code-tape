@@ -1,5 +1,5 @@
-import { migrateRecordingPackage } from "./migrations";
-import { isKnownRecordingEventType, validateRecordingPackageV1 } from "./validators";
+import { migrateRecordingPackage } from "./migrations.js";
+import { isKnownRecordingEventType, validateRecordingPackageV1 } from "./validators.js";
 import type {
   PackageLoadError,
   PackageLoadResult,
@@ -7,8 +7,8 @@ import type {
   RecordingEvent,
   RecordingPackageV1,
   SchemaValidationIssue,
-} from "./types";
-import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
+} from "./types.js";
+import { canonicalStringify, sha256Hex } from "./hash.js";
 
 export async function sha256Blob(blob: Blob): Promise<string> {
   const buffer = await blob.arrayBuffer();
