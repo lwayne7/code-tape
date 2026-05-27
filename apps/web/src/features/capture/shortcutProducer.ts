@@ -144,6 +144,8 @@ const KNOWN_SHORTCUTS: Record<string, { label: string; command: string }> = {
   "Ctrl+Y": { label: "Redo", command: "redo" },
   "Cmd+Enter": { label: "Run", command: "run" },
   "Ctrl+Enter": { label: "Run", command: "run" },
+  "Cmd+G": { label: "Go to Line", command: "go-to-line" },
+  "Ctrl+G": { label: "Go to Line", command: "go-to-line" },
 };
 
 function isControlShortcut(event: KeyboardEvent): boolean {

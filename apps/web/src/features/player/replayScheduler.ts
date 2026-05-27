@@ -45,6 +45,9 @@ const DEFAULT_RAF_INTERVAL_MS = 1000 / 60;
 const MEDIA_DRIFT_THRESHOLD_MS = 250;
 const MEDIA_BUFFERING_THRESHOLD_MS = 500;
 const MEDIA_FALLBACK_THRESHOLD_MS = 2000;
+const SEEK_POINTER_WINDOW_MS = 1200;
+const SEEK_SHORTCUT_WINDOW_MS = 1200;
+const SEEK_CLICK_WINDOW_MS = 500;
 
 export function defaultTickStrategy(): TickStrategy {
   let handle: number | null = null;
@@ -273,6 +276,47 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
     return { transientEvents, lastSeq };
   };
 
+  const latestEventInWindow = (
+    events: RecordingEvent[],
+    targetMs: number,
+    windowMs: number,
+  ): RecordingEvent | null => {
+    let latest: RecordingEvent | null = null;
+    const minTimeMs = Math.max(0, targetMs - windowMs);
+    for (const event of events) {
+      if (event.timestampMs < minTimeMs || event.timestampMs > targetMs) continue;
+      if (
+        !latest ||
+        event.timestampMs > latest.timestampMs ||
+        (event.timestampMs === latest.timestampMs && event.seq > latest.seq)
+      ) {
+        latest = event;
+      }
+    }
+    return latest;
+  };
+
+  const transientEventsForSeek = (targetMs: number): RecordingEvent[] => {
+    const latestMove = latestEventInWindow(
+      index.eventsByType.get("mouse-move") ?? [],
+      targetMs,
+      SEEK_POINTER_WINDOW_MS,
+    );
+    const latestClick = latestEventInWindow(
+      index.eventsByType.get("mouse-click") ?? [],
+      targetMs,
+      SEEK_CLICK_WINDOW_MS,
+    );
+    const latestShortcut = latestEventInWindow(
+      index.eventsByType.get("shortcut") ?? [],
+      targetMs,
+      SEEK_SHORTCUT_WINDOW_MS,
+    );
+    return [latestMove, latestClick, latestShortcut]
+      .filter((event): event is RecordingEvent => Boolean(event))
+      .sort((left, right) => left.timestampMs - right.timestampMs || left.seq - right.seq);
+  };
+
   const tickOnce = () => {
     if (!pkg) return;
     const frame = resolveFrame();
@@ -383,7 +427,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
         driftMs: 0,
       });
       if (shouldResumePlayback) ensureDriving();
-      options.onTick?.(stableState, [], clamped);
+      options.onTick?.(stableState, transientEventsForSeek(clamped), clamped);
     },
     setRate(rate: ReplayPlaybackRate) {
       clock.setRate(rate);

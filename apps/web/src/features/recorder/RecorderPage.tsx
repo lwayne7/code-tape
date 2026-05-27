@@ -636,6 +636,9 @@ export function RecorderPage() {
             fontSize={editorFontSize}
             theme={theme.resolved}
             readOnly={controllerState.status === "paused"}
+            onCommand={(command) => {
+              if (command === "run") void handleRun();
+            }}
           />
           <CameraPreview
             stream={mediaStream}

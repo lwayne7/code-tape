@@ -47,6 +47,30 @@ function shortcut(seq: number, t: number): RecordingEvent {
   };
 }
 
+function pointerMove(seq: number, t: number, x = 40, y = 20): RecordingEvent {
+  return {
+    id: `move-${seq}`,
+    seq,
+    timestampMs: t,
+    source: "pointer",
+    track: "ui",
+    type: "mouse-move",
+    payload: { x, y, containerWidth: 100, containerHeight: 80 },
+  };
+}
+
+function pointerClick(seq: number, t: number, x = 50, y = 25): RecordingEvent {
+  return {
+    id: `click-${seq}`,
+    seq,
+    timestampMs: t,
+    source: "pointer",
+    track: "ui",
+    type: "mouse-click",
+    payload: { x, y, containerWidth: 100, containerHeight: 80, button: 0 },
+  };
+}
+
 function mediaWarning(seq: number, t: number): RecordingEvent {
   return {
     id: `e-${seq}`,
@@ -611,6 +635,58 @@ describe("createReplayScheduler", () => {
 
     expect(latest().status).toBe("paused");
     expect(scheduler.getStableState().editor.code).toBe("paused-seek");
+  });
+
+  it("replays recent transient pointer and shortcut overlays after seek", async () => {
+    const transientTicks: RecordingEvent[][] = [];
+    const scheduler = createReplayScheduler({
+      tickStrategy: { start: vi.fn(), stop: vi.fn() },
+      onTick: (_state, transientEvents) => {
+        transientTicks.push(transientEvents);
+      },
+    });
+    await scheduler.load(
+      makePkg(
+        [
+          pointerMove(1, 900),
+          shortcut(2, 1_000),
+          pointerClick(3, 1_400),
+          content(4, 1_600, "after-stable"),
+        ],
+        [],
+        5_000,
+      ),
+    );
+
+    await scheduler.seek(1_850);
+
+    expect(transientTicks.at(-1)?.map((event) => event.id)).toEqual(["move-1", "s-2", "click-3"]);
+    expect(scheduler.getStableState().editor.code).toBe("after-stable");
+  });
+
+  it("keeps recent click and later pointer move overlays after seek", async () => {
+    const transientTicks: RecordingEvent[][] = [];
+    const scheduler = createReplayScheduler({
+      tickStrategy: { start: vi.fn(), stop: vi.fn() },
+      onTick: (_state, transientEvents) => {
+        transientTicks.push(transientEvents);
+      },
+    });
+    await scheduler.load(
+      makePkg(
+        [
+          pointerClick(1, 1_000),
+          pointerMove(2, 1_250, 70, 40),
+          content(3, 1_600, "after-stable"),
+        ],
+        [],
+        5_000,
+      ),
+    );
+
+    await scheduler.seek(1_450);
+
+    expect(transientTicks.at(-1)?.map((event) => event.id)).toEqual(["click-1", "move-2"]);
   });
 
   it("handles rejected async media operations during ready ticks", async () => {

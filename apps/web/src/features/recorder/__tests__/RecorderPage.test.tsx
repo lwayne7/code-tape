@@ -422,6 +422,26 @@ describe("RecorderPage", () => {
     expect(output).toHaveTextContent("1");
   });
 
+  it("runs code from the editor run command shortcut", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    recorderPageMock.editorValue.current = "console.log('shortcut-run');";
+
+    render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.codeEditorProps?.onCommand).toBeTypeOf("function"));
+
+    await act(async () => {
+      recorderPageMock.codeEditorProps?.onCommand?.("run");
+    });
+
+    await waitFor(() =>
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+        language: "javascript",
+        source: "console.log('shortcut-run');",
+      }),
+    );
+    expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
+  });
+
   it("requests browser media permissions from the setup toolbar and refreshes devices", async () => {
     recorderPageMock.devices.requestPermission.mockResolvedValue("granted");
     const { RecorderPage } = await import("../RecorderPage");

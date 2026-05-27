@@ -5,6 +5,7 @@ import type { CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
 import type {
   RecordingEvent,
+  MediaClockAdapter,
   RecordingPackageV1,
   RecordingRepository,
   ReplaySchedulerState,
@@ -313,7 +314,60 @@ describe("ReplayPage", () => {
     });
 
     expect(screen.getByLabelText("回放鼠标位置")).toBeInTheDocument();
+    expect(screen.getByLabelText("回放快捷键")).toHaveTextContent("Comment");
     expect(screen.getByText("Comment")).toBeInTheDocument();
+  });
+
+  it("keeps click pulse when a later pointer move arrives in the same scheduler tick", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.onTick?.(
+        {
+          editor: {
+            code: "",
+            language: "javascript",
+            cursor: null,
+            selection: null,
+            scrollTop: 0,
+            scrollLeft: 0,
+            fontSize: 14,
+            theme: "dark",
+          },
+          pointer: null,
+          media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+          runtime: { status: "idle", stdout: [], stderr: [], previewHtml: null, errorMessage: null },
+        },
+        [
+          {
+            id: "click-1",
+            seq: 1,
+            timestampMs: 100,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-click",
+            payload: { x: 30, y: 16, containerWidth: 100, containerHeight: 80, button: 0 },
+          },
+          {
+            id: "move-2",
+            seq: 2,
+            timestampMs: 120,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-move",
+            payload: { x: 70, y: 40, containerWidth: 100, containerHeight: 80 },
+          },
+        ],
+        120,
+      );
+    });
+
+    const pointer = screen.getByLabelText("回放鼠标位置");
+    expect(pointer).toHaveStyle({ left: "70%", top: "50%" });
+    expect(pointer.querySelector(".animate-ping")).toBeInTheDocument();
   });
 
   it("defaults display toggles on and hides replay layers when toggled off", async () => {
@@ -463,6 +517,43 @@ describe("ReplayPage", () => {
 
     expect(adapterAttachOrder).toBeLessThan(loadOrder);
     pause.mockRestore();
+  });
+
+  it("maps recording media offset as a media-time offset on the shared timeline", async () => {
+    const originalMedia = replayPageMock.packageData.media;
+    replayPageMock.packageData.media = {
+      ...originalMedia!,
+      durationMs: 120_000,
+      timelineOffsetMs: 5_000,
+    };
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    try {
+      render(<ReplayPage />);
+
+      await waitFor(() =>
+        expect(replayPageMock.scheduler.setMediaAdapter.mock.calls.some(([adapter]) => adapter)).toBe(
+          true,
+        ),
+      );
+      const adapter = replayPageMock.scheduler.setMediaAdapter.mock.calls.find(
+        ([candidate]) => candidate,
+      )?.[0] as MediaClockAdapter | undefined;
+
+      expect(adapter?.segments[0]).toEqual({
+        blobId: "blob-1",
+        timelineStartMs: 0,
+        timelineEndMs: 115_000,
+        mediaStartMs: 5_000,
+        mediaEndMs: 120_000,
+      });
+      expect(adapter?.timelineToMediaTime(42_000)).toBe(47_000);
+      expect(adapter?.mediaToTimelineTime(47)).toBe(42_000);
+    } finally {
+      replayPageMock.packageData.media = originalMedia;
+      pause.mockRestore();
+    }
   });
 
   it("keeps the scheduler subscription alive when the replay id changes", async () => {

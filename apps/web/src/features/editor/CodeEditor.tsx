@@ -8,6 +8,8 @@ export type CodeEditorHandle = {
   setModelLanguage(language: RecordingLanguage): void;
 };
 
+export type CodeEditorCommand = "run" | "format" | "comment" | "go-to-line";
+
 export type CodeEditorProps = {
   language: RecordingLanguage;
   initialValue: string;
@@ -20,6 +22,7 @@ export type CodeEditorProps = {
   scrollTop?: number;
   scrollLeft?: number;
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
+  onCommand?(command: CodeEditorCommand): void;
 };
 
 type MonacoModule = typeof Monaco;
@@ -142,6 +145,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollTop,
     scrollLeft,
     onMount,
+    onCommand,
   },
   ref,
 ) {
@@ -162,6 +166,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollLeft,
   });
   const onMountRef = useRef(onMount);
+  const onCommandRef = useRef(onCommand);
   const [loadError, setLoadError] = useState<unknown>(null);
 
   latestPropsRef.current = {
@@ -176,6 +181,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollLeft,
   };
   onMountRef.current = onMount;
+  onCommandRef.current = onCommand;
 
   useImperativeHandle(
     ref,
@@ -216,6 +222,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         monacoRef.current = monaco;
         modelRef.current = model;
         editorRef.current = editor;
+        registerEditorCommands(monaco, editor, (command) => onCommandRef.current?.(command));
         applyControlledEditorState(editor, currentProps);
         onMountRef.current?.(editor);
       })
@@ -299,6 +306,28 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     </div>
   );
 });
+
+function registerEditorCommands(
+  monaco: MonacoModule,
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  onCommand: (command: CodeEditorCommand) => void,
+) {
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+    onCommand("run");
+  });
+  editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
+    editor.trigger("keyboard", "editor.action.formatDocument", null);
+    onCommand("format");
+  });
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash, () => {
+    editor.trigger("keyboard", "editor.action.commentLine", null);
+    onCommand("comment");
+  });
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG, () => {
+    editor.trigger("keyboard", "editor.action.gotoLine", null);
+    onCommand("go-to-line");
+  });
+}
 
 function applyControlledEditorState(
   editor: Monaco.editor.IStandaloneCodeEditor,

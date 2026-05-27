@@ -30,6 +30,7 @@ const monacoMock = vi.hoisted(() => {
 
   class MockEditor {
     disposed = false;
+    commands: Array<{ keybinding: number; handler: () => void }> = [];
     updateOptions = vi.fn((nextOptions: Record<string, unknown>) => {
       Object.assign(this.options, nextOptions);
     });
@@ -40,6 +41,11 @@ const monacoMock = vi.hoisted(() => {
     setSelection = vi.fn();
     setScrollTop = vi.fn();
     setScrollLeft = vi.fn();
+    trigger = vi.fn();
+    addCommand = vi.fn((keybinding: number, handler: () => void) => {
+      this.commands.push({ keybinding, handler });
+      return `command-${this.commands.length}`;
+    });
 
     constructor(
       public host: HTMLElement,
@@ -92,10 +98,25 @@ const monacoMock = vi.hoisted(() => {
       setTheme,
       setModelLanguage,
     },
+    KeyMod: {
+      CtrlCmd: 1 << 11,
+      Shift: 1 << 10,
+      Alt: 1 << 9,
+    },
+    KeyCode: {
+      Enter: 3,
+      Slash: 85,
+      KeyF: 36,
+      KeyG: 37,
+    },
   };
 });
 
-vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({ editor: monacoMock.editor }));
+vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
+  editor: monacoMock.editor,
+  KeyMod: monacoMock.KeyMod,
+  KeyCode: monacoMock.KeyCode,
+}));
 vi.mock("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/language/typescript/monaco.contribution", () => ({}));
@@ -130,6 +151,12 @@ describe("CodeEditor", () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
+
+  function runCommand(editor: { commands: Array<{ keybinding: number; handler: () => void }> }, keybinding: number) {
+    const command = editor.commands.find((candidate) => candidate.keybinding === keybinding);
+    if (!command) throw new Error(`Missing command for keybinding ${keybinding}`);
+    command.handler();
+  }
 
   it("lazy-loads Monaco, creates the editor with initial props, and exposes it", async () => {
     const { CodeEditor } = await import("../CodeEditor");
@@ -248,6 +275,32 @@ describe("CodeEditor", () => {
     });
     expect(editor.setScrollTop).toHaveBeenCalledWith(240);
     expect(editor.setScrollLeft).toHaveBeenCalledWith(16);
+  });
+
+  it("registers common editor shortcut commands", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const onCommand = vi.fn();
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="console.log('shortcuts');"
+        fontSize={14}
+        theme="dark"
+        onCommand={onCommand}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.Enter);
+    runCommand(editor, monacoMock.KeyMod.Shift | monacoMock.KeyMod.Alt | monacoMock.KeyCode.KeyF);
+    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.Slash);
+    runCommand(editor, monacoMock.KeyMod.CtrlCmd | monacoMock.KeyCode.KeyG);
+
+    expect(onCommand).toHaveBeenCalledWith("run");
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.commentLine", null);
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.gotoLine", null);
   });
 
   it("configures JS/TS workers and disposes editor resources on unmount", async () => {

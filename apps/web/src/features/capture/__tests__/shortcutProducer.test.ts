@@ -58,12 +58,14 @@ describe("createShortcutProducer", () => {
     keydown(window, { key: "f", shiftKey: true, altKey: true, timeStamp: 600 });
     keydown(window, { key: "/", ctrlKey: true, timeStamp: 1200 });
     keydown(window, { key: "Enter", ctrlKey: true, timeStamp: 1800 });
+    keydown(window, { key: "g", ctrlKey: true, timeStamp: 2400 });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
       { keys: ["Cmd", "S"], label: "Save", command: "save" },
       { keys: ["Shift", "Alt", "F"], label: "Format", command: "format" },
       { keys: ["Ctrl", "/"], label: "Comment", command: "comment" },
       { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
+      { keys: ["Ctrl", "G"], label: "Go to Line", command: "go-to-line" },
     ]);
   });
 

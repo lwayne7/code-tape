@@ -188,7 +188,7 @@ export function ReplayControls({
         </RadixPopover.Root>
       </div>
 
-      <div onMouseEnter={openVolumePopover} onMouseLeave={closeVolumePopover}>
+      <div data-replay-volume-control onMouseEnter={openVolumePopover} onMouseLeave={closeVolumePopover}>
         <RadixPopover.Root open={volumePopoverOpen} onOpenChange={setVolumePopoverOpen}>
           <RadixPopover.Trigger asChild>
             <Toggle
@@ -228,7 +228,10 @@ export function ReplayControls({
                   <RadixSlider.Track className="relative w-1 h-full grow rounded-full bg-border">
                     <RadixSlider.Range className="absolute w-full rounded-full bg-primary" />
                   </RadixSlider.Track>
-                  <RadixSlider.Thumb className="block h-3 w-3 rounded-full bg-foreground shadow-elevation-2 transition-transform duration-150 ease-out-soft hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background" />
+                  <RadixSlider.Thumb
+                    aria-label="音量"
+                    className="block h-3 w-3 rounded-full bg-foreground shadow-elevation-2 transition-transform duration-150 ease-out-soft hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  />
                 </RadixSlider.Root>
               </div>
             </RadixPopover.Content>

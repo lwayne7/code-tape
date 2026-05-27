@@ -34,7 +34,16 @@ test("records, saves, replays, seeks, and keeps content-change events debounced"
     page,
     `document.body.textContent = "seek-before";\nconsole.log("${FIRST_OUTPUT}");\n`,
   );
-  await runCodeAndWaitForPreview(page, "seek-before");
+  await moveAndClickInsideEditor(page);
+  await selectRecentEditorText(page);
+  await pressRecordedShortcut(page, "Control+/");
+  await page.waitForTimeout(550);
+  await pressRecordedShortcut(page, "Control+/");
+  await page.waitForTimeout(550);
+  await pressRecordedShortcut(page, "Shift+Alt+F");
+  await pressRecordedShortcut(page, "Control+G");
+  await page.keyboard.press("Escape");
+  await runCodeWithShortcutAndWaitForPreview(page, "seek-before");
 
   await page.waitForTimeout(250);
   await page.getByRole("button", { name: "暂停录制" }).click();
@@ -61,6 +70,8 @@ test("records, saves, replays, seeks, and keeps content-change events debounced"
   const recording = stored!;
   const contentChanges = recording.events.filter((event) => event.type === "content-change");
   const runOutputs = recording.events.filter((event) => event.type === "run-output");
+  const shortcutEvents = recording.events.filter((event) => event.type === "shortcut");
+  const shortcutCommands = shortcutEvents.map((event) => event.payload.command);
   const firstRunOutput = runOutputs.find((event) =>
     Array.isArray(event.payload.stdout)
     && event.payload.stdout.includes(FIRST_OUTPUT),
@@ -73,22 +84,41 @@ test("records, saves, replays, seeks, and keeps content-change events debounced"
   expect(recording.events.some((event) => event.type === "record-pause")).toBe(true);
   expect(recording.events.some((event) => event.type === "record-resume")).toBe(true);
   expect(recording.events.some((event) => event.type === "record-stop")).toBe(true);
+  expect(recording.events.some((event) => event.type === "mouse-move")).toBe(true);
+  expect(recording.events.some((event) => event.type === "mouse-click")).toBe(true);
+  expect(
+    recording.events.some((event) => event.type === "selection-change" && event.payload.selection),
+  ).toBe(true);
+  expect(shortcutCommands).toEqual(expect.arrayContaining(["comment", "format", "go-to-line", "run"]));
   expect(contentChanges.length).toBeGreaterThan(0);
   expect(contentChanges.length).toBeLessThan(30);
   expect(contentChanges.at(-1)?.payload.code).toContain(LONG_INPUT);
   expect(firstRunOutput).toBeTruthy();
   expect(finalRunOutput).toBeTruthy();
+  const runShortcut = shortcutEvents.find((event) => event.payload.command === "run");
+  const clickEvent = recording.events.find((event) => event.type === "mouse-click");
+  expect(runShortcut).toBeTruthy();
+  expect(clickEvent).toBeTruthy();
 
   await page.getByRole("button", { name: "播放" }).click();
   await expect(page.getByRole("button", { name: "暂停" })).toBeEnabled();
   await page.getByRole("button", { name: "暂停" }).click();
   await expect(page.getByRole("button", { name: "播放" })).toBeEnabled();
+  await page.getByRole("button", { name: "静音" }).click();
+  await expect(page.getByRole("button", { name: "取消静音" })).toBeVisible();
+  await page.locator("[data-replay-volume-control]").hover();
+  await page.waitForTimeout(250);
+  await expect(page.getByRole("slider", { name: "音量" })).toBeVisible();
 
   await page.getByRole("button", { name: "倍速" }).click();
   await page.getByRole("option", { name: "2x" }).click();
   await expect(page.getByRole("option", { name: "2x" })).toHaveAttribute("aria-selected", "true");
 
   const runtimeOutput = page.getByRole("region", { name: "Runtime output" });
+  await seekByProgress(page, clickEvent!.timestampMs + 20, recording.meta.durationMs);
+  await expect(page.getByLabel("回放鼠标位置")).toBeVisible();
+  await seekByProgress(page, runShortcut!.timestampMs + 20, recording.meta.durationMs);
+  await expect(page.getByLabel("回放快捷键")).toContainText("Run");
   await seekByProgress(page, firstRunOutput!.timestampMs + 20, recording.meta.durationMs);
   await expect(page.locator("[data-code-editor]")).toContainText("seek-before");
   await expect(page.locator("[data-code-editor]")).not.toContainText(LONG_INPUT);
@@ -117,8 +147,36 @@ async function typeInEditor(page: Page, source: string): Promise<void> {
   await expect(page.locator("[data-code-editor]")).toContainText(source.split("\n")[0] ?? source);
 }
 
+async function moveAndClickInsideEditor(page: Page): Promise<void> {
+  const editor = page.locator("[data-code-editor]").first();
+  const box = await editor.boundingBox();
+  if (!box) throw new Error("Code editor surface is not visible");
+  const x = box.x + Math.min(120, box.width / 2);
+  const y = box.y + Math.min(120, box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.click(x, y);
+}
+
+async function selectRecentEditorText(page: Page): Promise<void> {
+  await page.locator("[data-code-editor] .monaco-editor").click();
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.keyboard.press("Shift+ArrowLeft");
+}
+
+async function pressRecordedShortcut(page: Page, shortcut: string): Promise<void> {
+  await page.locator("[data-code-editor] .monaco-editor").click();
+  await page.keyboard.press(shortcut);
+}
+
 async function runCodeAndWaitForPreview(page: Page, expectedText: string): Promise<void> {
   await page.getByRole("button", { name: "运行代码" }).click();
+  await expect(
+    page.frameLocator('iframe[title="code-tape preview"]').locator("body"),
+  ).toContainText(expectedText);
+}
+
+async function runCodeWithShortcutAndWaitForPreview(page: Page, expectedText: string): Promise<void> {
+  await pressRecordedShortcut(page, "Control+Enter");
   await expect(
     page.frameLocator('iframe[title="code-tape preview"]').locator("body"),
   ).toContainText(expectedText);
