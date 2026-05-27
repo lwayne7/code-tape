@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -454,6 +454,16 @@ test('authority docs keep IndexedDB save failure export fallback mandatory', () 
 
   assert.match(technicalPlan, /文件导出作为保存失败兜底/u);
   assert.match(technicalPlan, /当 IndexedDB 写入失败或 quota 不足时，文件导出是 P0 兜底路径/u);
+});
+
+test('technical plan owns P1 cloud contract without standalone cloud plan', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+
+  assert.equal(existsSync('docs/云端技术方案.md'), false);
+  assert.match(technicalPlan, /## 十、P1 云端回放中心详细方案/u);
+  assert.match(technicalPlan, /后续实现不得再新增独立云端技术方案文档/u);
+  assert.match(technicalPlan, /ready --> soft_deleted[\s\S]*soft_deleted --> purging[\s\S]*purging --> deleted/u);
+  assert.match(technicalPlan, /`indexes\.json` 是可选派生资产，不是 P1 上传必需资产/u);
 });
 
 test('contract check launches npx through cmd on Windows', () => {
