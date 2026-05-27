@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import JSZip from "jszip";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecordingStore } from "../recordingStore";
 import type {
   RecordingEvent,
@@ -167,6 +167,39 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(result.mediaBlob).toBeInstanceOf(Blob);
     const buffer = await result.mediaBlob!.arrayBuffer();
     expect(new TextDecoder().decode(buffer)).toBe("binary");
+  });
+
+  it("returns media-write-failed when media blob cannot be prepared", async () => {
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-media-fail");
+    vi.spyOn(input.mediaBlob!, "arrayBuffer").mockRejectedValueOnce(new Error("blob read failed"));
+
+    const result = await store.saveDraft(input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("media-write-failed");
+      expect(result.message).toContain("blob read failed");
+    }
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("returns a useful media-write-failed message when blob preparation throws an empty message", async () => {
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-media-empty-error");
+    vi.spyOn(input.mediaBlob!, "arrayBuffer").mockRejectedValueOnce({
+      name: "NotReadableError",
+      message: "",
+    });
+
+    const result = await store.saveDraft(input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("media-write-failed");
+      expect(result.message).toContain("NotReadableError");
+      expect(result.message).toContain("media blob could not be prepared");
+    }
   });
 
   it("load on a draft returns incomplete-package", async () => {

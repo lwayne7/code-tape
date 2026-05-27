@@ -219,6 +219,29 @@ describe("createRecordingController", () => {
     expect(repository.commits.length).toBe(0);
   });
 
+  it("preflights quota before saveDraft and downloads fallback when storage is too low", async () => {
+    const onPersistenceFailure = vi.fn();
+    const { controller, repository } = setup({ onPersistenceFailure });
+    vi.mocked(repository.estimateQuota).mockResolvedValueOnce({
+      usageBytes: 950 * 1024,
+      quotaBytes: 1024 * 1024,
+    });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/quota-precheck-failed/);
+
+    expect(repository.estimateQuota).toHaveBeenCalledTimes(1);
+    expect(repository.saveDraft).not.toHaveBeenCalled();
+    expect(repository.commits.length).toBe(0);
+    expect(onPersistenceFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pkg: expect.objectContaining({ events: expect.any(Array) }),
+        mediaBlob: null,
+        error: expect.any(Error),
+      }),
+    );
+  });
+
   it("passes the finalized package to the persistence failure fallback", async () => {
     const onPersistenceFailure = vi.fn();
     const { controller, repository } = setup({ onPersistenceFailure });
@@ -278,6 +301,149 @@ describe("createRecordingController", () => {
     expect(controller.state.status).toBe("completed");
   });
 
+  it("falls back to an event-only package when media write fails", async () => {
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const mediaSource = vi.fn(async () => ({
+      blob: mediaBlob,
+      durationMs: 1_500,
+      mimeType: "video/webm",
+      hasAudio: true,
+      hasCamera: true,
+    }));
+    const { controller, repository } = setup({ mediaSource });
+    vi.mocked(repository.saveDraft).mockResolvedValueOnce({
+      ok: false,
+      reason: "media-write-failed",
+      message: "blob store failed",
+    });
+
+    await controller.start(makeStartPayload());
+    const pkg = await controller.stop("user");
+
+    expect(repository.saveDraft).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(repository.saveDraft).mock.calls[0][0].mediaBlob).toBe(mediaBlob);
+    expect(vi.mocked(repository.saveDraft).mock.calls[1][0].mediaBlob).toBeNull();
+    expect(repository.commits).toHaveLength(1);
+    expect(pkg.media).toBeNull();
+    expect(pkg.events.at(-1)).toMatchObject({
+      id: expect.stringMatching(/^e-/),
+      type: "media-warning",
+      payload: {
+        target: "recorder",
+        code: "recorder-error",
+      },
+    });
+    expect(controller.state.status).toBe("completed");
+  });
+
+  it("downloads an event-only fallback when media save fallback also fails", async () => {
+    const onPersistenceFailure = vi.fn();
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const mediaSource = vi.fn(async () => ({
+      blob: mediaBlob,
+      durationMs: 1_500,
+      mimeType: "video/webm",
+      hasAudio: true,
+      hasCamera: true,
+    }));
+    const { controller, repository } = setup({ mediaSource, onPersistenceFailure });
+    vi.mocked(repository.saveDraft)
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "media-write-failed",
+        message: "blob store failed",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "quota-exceeded",
+        message: "quota failed for event-only draft",
+      });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/save-draft-failed/);
+
+    expect(controller.state.status).toBe("failed");
+    expect(controller.state.lastError?.code).toBe("save-draft-failed");
+    expect(repository.commit).not.toHaveBeenCalled();
+    expect(onPersistenceFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaBlob: null,
+        pkg: expect.objectContaining({
+          media: null,
+          events: expect.arrayContaining([
+            expect.objectContaining({
+              id: expect.stringMatching(/^e-/),
+              type: "media-warning",
+            }),
+          ]),
+        }),
+        error: expect.any(Error),
+      }),
+    );
+  });
+
+  it("downloads an event-only fallback when media save fallback commit fails", async () => {
+    const onPersistenceFailure = vi.fn();
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const mediaSource = vi.fn(async () => ({
+      blob: mediaBlob,
+      durationMs: 1_500,
+      mimeType: "video/webm",
+      hasAudio: true,
+      hasCamera: true,
+    }));
+    const { controller, repository } = setup({ mediaSource, onPersistenceFailure });
+    vi.mocked(repository.saveDraft).mockResolvedValueOnce({
+      ok: false,
+      reason: "media-write-failed",
+      message: "blob store failed",
+    });
+    vi.mocked(repository.commit).mockResolvedValueOnce({
+      ok: false,
+      reason: "unknown",
+      message: "event-only commit failed",
+    });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/commit-failed/);
+
+    expect(controller.state.status).toBe("failed");
+    expect(controller.state.lastError?.code).toBe("commit-failed");
+    expect(onPersistenceFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaBlob: null,
+        pkg: expect.objectContaining({
+          media: null,
+          events: expect.arrayContaining([
+            expect.objectContaining({
+              id: expect.stringMatching(/^e-/),
+              type: "media-warning",
+            }),
+          ]),
+        }),
+        error: expect.any(Error),
+      }),
+    );
+  });
+
+  it("does not re-stringify package arrays during quota preflight", async () => {
+    const { controller, repository } = setup();
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    vi.mocked(repository.estimateQuota).mockImplementationOnce(async () => {
+      stringifySpy.mockClear();
+      return { usageBytes: 0, quotaBytes: 50 * 1024 * 1024 };
+    });
+
+    try {
+      await controller.start(makeStartPayload());
+      await controller.stop("user");
+
+      expect(stringifySpy).not.toHaveBeenCalled();
+    } finally {
+      stringifySpy.mockRestore();
+    }
+  });
+
   it("does not complete when commit fails", async () => {
     const { controller, repository } = setup();
     vi.mocked(repository.commit).mockResolvedValueOnce({
@@ -291,6 +457,27 @@ describe("createRecordingController", () => {
 
     expect(controller.state.status).toBe("failed");
     expect(controller.state.lastError?.code).toBe("commit-failed");
+  });
+
+  it("downloads fallback when commit fails", async () => {
+    const onPersistenceFailure = vi.fn();
+    const { controller, repository } = setup({ onPersistenceFailure });
+    vi.mocked(repository.commit).mockResolvedValueOnce({
+      ok: false,
+      reason: "unknown",
+      message: "transaction failed",
+    });
+
+    await controller.start(makeStartPayload());
+    await expect(controller.stop("user")).rejects.toThrow(/commit-failed/);
+
+    expect(onPersistenceFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pkg: expect.objectContaining({ meta: expect.objectContaining({ title: "title-x" }) }),
+        mediaBlob: null,
+        error: expect.any(Error),
+      }),
+    );
   });
 
   it("reset returns the controller to idle and disposes producers", async () => {
