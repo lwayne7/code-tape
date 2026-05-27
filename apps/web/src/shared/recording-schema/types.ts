@@ -608,8 +608,8 @@ export type IframeRuntime = {
 export type DeviceInfo = { deviceId: string; label: string; kind: "audioinput" | "videoinput" };
 
 export type OpenStreamRequest = {
-  audioDeviceId: string | null;
-  cameraDeviceId: string | null;
+  audioDeviceId?: string | null;
+  cameraDeviceId?: string | null;
 };
 
 export type OpenStreamResult = {

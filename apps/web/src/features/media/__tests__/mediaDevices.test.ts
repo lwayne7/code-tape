@@ -100,6 +100,60 @@ describe("createMediaDevicesController", () => {
     expect(result.capability.selectedCameraDeviceId).toBe("cam-1");
   });
 
+  it("openStream uses default devices when device ids are undefined", async () => {
+    const audioStream = makeFakeStream([makeFakeTrack("audio")]);
+    const cameraStream = makeFakeStream([makeFakeTrack("video")]);
+    const getUserMedia = vi.fn().mockResolvedValueOnce(audioStream).mockResolvedValueOnce(cameraStream);
+    const md = setupNavigator(getUserMedia);
+    const controller = createMediaDevicesController({ navigatorMediaDevices: md });
+
+    const result = await controller.openStream({});
+
+    expect(getUserMedia).toHaveBeenNthCalledWith(1, { audio: true, video: false });
+    expect(getUserMedia).toHaveBeenNthCalledWith(2, { audio: false, video: true });
+    expect(result.stream?.getAudioTracks()).toHaveLength(1);
+    expect(result.stream?.getVideoTracks()).toHaveLength(1);
+    expect(result.capability.selectedAudioDeviceId).toBeNull();
+    expect(result.capability.selectedCameraDeviceId).toBeNull();
+  });
+
+  it("openStream treats null device ids as disabled tracks without marking devices unsupported", async () => {
+    const audioStream = makeFakeStream([makeFakeTrack("audio")]);
+    const getUserMedia = vi.fn(async () => audioStream);
+    const md = setupNavigator(getUserMedia);
+    const controller = createMediaDevicesController({ navigatorMediaDevices: md });
+
+    const result = await controller.openStream({ audioDeviceId: "mic-1", cameraDeviceId: null });
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: { deviceId: { exact: "mic-1" } },
+      video: false,
+    });
+    expect(result.stream?.getAudioTracks()).toHaveLength(1);
+    expect(result.stream?.getVideoTracks()).toHaveLength(0);
+    expect(result.capability.audio).toBe("available");
+    expect(result.capability.camera).toBe("available");
+    expect(result.capability.selectedAudioDeviceId).toBe("mic-1");
+    expect(result.capability.selectedCameraDeviceId).toBeNull();
+  });
+
+  it("openStream returns event-only capability without getUserMedia when both tracks are null", async () => {
+    const getUserMedia = vi.fn();
+    const md = setupNavigator(getUserMedia);
+    const controller = createMediaDevicesController({ navigatorMediaDevices: md });
+
+    const result = await controller.openStream({ audioDeviceId: null, cameraDeviceId: null });
+
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(result.stream).toBeNull();
+    expect(result.warnings).toEqual([]);
+    expect(result.capability.audio).toBe("available");
+    expect(result.capability.camera).toBe("available");
+    expect(result.capability.selectedAudioDeviceId).toBeNull();
+    expect(result.capability.selectedCameraDeviceId).toBeNull();
+  });
+
   it("keeps the camera stream when the microphone request is denied", async () => {
     const cameraStream = makeFakeStream([makeFakeTrack("video")]);
     const denied = new Error("blocked by user");

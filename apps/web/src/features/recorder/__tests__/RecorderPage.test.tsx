@@ -26,6 +26,11 @@ const recorderPageMock = vi.hoisted(() => {
     getValue: vi.fn(() => editorValue.current),
     getModel: vi.fn(() => editorModel),
   };
+  const audioTrack = { kind: "audio" } as MediaStreamTrack;
+  const videoTrack = { kind: "video" } as MediaStreamTrack;
+  const getTracks = vi.fn(() => [audioTrack, videoTrack]);
+  const getAudioTracks = vi.fn(() => [audioTrack]);
+  const getVideoTracks = vi.fn(() => [videoTrack]);
   const setModelLanguage = vi.fn();
   const navigate = vi.fn();
   const trigger = vi.fn(async () => ({
@@ -82,9 +87,9 @@ const recorderPageMock = vi.hoisted(() => {
     dispose: vi.fn(),
   };
   const stream = {
-    getTracks: vi.fn(() => []),
-    getAudioTracks: vi.fn(() => []),
-    getVideoTracks: vi.fn(() => []),
+    getTracks,
+    getAudioTracks,
+    getVideoTracks,
   } as unknown as MediaStream;
   const devices = {
     enumerate: vi.fn<MediaDevicesController["enumerate"]>(async () => ({
@@ -194,6 +199,9 @@ const recorderPageMock = vi.hoisted(() => {
       navigate.mockClear();
       trigger.mockClear();
       flushPending.mockClear();
+      getTracks.mockClear();
+      getAudioTracks.mockClear();
+      getVideoTracks.mockClear();
       vi.mocked(editorProducer.start).mockClear();
       vi.mocked(editorProducer.pause).mockClear();
       vi.mocked(editorProducer.resume).mockClear();

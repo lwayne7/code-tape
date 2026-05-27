@@ -113,23 +113,22 @@ export function createMediaDevicesController(
 
       const nextCapability: MediaCapability = {
         ...capability,
-        audio: request.audioDeviceId === null ? "unsupported" : capability.audio,
-        camera: request.cameraDeviceId === null ? "unsupported" : capability.camera,
-        selectedAudioDeviceId: request.audioDeviceId,
-        selectedCameraDeviceId: request.cameraDeviceId,
+        selectedAudioDeviceId: request.audioDeviceId ?? null,
+        selectedCameraDeviceId: request.cameraDeviceId ?? null,
       };
       const streams: MediaStream[] = [];
 
       const openTrack = async (
         target: "audio" | "camera",
-        deviceId: string | null,
+        deviceId: string | null | undefined,
       ): Promise<void> => {
         if (deviceId === null) return;
         try {
+          const trackConstraint = deviceId === undefined ? true : { deviceId: { exact: deviceId } };
           const stream = await md.getUserMedia(
             target === "audio"
-              ? { audio: { deviceId: { exact: deviceId } }, video: false }
-              : { audio: false, video: { deviceId: { exact: deviceId } } },
+              ? { audio: trackConstraint, video: false }
+              : { audio: false, video: trackConstraint },
           );
           streams.push(stream);
           nextCapability[target] = "available";

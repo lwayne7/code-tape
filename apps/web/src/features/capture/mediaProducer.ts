@@ -152,11 +152,11 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
     },
     primeInitialState(input) {
       if (isPaused || isStopped) return;
-      const cameraPosition = normalizeCameraPosition(input.cameraPosition);
-      if (!cameraPosition) return;
       microphoneEnabled = input.microphoneEnabled;
       cameraEnabled = input.cameraEnabled;
       emitMediaToggle();
+      const cameraPosition = normalizeCameraPosition(input.cameraPosition);
+      if (!cameraPosition) return;
       emitCameraPosition(cameraPosition);
       lastPositionTime = clock.now();
     },

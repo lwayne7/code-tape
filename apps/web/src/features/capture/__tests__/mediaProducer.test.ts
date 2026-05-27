@@ -213,6 +213,26 @@ describe("createMediaProducer", () => {
     );
   });
 
+  it("should emit initial media-toggle even when the initial camera position is invalid", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+    mockBus.emit.mockClear();
+
+    producer.primeInitialState({
+      microphoneEnabled: true,
+      cameraEnabled: false,
+      cameraPosition: { x: Number.NaN, y: 0.75 },
+    });
+
+    expect(mockBus.emit).toHaveBeenCalledTimes(1);
+    expect(mockBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "media-toggle",
+        payload: { microphoneEnabled: true, cameraEnabled: false },
+      }),
+    );
+  });
+
   it("should ignore initial media priming while paused", () => {
     const producer = createMediaProducer(deps);
     producer.start();

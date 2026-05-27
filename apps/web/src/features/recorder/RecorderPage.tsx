@@ -62,6 +62,7 @@ type DeviceOptions = {
   loaded: boolean;
 };
 type DeviceList = Pick<DeviceOptions, "audio" | "camera">;
+type MediaOpenRequest = { audioDeviceId?: string | null; cameraDeviceId?: string | null };
 
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
@@ -355,8 +356,11 @@ export function RecorderPage() {
           media = eventOnlyMedia();
         }
       }
-      setMicrophoneEnabled(media.capability.audio === "available");
-      setCameraEnabled(media.capability.camera === "available");
+      const activeTracks = media.stream?.getTracks() ?? [];
+      const hasAudioTrack = activeTracks.some((track) => track.kind === "audio");
+      const hasCameraTrack = activeTracks.some((track) => track.kind === "video");
+      setMicrophoneEnabled(hasAudioTrack);
+      setCameraEnabled(hasCameraTrack);
       stack.setCurrentMediaCapability(media.capability);
 
       const payload: RecordStartPayload = {
@@ -370,8 +374,8 @@ export function RecorderPage() {
       try {
         await stack.controller.start(payload);
         stack.mediaProducer.primeInitialState({
-          microphoneEnabled: media.capability.audio === "available",
-          cameraEnabled: media.capability.camera === "available",
+          microphoneEnabled: hasAudioTrack,
+          cameraEnabled: hasCameraTrack,
           cameraPosition,
         });
         if (!isCurrentStart(startToken) && isActiveRecordingStatus(stack.controller.state.status)) {
@@ -550,13 +554,14 @@ export function RecorderPage() {
 
 async function openSelectedMedia(
   devices: MediaDevicesController,
-  request: { audioDeviceId: string | null; cameraDeviceId: string | null },
+  request: MediaOpenRequest,
 ): Promise<OpenStreamResult> {
   try {
-    if (!request.audioDeviceId && !request.cameraDeviceId) return eventOnlyMedia();
+    if (request.audioDeviceId === null && request.cameraDeviceId === null) return eventOnlyMedia();
 
     const result = await devices.openStream(request);
-    if (!result.stream) {
+    const requestedAnyTrack = request.audioDeviceId !== null || request.cameraDeviceId !== null;
+    if (!result.stream && requestedAnyTrack) {
       devices.release();
       return result;
     }

@@ -192,4 +192,25 @@ describe("IframeRuntime sandbox lifecycle", () => {
     runtime.destroy();
     host.remove();
   });
+
+  it("keeps the mounted host usable after reset", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.renderPreview("<body><p>first</p></body>");
+    runtime.reset();
+    expect(host.querySelector("iframe")).toBeNull();
+
+    await runtime.renderPreview("<body><p>second</p></body>");
+    expect(host.querySelector("iframe")?.srcdoc).toContain("second");
+
+    runtime.reset();
+    await runtime.run({ runId: "run-after-reset", compiledCode: "", timeoutMs: 1 });
+    expect(host.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+
+    runtime.destroy();
+    host.remove();
+  });
 });
