@@ -942,6 +942,14 @@ test('root package exposes complete quality gate scripts', () => {
   assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
 
+test('api package test script runs compiled tests without shell glob expansion', () => {
+  const pkg = JSON.parse(readFileSync('apps/api/package.json', 'utf8'));
+
+  assert.equal(pkg.scripts.test, 'npm run build && node scripts/run-dist-tests.mjs');
+  assert.doesNotMatch(pkg.scripts.test, /\*\*/);
+  assert.ok(existsSync('apps/api/scripts/run-dist-tests.mjs'));
+});
+
 test('agent prompts separate commit and push quality gates', () => {
   const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
   const claudePrompt = readFileSync('CLAUDE.md', 'utf8');

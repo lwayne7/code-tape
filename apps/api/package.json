@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test \"dist/**/*.test.js\""
+    "test": "npm run build && node scripts/run-dist-tests.mjs"
   },
   "dependencies": {
     "@code-tape/recording-schema": "0.0.0"
