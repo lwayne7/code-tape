@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createMediaClockAdapter } from "../mediaClockAdapter";
 import { createReplayScheduler } from "../replayScheduler";
 import { createTimelineClock } from "../timelineClock";
 import { buildInitialState } from "../initialState";
 import { replayReducer } from "../replayReducer";
 import type {
+  MediaClockAdapter,
   RecordingEvent,
   RecordingPackageV1,
   RecordingSnapshot,
+  ReplaySchedulerState,
   ReplayStableState,
 } from "@/shared/recording-schema";
 import { RECORDING_SCHEMA_VERSION } from "@/shared/recording-schema";
@@ -44,7 +47,12 @@ function shortcut(seq: number, t: number): RecordingEvent {
   };
 }
 
-function makePkg(events: RecordingEvent[], snapshots: RecordingSnapshot[] = [], durationMs = 10_000): RecordingPackageV1 {
+function makePkg(
+  events: RecordingEvent[],
+  snapshots: RecordingSnapshot[] = [],
+  durationMs = 10_000,
+  withMedia = false,
+): RecordingPackageV1 {
   return {
     schemaVersion: RECORDING_SCHEMA_VERSION,
     manifest: {
@@ -75,7 +83,17 @@ function makePkg(events: RecordingEvent[], snapshots: RecordingSnapshot[] = [], 
     },
     events,
     snapshots,
-    media: null,
+    media: withMedia
+      ? {
+          blobId: "media-1",
+          mimeType: "video/webm",
+          durationMs,
+          sizeBytes: 1024,
+          timelineOffsetMs: 0,
+          hasAudio: true,
+          hasCamera: true,
+        }
+      : null,
   };
 }
 
@@ -86,6 +104,56 @@ function replayFromZeroTo(pkg: RecordingPackageV1, targetMs: number): ReplayStab
     state = replayReducer(state, event);
   }
   return state;
+}
+
+type TestMediaAdapter = MediaClockAdapter & {
+  getStatus(): ReplaySchedulerState["mediaStatus"];
+  getCurrentTimeSec(): number | null;
+  flushPendingSeek?(): Promise<void>;
+};
+
+function testMediaAdapter({
+  currentTimeSec,
+  status = "ready",
+  seek = vi.fn(async () => {}),
+}: {
+  currentTimeSec: () => number | null;
+  status?: ReplaySchedulerState["mediaStatus"];
+  seek?: (targetTimeMs: number) => Promise<void>;
+}): TestMediaAdapter {
+  return {
+    segments: [
+      {
+        blobId: "media-1",
+        timelineStartMs: 0,
+        timelineEndMs: 10_000,
+        mediaStartMs: 0,
+        mediaEndMs: 10_000,
+      },
+    ],
+    timelineToMediaTime(targetTimeMs) {
+      return targetTimeMs;
+    },
+    mediaToTimelineTime(mediaCurrentTimeSec) {
+      return mediaCurrentTimeSec * 1000;
+    },
+    seek,
+    setRate: vi.fn(),
+    getStatus: () => status,
+    getCurrentTimeSec: currentTimeSec,
+    flushPendingSeek: vi.fn(async () => {}),
+  };
+}
+
+function watchState(scheduler: { subscribe(listener: (state: ReplaySchedulerState) => void): () => void }) {
+  let latest: ReplaySchedulerState | null = null;
+  scheduler.subscribe((state) => {
+    latest = state;
+  });
+  return () => {
+    if (!latest) throw new Error("scheduler did not publish state");
+    return latest;
+  };
 }
 
 describe("createReplayScheduler", () => {
@@ -184,5 +252,503 @@ describe("createReplayScheduler", () => {
     scheduler.tick();
     expect(scheduler.getStableState().editor.code).toBe("a");
     expect(seen).toContain("ended");
+  });
+
+  it("uses ready media currentTime as the main replay clock", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => mediaCurrentTimeSec,
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1000, "media-driven")], [], 5000, true));
+
+    scheduler.play();
+    wall = 1250;
+    mediaCurrentTimeSec = 1.2;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("ready");
+    expect(latest().timelineTimeMs).toBe(1200);
+    expect(latest().driftMs).toBe(50);
+    expect(scheduler.getStableState().editor.code).toBe("media-driven");
+  });
+
+  it("uses the production media adapter to map HTMLMediaElement seconds to timeline milliseconds", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 0,
+          timelineEndMs: 5000,
+          mediaStartMs: 0,
+          mediaEndMs: 5000,
+        },
+      ],
+      currentTimeProvider: () => 1.2,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.play();
+    wall = 1250;
+    scheduler.tick();
+
+    expect(latest().timelineTimeMs).toBe(1200);
+    expect(latest().driftMs).toBe(50);
+  });
+
+  it("uses the timeline clock before an offset media segment starts", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 1000,
+          timelineEndMs: 2000,
+          mediaStartMs: 0,
+          mediaEndMs: 1000,
+        },
+      ],
+      currentTimeProvider: () => 0,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(
+      makePkg([content(1, 500, "before-media"), content(2, 1000, "media-start")], [], 5000, true),
+    );
+
+    scheduler.play();
+    wall = 500;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("ready");
+    expect(latest().timelineTimeMs).toBe(500);
+    expect(latest().driftMs).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("before-media");
+  });
+
+  it("keeps applying pure events after the media segment ends", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 1000,
+          timelineEndMs: 2000,
+          mediaStartMs: 0,
+          mediaEndMs: 1000,
+        },
+      ],
+      currentTimeProvider: () => 1,
+      statusProvider: () => "ready",
+    });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 2400, "after-media")], [], 5000, true));
+
+    scheduler.play();
+    wall = 2500;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("ready");
+    expect(latest().timelineTimeMs).toBe(2500);
+    expect(latest().driftMs).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("after-media");
+  });
+
+  it("rolls stable state back when media currentTime moves backward", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => mediaCurrentTimeSec,
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1000, "after-event")], [], 5000, true));
+
+    scheduler.play();
+    wall = 1200;
+    mediaCurrentTimeSec = 1.2;
+    scheduler.tick();
+    expect(scheduler.getStableState().editor.code).toBe("after-event");
+
+    wall = 500;
+    mediaCurrentTimeSec = 0.5;
+    scheduler.tick();
+
+    expect(latest().timelineTimeMs).toBe(500);
+    expect(latest().lastAppliedSeq).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("");
+  });
+
+  it("does not seek media to stale clock time when stalled media becomes ready", async () => {
+    let wall = 0;
+    let schedulerWall = 0;
+    let mediaStatus: ReplaySchedulerState["mediaStatus"] = "ready";
+    let mediaCurrentTimeSec = 1;
+    const seek = vi.fn(async () => {});
+    const adapter = testMediaAdapter({
+      currentTimeSec: () => mediaCurrentTimeSec,
+      seek,
+    });
+    adapter.getStatus = () => mediaStatus;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+      wallNow: () => schedulerWall,
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1500, "skipped")], [], 5000, true));
+
+    scheduler.play();
+    wall = 1000;
+    scheduler.tick();
+    mediaStatus = "stalled";
+    scheduler.tick();
+    wall = 2000;
+    schedulerWall = 700;
+    scheduler.tick();
+    mediaStatus = "ready";
+    mediaCurrentTimeSec = 1;
+    scheduler.setMediaAdapter(adapter as never);
+    scheduler.tick();
+
+    expect(seek).not.toHaveBeenCalled();
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(scheduler.getStableState().editor.code).toBe("");
+  });
+
+  it("falls back to the timeline clock when package media is missing", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 300, "timeline-fallback")], [], 5000, true));
+
+    scheduler.play();
+    wall = 400;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("missing");
+    expect(latest().timelineTimeMs).toBe(400);
+    expect(scheduler.getStableState().editor.code).toBe("timeline-fallback");
+  });
+
+  it("records drift and asks the media adapter to correct large drift", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const seek = vi.fn(async () => {});
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => mediaCurrentTimeSec,
+        seek,
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.play();
+    wall = 1600;
+    mediaCurrentTimeSec = 1;
+    scheduler.tick();
+
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(latest().driftMs).toBe(600);
+    expect(seek).toHaveBeenCalledWith(1600);
+  });
+
+  it("clears stale drift after seek completes", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => mediaCurrentTimeSec,
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.play();
+    wall = 1600;
+    mediaCurrentTimeSec = 1;
+    scheduler.tick();
+    expect(latest().driftMs).toBe(600);
+
+    await scheduler.seek(1200);
+
+    expect(latest().timelineTimeMs).toBe(1200);
+    expect(latest().driftMs).toBe(0);
+  });
+
+  it("does not apply events beyond duration when ending after a clock overshoot", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1200, "past-duration")], [], 1000));
+
+    scheduler.play();
+    wall = 1500;
+    scheduler.tick();
+
+    expect(latest().status).toBe("ended");
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(latest().lastAppliedSeq).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("");
+  });
+
+  it("restores playback after seek when replay was playing", async () => {
+    let wall = 0;
+    const start = vi.fn();
+    const stop = vi.fn();
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start, stop },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1000, "after-seek")], [], 5000));
+
+    scheduler.play();
+    await scheduler.seek(900);
+
+    expect(latest().status).toBe("playing");
+    expect(start).toHaveBeenCalledTimes(2);
+
+    wall = 300;
+    scheduler.tick();
+
+    expect(latest().timelineTimeMs).toBe(1200);
+    expect(scheduler.getStableState().editor.code).toBe("after-seek");
+  });
+
+  it("keeps replay paused after seek when replay was paused", async () => {
+    const scheduler = createReplayScheduler({
+      tickStrategy: { start: vi.fn(), stop: vi.fn() },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 1000, "paused-seek")], [], 5000));
+
+    await scheduler.seek(1200);
+
+    expect(latest().status).toBe("paused");
+    expect(scheduler.getStableState().editor.code).toBe("paused-seek");
+  });
+
+  it("handles rejected async media operations during ready ticks", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const flushError = new Error("flush failed");
+    const seekError = new Error("seek failed");
+    const seek = vi.fn(async () => {
+      throw seekError;
+    });
+    const adapter = testMediaAdapter({
+      currentTimeSec: () => mediaCurrentTimeSec,
+      seek,
+    });
+    adapter.flushPendingSeek = vi.fn(async () => {
+      throw flushError;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: adapter as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+
+    await scheduler.load(makePkg([], [], 5000, true));
+    scheduler.play();
+    wall = 500;
+    mediaCurrentTimeSec = 0;
+    scheduler.tick();
+    await Promise.resolve();
+
+    try {
+      expect(warn).toHaveBeenCalledWith(
+        "[replay-scheduler] media operation failed:",
+        flushError,
+      );
+      expect(warn).toHaveBeenCalledWith("[replay-scheduler] media operation failed:", seekError);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("enters buffering and stops applying events after media is stalled for 500ms", async () => {
+    let wall = 0;
+    let schedulerWall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => 0,
+        status: "stalled",
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+      wallNow: () => schedulerWall,
+    } as never);
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 100, "should-not-advance")], [], 5000, true));
+
+    scheduler.play();
+    wall = 700;
+    scheduler.tick();
+    schedulerWall = 600;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("stalled");
+    expect(latest().status).toBe("buffering");
+    expect(latest().timelineTimeMs).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("");
+  });
+
+  it("exposes a pure-event fallback callback after media is stalled for 2s", async () => {
+    const wall = 0;
+    let schedulerWall = 0;
+    const onMediaFallbackReady = vi.fn();
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => 0,
+        status: "stalled",
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+      wallNow: () => schedulerWall,
+      onMediaFallbackReady,
+    } as never);
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.play();
+    scheduler.tick();
+    schedulerWall = 2100;
+    scheduler.tick();
+    scheduler.tick();
+
+    expect(onMediaFallbackReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets stalled media timers when loading a new package", async () => {
+    const wall = 0;
+    let schedulerWall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => 0,
+        status: "stalled",
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+      wallNow: () => schedulerWall,
+    } as never);
+    const latest = watchState(scheduler);
+
+    await scheduler.load(makePkg([], [], 5000, true));
+    scheduler.play();
+    scheduler.tick();
+    schedulerWall = 700;
+    scheduler.tick();
+    expect(latest().status).toBe("buffering");
+
+    await scheduler.load(makePkg([], [], 5000, true));
+    scheduler.play();
+    scheduler.tick();
+
+    expect(latest().status).toBe("playing");
+  });
+
+  it("flushes a pending media seek when metadata becomes ready while replay is paused", async () => {
+    let metadataReady = false;
+    const seekHandler = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments: [
+        {
+          blobId: "media-1",
+          timelineStartMs: 0,
+          timelineEndMs: 5000,
+          mediaStartMs: 0,
+          mediaEndMs: 5000,
+        },
+      ],
+      metadataReadyProvider: () => metadataReady,
+      statusProvider: () => (metadataReady ? "ready" : "loading"),
+      seekHandler,
+    });
+    const scheduler = createReplayScheduler({
+      mediaAdapter: adapter,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    await scheduler.seek(1800);
+    expect(seekHandler).not.toHaveBeenCalled();
+
+    metadataReady = true;
+    scheduler.setMediaAdapter(adapter);
+
+    expect(seekHandler).toHaveBeenCalledWith(adapter.segments[0], 1800);
+  });
+
+  it("applies the current playback rate when a media adapter is attached", async () => {
+    const setRate = vi.fn();
+    const adapter = testMediaAdapter({
+      currentTimeSec: () => 0,
+      status: "ready",
+    });
+    adapter.setRate = setRate;
+    const scheduler = createReplayScheduler({
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    await scheduler.load(makePkg([], [], 5000, true));
+
+    scheduler.setRate(2);
+    scheduler.setMediaAdapter(adapter as never);
+
+    expect(setRate).toHaveBeenCalledWith(2);
   });
 });

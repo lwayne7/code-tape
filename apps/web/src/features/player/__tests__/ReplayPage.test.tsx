@@ -69,6 +69,7 @@ const replayPageMock = vi.hoisted(() => {
     setRate: vi.fn(),
     setVolume: vi.fn(),
     setMuted: vi.fn(),
+    setMediaAdapter: vi.fn(),
     destroy: vi.fn(),
     subscribe: vi.fn((listener: (state: typeof schedulerState) => void) => {
       listener(schedulerState);
@@ -102,6 +103,7 @@ const replayPageMock = vi.hoisted(() => {
       scheduler.setRate.mockClear();
       scheduler.setVolume.mockClear();
       scheduler.setMuted.mockClear();
+      scheduler.setMediaAdapter.mockClear();
       scheduler.destroy.mockClear();
       scheduler.subscribe.mockClear();
       schedulerState.status = "ready";
@@ -171,30 +173,37 @@ describe("ReplayPage", () => {
   });
 
   it("wires replay control callbacks to scheduler commands", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const { ReplayPage } = await import("../ReplayPage");
 
-    render(<ReplayPage />);
+    try {
+      render(<ReplayPage />);
 
-    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
-    expect(replayPageMock.controlsProps?.durationMs).toBe(120_000);
+      await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+      expect(replayPageMock.controlsProps?.durationMs).toBe(120_000);
 
-    await act(async () => {
-      await replayPageMock.controlsProps?.onSeek(42_000);
-    });
-    act(() => {
-      replayPageMock.controlsProps?.onPlay();
-      replayPageMock.controlsProps?.onRate(1.5);
-      replayPageMock.controlsProps?.onVolume(35);
-      replayPageMock.controlsProps?.onMuted(true);
-    });
+      await act(async () => {
+        await replayPageMock.controlsProps?.onSeek(42_000);
+      });
+      act(() => {
+        replayPageMock.controlsProps?.onPlayPause();
+        replayPageMock.controlsProps?.onRate(1.5);
+        replayPageMock.controlsProps?.onVolume(35);
+        replayPageMock.controlsProps?.onMuted(true);
+      });
 
-    expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(42_000);
-    expect(replayPageMock.scheduler.play).toHaveBeenCalledTimes(1);
-    expect(replayPageMock.scheduler.setRate).toHaveBeenCalledWith(1.5);
-    expect(replayPageMock.scheduler.setVolume).toHaveBeenCalledWith(35);
-    expect(replayPageMock.scheduler.setMuted).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(replayPageMock.controlsProps?.volume).toBe(35));
-    expect(replayPageMock.controlsProps?.muted).toBe(true);
+      expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(42_000);
+      expect(replayPageMock.scheduler.play).toHaveBeenCalledTimes(1);
+      expect(replayPageMock.scheduler.setRate).toHaveBeenCalledWith(1.5);
+      expect(replayPageMock.scheduler.setVolume).toHaveBeenCalledWith(35);
+      expect(replayPageMock.scheduler.setMuted).toHaveBeenCalledWith(true);
+      await waitFor(() => expect(replayPageMock.controlsProps?.volume).toBe(35));
+      expect(replayPageMock.controlsProps?.muted).toBe(true);
+    } finally {
+      play.mockRestore();
+      pause.mockRestore();
+    }
   });
 
   it("renders scheduler stable state into the read-only editor and runtime panel", async () => {
@@ -354,6 +363,29 @@ describe("ReplayPage", () => {
     pause.mockRestore();
   });
 
+  it("attaches a media adapter before loading a package with a media blob", async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() =>
+      expect(replayPageMock.scheduler.setMediaAdapter.mock.calls.some(([adapter]) => adapter)).toBe(
+        true,
+      ),
+    );
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    const firstAdapterCallIndex = replayPageMock.scheduler.setMediaAdapter.mock.calls.findIndex(
+      ([adapter]) => adapter,
+    );
+    const adapterAttachOrder =
+      replayPageMock.scheduler.setMediaAdapter.mock.invocationCallOrder[firstAdapterCallIndex];
+    const loadOrder = replayPageMock.scheduler.load.mock.invocationCallOrder[0];
+
+    expect(adapterAttachOrder).toBeLessThan(loadOrder);
+    pause.mockRestore();
+  });
+
   it("keeps the scheduler subscription alive when the replay id changes", async () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const { ReplayPage } = await import("../ReplayPage");
@@ -449,6 +481,26 @@ describe("ReplayPage", () => {
 
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
+    play.mockRestore();
+    pause.mockRestore();
+  });
+
+  it("pauses replay from the control gesture while buffering", async () => {
+    replayPageMock.schedulerState.status = "buffering";
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    act(() => {
+      replayPageMock.controlsProps?.onPlayPause();
+    });
+
+    expect(replayPageMock.scheduler.pause).toHaveBeenCalledTimes(1);
+    expect(replayPageMock.scheduler.play).not.toHaveBeenCalled();
+
     play.mockRestore();
     pause.mockRestore();
   });

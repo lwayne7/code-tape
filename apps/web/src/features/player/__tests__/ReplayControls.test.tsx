@@ -75,7 +75,6 @@ function renderControls(overrides: Partial<ReplayControlsProps> = {}) {
     state: state("ready"),
     durationMs: 120_000,
     onPlayPause: vi.fn(),
-    onPlay: vi.fn(),
     onSeek: vi.fn(),
     onRate: vi.fn(),
     volume: 80,
@@ -149,12 +148,10 @@ describe("ReplayControls", () => {
     "disables progress seeking while status is %s",
     (status) => {
       const onSeek = vi.fn();
-      const onPlay = vi.fn();
       renderControls({
         state: state(status, { timelineTimeMs: 20_000 }),
         durationMs: 100_000,
         onSeek,
-        onPlay,
       });
 
       const progressSlider = screen.getByRole("slider", { name: "播放进度" });
@@ -164,15 +161,13 @@ describe("ReplayControls", () => {
       fireEvent.mouseUp(progressSlider);
 
       expect(onSeek).not.toHaveBeenCalled();
-      expect(onPlay).not.toHaveBeenCalled();
     },
   );
 
   describe("handleSliderCommit logic", () => {
-    it("updates preview locally while dragging and seeks only on commit", async () => {
+    it("updates preview locally while dragging and delegates seek without forcing playback", async () => {
       const onSeek = vi.fn();
-      const onPlay = vi.fn();
-      renderControls({ durationMs: 100_000, onSeek, onPlay });
+      renderControls({ durationMs: 100_000, onSeek });
 
       const progressSlider = screen.getByRole("slider", { name: "播放进度" });
       fireEvent.change(progressSlider, { target: { value: "25" } });
@@ -183,10 +178,9 @@ describe("ReplayControls", () => {
       fireEvent.mouseUp(progressSlider);
 
       await waitFor(() => expect(onSeek).toHaveBeenCalledWith(25_000));
-      expect(onPlay).toHaveBeenCalledTimes(1);
     });
 
-    it("waits for async seek before auto-playing", async () => {
+    it("does not issue playback while an async seek is pending", async () => {
       let resolveSeek: () => void = () => {};
       const onSeek = vi.fn(
         () =>
@@ -194,21 +188,17 @@ describe("ReplayControls", () => {
             resolveSeek = resolve;
           }),
       );
-      const onPlay = vi.fn();
-      renderControls({ durationMs: 120_000, onSeek, onPlay });
+      renderControls({ durationMs: 120_000, onSeek });
 
       const progressSlider = screen.getByRole("slider", { name: "播放进度" });
       fireEvent.change(progressSlider, { target: { value: "50" } });
       fireEvent.mouseUp(progressSlider);
 
       expect(onSeek).toHaveBeenCalledWith(60_000);
-      expect(onPlay).not.toHaveBeenCalled();
 
       await act(async () => {
         resolveSeek();
       });
-
-      expect(onPlay).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-26T14:38:33Z",
+  "updatedAt": "2026-05-27T01:19:18Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 76,
+      "activeIssue": 78,
       "completedIssues": [
         11,
         10,
@@ -11,7 +11,8 @@
         40,
         55,
         56,
-        65
+        65,
+        76
       ],
       "reviewedIssues": [
         4,
@@ -22,10 +23,10 @@
         59
       ],
       "bugPenalties": [],
-      "developmentScore": 13.5,
+      "developmentScore": 17.25,
       "reviewScore": 2.5,
       "penaltyScore": 0,
-      "totalScore": 16
+      "totalScore": 19.75
     },
     "MINTPIPERAS": {
       "activeIssue": null,
@@ -75,13 +76,14 @@
       "reviewedIssues": [
         10,
         40,
-        55
+        55,
+        76
       ],
       "bugPenalties": [],
       "developmentScore": 7,
-      "reviewScore": 2.5,
+      "reviewScore": 3.75,
       "penaltyScore": 0,
-      "totalScore": 9.5
+      "totalScore": 10.75
     },
     "JunMang01": {
       "activeIssue": null,
@@ -350,11 +352,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-26T14:35:21Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-27T01:09:35Z",
+      "mergedPr": 80
     },
     "77": {
       "number": 77,
@@ -367,6 +369,20 @@
       "status": "claimed",
       "assignee": "yangchloeeeee",
       "claimedAt": "2026-05-26T14:38:33Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "78": {
+      "number": 78,
+      "title": "[P0] 录制到回放主链路 Playwright e2e",
+      "score": 5,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-27T01:19:18Z",
       "closedAt": null,
       "mergedPr": null
     },
@@ -655,6 +671,18 @@
       "developerDelta": 2.25,
       "reviewerDelta": 0.75,
       "createdAt": "2026-05-26T06:53:35Z"
+    },
+    {
+      "id": "pr-80-merge",
+      "type": "feature_merge",
+      "issue": 76,
+      "pr": 80,
+      "score": 5,
+      "developer": "ceilf6",
+      "reviewer": "yangchloeeeee",
+      "developerDelta": 3.75,
+      "reviewerDelta": 1.25,
+      "createdAt": "2026-05-27T01:09:35Z"
     }
   ]
 }

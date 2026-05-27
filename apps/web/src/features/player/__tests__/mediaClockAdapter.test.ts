@@ -31,4 +31,64 @@ describe("createMediaClockAdapter", () => {
     await adapter.seek(1800);
     expect(seek).toHaveBeenCalledWith(segments[1], 1300);
   });
+
+  it("holds seek until metadata is ready, then flushes the pending media time", async () => {
+    let metadataReady = false;
+    const seek = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments,
+      seekHandler: seek,
+      metadataReadyProvider: () => metadataReady,
+    });
+
+    await adapter.seek(1800);
+    expect(seek).not.toHaveBeenCalled();
+
+    metadataReady = true;
+    await adapter.flushPendingSeek();
+
+    expect(seek).toHaveBeenCalledWith(segments[1], 1300);
+  });
+
+  it("does not flush the same pending seek twice while an async seek is in flight", async () => {
+    let metadataReady = false;
+    let resolveSeek!: () => void;
+    const seek = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSeek = resolve;
+        }),
+    );
+    const adapter = createMediaClockAdapter({
+      segments,
+      seekHandler: seek,
+      metadataReadyProvider: () => metadataReady,
+    });
+
+    await adapter.seek(1800);
+    metadataReady = true;
+    const firstFlush = adapter.flushPendingSeek();
+    const secondFlush = adapter.flushPendingSeek();
+
+    expect(seek).toHaveBeenCalledTimes(1);
+    resolveSeek();
+    await Promise.all([firstFlush, secondFlush]);
+  });
+
+  it("cancels a pending seek when the latest seek lands outside media segments", async () => {
+    let metadataReady = false;
+    const seek = vi.fn();
+    const adapter = createMediaClockAdapter({
+      segments,
+      seekHandler: seek,
+      metadataReadyProvider: () => metadataReady,
+    });
+
+    await adapter.seek(500);
+    await adapter.seek(1200);
+    metadataReady = true;
+    await adapter.flushPendingSeek();
+
+    expect(seek).not.toHaveBeenCalled();
+  });
 });
