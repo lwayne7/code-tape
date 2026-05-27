@@ -1,10 +1,11 @@
-import { cloneState } from "@/features/player/initialState";
-import { replayReducer, STABLE_EVENT_TYPES } from "@/features/player/replayReducer";
-import type {
-  RecordingEvent,
-  RecordingSnapshot,
-  RecordStartPayload,
-  ReplayStableState,
+import {
+  buildInitialReplayStateFromRecordStart,
+  cloneReplayStableState,
+  replayReducer,
+  STABLE_EVENT_TYPES,
+  type RecordingEvent,
+  type RecordingSnapshot,
+  type ReplayStableState,
 } from "@/shared/recording-schema";
 import { generateId } from "@/shared/util/ids";
 
@@ -40,7 +41,7 @@ export function createSnapshotBuilder(): SnapshotBuilder {
       id: generateId("snap"),
       timestampMs: event.timestampMs,
       eventSeq: event.seq,
-      state: cloneState(state),
+      state: cloneReplayStableState(state),
     });
     lastSnapshotTimestampMs = event.timestampMs;
     lastSnapshotSeq = event.seq;
@@ -49,14 +50,14 @@ export function createSnapshotBuilder(): SnapshotBuilder {
   const getSnapshots = () =>
     snapshots.map((snapshot) => ({
       ...snapshot,
-      state: cloneState(snapshot.state),
+      state: cloneReplayStableState(snapshot.state),
     }));
 
   return {
     apply(event) {
       lastEvent = event;
       if (event.type === "record-start") {
-        state = initialStateFromRecordStart(event.payload);
+        state = buildInitialReplayStateFromRecordStart(event.payload);
         capture(event);
         return;
       }
@@ -89,34 +90,6 @@ export function createSnapshotBuilder(): SnapshotBuilder {
       lastSnapshotSeq = 0;
       stableEventsSinceSnapshot = 0;
       snapshots.length = 0;
-    },
-  };
-}
-
-function initialStateFromRecordStart(payload: RecordStartPayload): ReplayStableState {
-  return {
-    editor: {
-      code: "",
-      language: payload.initialLanguage,
-      cursor: null,
-      selection: null,
-      scrollTop: 0,
-      scrollLeft: 0,
-      fontSize: payload.initialFontSize,
-      theme: payload.initialTheme,
-    },
-    pointer: null,
-    media: {
-      microphoneEnabled: false,
-      cameraEnabled: false,
-      cameraPosition: { x: 0, y: 0 },
-    },
-    runtime: {
-      status: "idle",
-      stdout: [],
-      stderr: [],
-      previewHtml: null,
-      errorMessage: null,
     },
   };
 }
