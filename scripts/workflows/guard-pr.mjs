@@ -53,7 +53,7 @@ export function evaluatePrGuard({
     latestCommitAt: pr.latestCommitAt,
   });
   if (!reviewer) {
-    reasons.push('PR needs CR通过 from the first eligible non-author PR commenter');
+    reasons.push('PR needs CR通过 from the first eligible non-author PR reviewer');
   }
 
   if (isTimedOut(pr.createdAt, now)) {

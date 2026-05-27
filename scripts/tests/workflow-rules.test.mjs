@@ -194,6 +194,90 @@ test('findValidReviewer accepts CR pass from the claimed reviewer in a PR review
   );
 });
 
+test('findValidReviewer accepts review submission claim and pass without issue comments', () => {
+  const reviews = [
+    {
+      user: { login: 'alice', type: 'User' },
+      state: 'APPROVED',
+      body: 'CR认领',
+      submitted_at: '2026-05-22T10:05:00.000Z',
+    },
+    {
+      user: { login: 'alice', type: 'User' },
+      state: 'APPROVED',
+      body: 'CR通过',
+      submitted_at: '2026-05-22T10:30:00.000Z',
+    },
+  ];
+
+  assert.equal(
+    findValidReviewer({
+      reviews,
+      comments: [],
+      prAuthor: 'carol',
+      latestCommitAt: '2026-05-22T11:00:00.000Z',
+    }),
+    'alice',
+  );
+});
+
+test('findValidReviewer accepts review submission CR pass as its own claim', () => {
+  const reviews = [
+    {
+      user: { login: 'alice', type: 'User' },
+      state: 'APPROVED',
+      body: 'CR通过',
+      submitted_at: '2026-05-22T10:30:00.000Z',
+    },
+  ];
+
+  assert.equal(
+    findValidReviewer({
+      reviews,
+      comments: [],
+      prAuthor: 'carol',
+      latestCommitAt: '2026-05-22T11:00:00.000Z',
+    }),
+    'alice',
+  );
+});
+
+test('findValidReviewer ignores repo guard and merge confirmation when claiming reviewer', () => {
+  const comments = [
+    { user: { login: 'maintainer', type: 'User' }, body: '确认合并', created_at: '2026-05-22T10:40:00.000Z' },
+  ];
+  const reviews = [
+    {
+      user: { login: 'maintainer', type: 'User' },
+      state: 'APPROVED',
+      body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n自动评审报告',
+      submitted_at: '2026-05-22T10:01:00.000Z',
+    },
+    {
+      user: { login: 'alice', type: 'User' },
+      state: 'APPROVED',
+      body: 'CR认领',
+      submitted_at: '2026-05-22T10:05:00.000Z',
+    },
+    {
+      user: { login: 'alice', type: 'User' },
+      state: 'APPROVED',
+      body: 'CR通过',
+      submitted_at: '2026-05-22T10:30:00.000Z',
+    },
+  ];
+
+  assert.equal(
+    findValidReviewer({
+      reviews,
+      comments,
+      prAuthor: 'carol',
+      latestCommitAt: '2026-05-22T11:00:00.000Z',
+    }),
+    'alice',
+  );
+});
+
 test('findValidReviewer accepts CR pass from the claimed reviewer in an inline review comment', () => {
   const comments = [
     { user: { login: 'alice', type: 'User' }, body: 'CR认领', created_at: '2026-05-22T10:05:00.000Z' },

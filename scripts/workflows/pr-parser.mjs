@@ -1,4 +1,6 @@
 const closingKeywordPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi;
+const crClaimSignals = new Set(['CR认领', 'CR通过']);
+const ignoredClaimBodies = new Set(['确认合并']);
 const ignoredReviewerLogins = new Set(['github-actions[bot]']);
 
 export function parseClosingIssues(body = '') {
@@ -21,12 +23,16 @@ function commentLogin(comment) {
   return comment?.user?.login;
 }
 
+function commentBody(comment) {
+  return comment?.body?.trim() ?? '';
+}
+
 function commentCreatedAt(comment) {
-  return comment?.created_at || comment?.createdAt;
+  return comment?.created_at || comment?.createdAt || comment?.submitted_at || comment?.submittedAt;
 }
 
 function hasCrPassFrom(items, login) {
-  return items.some((item) => commentLogin(item) === login && item?.body?.trim() === 'CR通过');
+  return items.some((item) => commentLogin(item) === login && commentBody(item) === 'CR通过');
 }
 
 function isEligibleReviewerComment(comment, prAuthor) {
@@ -35,16 +41,36 @@ function isEligibleReviewerComment(comment, prAuthor) {
   return Boolean(login) && login !== prAuthor && type !== 'Bot' && !ignoredReviewerLogins.has(login);
 }
 
-export function findClaimedReviewer({ comments = [], prAuthor }) {
-  const sortedComments = [...comments].sort(
-    (a, b) => Date.parse(commentCreatedAt(a)) - Date.parse(commentCreatedAt(b)),
-  );
-  const claimedComment = sortedComments.find((comment) => isEligibleReviewerComment(comment, prAuthor));
-  return commentLogin(claimedComment) ?? null;
+function isWorkflowMaintenanceComment(comment) {
+  const body = commentBody(comment);
+  return ignoredClaimBodies.has(body) || body.includes('repo-guard');
+}
+
+function eventTime(comment) {
+  const timestamp = Date.parse(commentCreatedAt(comment) ?? '');
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
+}
+
+function isEligibleClaimComment(comment, prAuthor) {
+  return isEligibleReviewerComment(comment, prAuthor) && !isWorkflowMaintenanceComment(comment);
+}
+
+function isEligibleReviewClaim(review, prAuthor) {
+  return isEligibleClaimComment(review, prAuthor) && crClaimSignals.has(commentBody(review));
+}
+
+export function findClaimedReviewer({ comments = [], reviews = [], reviewComments = [], prAuthor }) {
+  const claimEvents = [
+    ...comments.filter((comment) => isEligibleClaimComment(comment, prAuthor)),
+    ...reviews.filter((review) => isEligibleReviewClaim(review, prAuthor)),
+    ...reviewComments.filter((comment) => isEligibleClaimComment(comment, prAuthor)),
+  ].sort((a, b) => eventTime(a) - eventTime(b));
+
+  return commentLogin(claimEvents[0]) ?? null;
 }
 
 export function findValidReviewer({ comments = [], reviews = [], reviewComments = [], prAuthor }) {
-  const claimedReviewer = findClaimedReviewer({ comments, prAuthor });
+  const claimedReviewer = findClaimedReviewer({ comments, reviews, reviewComments, prAuthor });
   if (!claimedReviewer) {
     return null;
   }
