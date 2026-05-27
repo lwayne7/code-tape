@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build -w @code-tape/recording-schema",
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node scripts/run-dist-tests.mjs"
   },

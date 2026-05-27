@@ -2,6 +2,7 @@ import type { CloudRecordingService } from "../cloud/cloudRecordingService.js";
 import type {
   CloudApiError,
   CloudApiErrorCode,
+  CloudResult,
   CreateUploadSessionRequest,
 } from "../cloud/types.js";
 
@@ -42,8 +43,9 @@ export function createCloudApiHandler(deps: {
       }
       const parsed = await readJsonObject(request);
       if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
-      const input = parsed.value as CreateUploadSessionRequest;
-      const result = await deps.service.createUploadSession({ ownerId, input });
+      const input = parseCreateUploadSessionRequest(parsed.value);
+      if (!input.ok) return jsonError({ ...input.error, requestId }, requestId);
+      const result = await deps.service.createUploadSession({ ownerId, input: input.value });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
       return jsonResponse(result.value, 201, requestId);
     }
@@ -72,6 +74,66 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 function badRequestError(): CloudApiError {
   return { code: "bad-request", message: "request body must be a valid JSON object" };
+}
+
+function parseCreateUploadSessionRequest(
+  value: Record<string, unknown>,
+): CloudResult<CreateUploadSessionRequest> {
+  if (
+    !isString(value.idempotencyKey) ||
+    !isString(value.localPackageId) ||
+    !isString(value.title) ||
+    !isString(value.schemaVersion) ||
+    !isFiniteNumber(value.durationMs) ||
+    !isString(value.initialLanguage) ||
+    typeof value.hasAudio !== "boolean" ||
+    typeof value.hasCamera !== "boolean" ||
+    !Array.isArray(value.assets)
+  ) {
+    return { ok: false, error: badRequestError() };
+  }
+
+  const assets = [];
+  for (const asset of value.assets) {
+    if (
+      !isJsonObject(asset) ||
+      !isString(asset.kind) ||
+      !isString(asset.sha256) ||
+      !isFiniteNumber(asset.sizeBytes) ||
+      !isString(asset.mimeType)
+    ) {
+      return { ok: false, error: badRequestError() };
+    }
+    assets.push({
+      kind: asset.kind,
+      sha256: asset.sha256,
+      sizeBytes: asset.sizeBytes,
+      mimeType: asset.mimeType,
+    });
+  }
+
+  return {
+    ok: true,
+    value: {
+      idempotencyKey: value.idempotencyKey,
+      localPackageId: value.localPackageId,
+      title: value.title,
+      schemaVersion: value.schemaVersion,
+      durationMs: value.durationMs,
+      initialLanguage: value.initialLanguage,
+      hasAudio: value.hasAudio,
+      hasCamera: value.hasCamera,
+      assets: assets as CreateUploadSessionRequest["assets"],
+    } as CreateUploadSessionRequest,
+  };
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function readOwnerToken(request: Request): string | null {

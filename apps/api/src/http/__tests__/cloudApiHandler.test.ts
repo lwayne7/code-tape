@@ -71,6 +71,33 @@ for (const input of [
   { name: "empty", body: undefined },
   { name: "malformed JSON", body: '{"idempotencyKey":' },
   { name: "non-object JSON", body: JSON.stringify(["not", "an", "object"]) },
+  {
+    name: "missing assets",
+    body: JSON.stringify({
+      idempotencyKey: "idem-http-1",
+      localPackageId: "pkg-1",
+      title: "Cloud API demo",
+      schemaVersion: RECORDING_SCHEMA_VERSION,
+      durationMs: 1000,
+      initialLanguage: "javascript",
+      hasAudio: false,
+      hasCamera: false,
+    }),
+  },
+  {
+    name: "non-array assets",
+    body: JSON.stringify({
+      ...(await makeCreateSessionRequest(await makePackage())),
+      assets: "not-assets",
+    }),
+  },
+  {
+    name: "invalid asset field types",
+    body: JSON.stringify({
+      ...(await makeCreateSessionRequest(await makePackage())),
+      assets: [{ kind: "manifest", sha256: 123, sizeBytes: "bad", mimeType: null }],
+    }),
+  },
 ] as const) {
   test(`cloud API returns the unified error shape for ${input.name} upload-session bodies`, async () => {
     const handler = createCloudApiHandler({

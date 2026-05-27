@@ -945,6 +945,7 @@ test('root package exposes complete quality gate scripts', () => {
 test('api package test script runs compiled tests without shell glob expansion', () => {
   const pkg = JSON.parse(readFileSync('apps/api/package.json', 'utf8'));
 
+  assert.equal(pkg.scripts.prebuild, 'npm run build -w @code-tape/recording-schema');
   assert.equal(pkg.scripts.test, 'npm run build && node scripts/run-dist-tests.mjs');
   assert.doesNotMatch(pkg.scripts.test, /\*\*/);
   assert.ok(existsSync('apps/api/scripts/run-dist-tests.mjs'));
