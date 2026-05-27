@@ -101,27 +101,56 @@ export function createMediaDevicesController(
     async openStream(request: OpenStreamRequest): Promise<OpenStreamResult> {
       const warnings: MediaWarningPayload[] = [];
       if (!md) {
+        const nextCapability = { ...capability, audio: "unsupported" as const, camera: "unsupported" as const };
+        updateCapability(nextCapability);
         return {
           stream: null,
-          capability: { ...capability, audio: "unsupported", camera: "unsupported" },
-          warnings: [{ target: "recorder", code: "recorder-error", message: "getUserMedia not available" }],
+          capability: nextCapability,
+          warnings: [{ target: "recorder", code: "unsupported", message: "getUserMedia not available" }],
         };
       }
       stopActiveStream();
-      const constraints: MediaStreamConstraints = {
-        audio: request.audioDeviceId
-          ? { deviceId: { exact: request.audioDeviceId } }
-          : !!request.audioDeviceId === false ? false : true,
-        video: request.cameraDeviceId
-          ? { deviceId: { exact: request.cameraDeviceId } }
-          : !!request.cameraDeviceId === false ? false : true,
+
+      const nextCapability: MediaCapability = {
+        ...capability,
+        audio: request.audioDeviceId === null ? "unsupported" : capability.audio,
+        camera: request.cameraDeviceId === null ? "unsupported" : capability.camera,
+        selectedAudioDeviceId: request.audioDeviceId,
+        selectedCameraDeviceId: request.cameraDeviceId,
       };
-      if (request.audioDeviceId === null) constraints.audio = false;
-      if (request.cameraDeviceId === null) constraints.video = false;
-      try {
-        const stream = await md.getUserMedia(constraints);
+      const streams: MediaStream[] = [];
+
+      const openTrack = async (
+        target: "audio" | "camera",
+        deviceId: string | null,
+      ): Promise<void> => {
+        if (deviceId === null) return;
+        try {
+          const stream = await md.getUserMedia(
+            target === "audio"
+              ? { audio: { deviceId: { exact: deviceId } }, video: false }
+              : { audio: false, video: { deviceId: { exact: deviceId } } },
+          );
+          streams.push(stream);
+          nextCapability[target] = "available";
+        } catch (err) {
+          const status = classifyError(err);
+          nextCapability[target] = status;
+          warnings.push({
+            target,
+            code: warningCodeForOpenStreamError(err, status),
+            message: err instanceof Error ? err.message : "Failed to open media stream",
+          });
+        }
+      };
+
+      await openTrack("audio", request.audioDeviceId);
+      await openTrack("camera", request.cameraDeviceId);
+
+      const stream = combineStreams(streams);
+      if (stream) {
         activeStream = stream;
-        for (const track of stream.getTracks()) {
+        for (const track of uniqueTracks(stream.getTracks())) {
           track.addEventListener("ended", () => {
             warnings.push({
               target: track.kind === "audio" ? "audio" : "camera",
@@ -133,24 +162,9 @@ export function createMediaDevicesController(
             } as Partial<MediaCapability>);
           });
         }
-        updateCapability({
-          audio: stream.getAudioTracks().length > 0 ? "available" : capability.audio,
-          camera: stream.getVideoTracks().length > 0 ? "available" : capability.camera,
-          selectedAudioDeviceId: request.audioDeviceId,
-          selectedCameraDeviceId: request.cameraDeviceId,
-        });
-        return { stream, capability, warnings };
-      } catch (err) {
-        const code = classifyError(err);
-        const target: MediaWarningPayload["target"] =
-          request.cameraDeviceId !== null ? "camera" : "audio";
-        warnings.push({
-          target,
-          code: warningCodeForOpenStreamError(err, code),
-          message: err instanceof Error ? err.message : "Failed to open media stream",
-        });
-        return { stream: null, capability, warnings };
       }
+      updateCapability(nextCapability);
+      return { stream, capability, warnings };
     },
     setTrackEnabled(kind, enabled) {
       if (!activeStream) return;
@@ -173,4 +187,23 @@ export function createMediaDevicesController(
       return () => capabilityListeners.delete(listener);
     },
   };
+}
+
+function uniqueTracks(tracks: MediaStreamTrack[]): MediaStreamTrack[] {
+  return Array.from(new Set(tracks));
+}
+
+function combineStreams(streams: MediaStream[]): MediaStream | null {
+  if (streams.length === 0) return null;
+  const uniqueStreams = Array.from(new Set(streams));
+  if (uniqueStreams.length === 1) return uniqueStreams[0];
+
+  const tracks = uniqueTracks(streams.flatMap((stream) => stream.getTracks()));
+  if (tracks.length === 0) return null;
+  if (typeof MediaStream === "function") return new MediaStream(tracks);
+  return {
+    getTracks: () => tracks,
+    getAudioTracks: () => tracks.filter((track) => track.kind === "audio"),
+    getVideoTracks: () => tracks.filter((track) => track.kind === "video"),
+  } as unknown as MediaStream;
 }

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { acceptRuntimeMessage, createIframeRuntime } from "../iframeRuntime";
+import {
+  RUNTIME_CONSOLE_ARG_LIMIT,
+  RUNTIME_CONSOLE_ARG_MAX_CHARS,
+  RUNTIME_PREVIEW_HTML_MAX_CHARS,
+  acceptRuntimeMessage,
+  createIframeRuntime,
+} from "../iframeRuntime";
+import { IFRAME_BOOT_SCRIPT } from "../iframeBoot";
 
 describe("acceptRuntimeMessage — schema + source validation", () => {
   const expected = { runId: "run-1", source: null };
@@ -95,9 +102,49 @@ describe("acceptRuntimeMessage — schema + source validation", () => {
     expect(acceptRuntimeMessage("hi", expected)).toBeNull();
     expect(acceptRuntimeMessage(42, expected)).toBeNull();
   });
+
+  it("caps console args and previewHtml to P0 runtime budgets", () => {
+    const consoleResult = acceptRuntimeMessage(
+      {
+        source: "code-tape-runtime",
+        runId: "run-1",
+        type: "console",
+        payload: {
+          level: "log",
+          args: Array.from({ length: RUNTIME_CONSOLE_ARG_LIMIT + 10 }, () =>
+            "x".repeat(RUNTIME_CONSOLE_ARG_MAX_CHARS + 10),
+          ),
+        },
+      },
+      expected,
+    );
+    const previewResult = acceptRuntimeMessage(
+      {
+        source: "code-tape-runtime",
+        runId: "run-1",
+        type: "complete",
+        payload: { previewHtml: "x".repeat(RUNTIME_PREVIEW_HTML_MAX_CHARS + 10) },
+      },
+      expected,
+    );
+
+    expect(consoleResult?.type).toBe("console");
+    if (consoleResult?.type === "console") {
+      expect(consoleResult.payload.args).toHaveLength(RUNTIME_CONSOLE_ARG_LIMIT);
+      expect(consoleResult.payload.args[0]).toHaveLength(RUNTIME_CONSOLE_ARG_MAX_CHARS);
+    }
+    expect(previewResult?.type).toBe("complete");
+    if (previewResult?.type === "complete") {
+      expect(previewResult.payload.previewHtml).toHaveLength(RUNTIME_PREVIEW_HTML_MAX_CHARS);
+    }
+  });
 });
 
 describe("IframeRuntime sandbox lifecycle", () => {
+  it("does not require unsafe-eval to execute user code", () => {
+    expect(IFRAME_BOOT_SCRIPT).not.toContain("new Function");
+  });
+
   it("creates a fresh run iframe for every run", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -112,6 +159,22 @@ describe("IframeRuntime sandbox lifecycle", () => {
 
     expect(firstRunFrame).not.toBe(mountedFrame);
     expect(secondRunFrame).not.toBe(firstRunFrame);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("injects the technical-plan CSP into executable runtime srcdoc", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("Content-Security-Policy");
+    expect(frame?.srcdoc).toContain("default-src 'none'");
+    expect(frame?.srcdoc).toContain("connect-src 'none'");
     runtime.destroy();
     host.remove();
   });

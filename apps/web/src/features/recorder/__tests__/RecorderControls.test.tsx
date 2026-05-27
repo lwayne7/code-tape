@@ -99,6 +99,30 @@ describe("RecorderControls", () => {
     expect(props.onPause).not.toHaveBeenCalled();
   });
 
+  it("locks run and media toggles while paused", () => {
+    const { props } = renderControls({
+      state: state("paused"),
+      microphoneEnabled: true,
+      cameraEnabled: true,
+    });
+
+    const microphone = screen.getByRole("button", { name: "关闭麦克风" });
+    const camera = screen.getByRole("button", { name: "关闭摄像头" });
+    const run = screen.getByRole("button", { name: "运行代码" });
+
+    expect(microphone).toBeDisabled();
+    expect(camera).toBeDisabled();
+    expect(run).toBeDisabled();
+
+    fireEvent.click(microphone);
+    fireEvent.click(camera);
+    fireEvent.click(run);
+
+    expect(props.onToggleMicrophone).not.toHaveBeenCalled();
+    expect(props.onToggleCamera).not.toHaveBeenCalled();
+    expect(props.onRun).not.toHaveBeenCalled();
+  });
+
   it("calls media toggle callbacks with the next pressed state", () => {
     const { props } = renderControls({
       microphoneEnabled: false,

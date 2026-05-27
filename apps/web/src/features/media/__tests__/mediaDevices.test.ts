@@ -100,6 +100,33 @@ describe("createMediaDevicesController", () => {
     expect(result.capability.selectedCameraDeviceId).toBe("cam-1");
   });
 
+  it("keeps the camera stream when the microphone request is denied", async () => {
+    const cameraStream = makeFakeStream([makeFakeTrack("video")]);
+    const denied = new Error("blocked by user");
+    (denied as Error & { name: string }).name = "NotAllowedError";
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(denied)
+      .mockResolvedValueOnce(cameraStream);
+    const md = setupNavigator(getUserMedia);
+    const controller = createMediaDevicesController({ navigatorMediaDevices: md });
+
+    const result = await controller.openStream({ audioDeviceId: "mic-1", cameraDeviceId: "cam-1" });
+
+    expect(result.stream?.getVideoTracks()).toHaveLength(1);
+    expect(result.stream?.getAudioTracks()).toHaveLength(0);
+    expect(result.capability.audio).toBe("denied");
+    expect(result.capability.camera).toBe("available");
+    expect(result.capability.selectedAudioDeviceId).toBe("mic-1");
+    expect(result.capability.selectedCameraDeviceId).toBe("cam-1");
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        target: "audio",
+        code: "permission-denied",
+      }),
+    ]);
+  });
+
   it("release stops all active stream tracks", async () => {
     const stopAudio = vi.fn();
     const stopVideo = vi.fn();

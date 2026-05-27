@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
+import { RefreshCcw } from "lucide-react";
 import type { IframeRuntime } from "@/shared/recording-schema";
+import { IconButton } from "@/shared/ui";
 
 export type PreviewPaneProps = {
   runtime: IframeRuntime;
@@ -44,6 +46,16 @@ export function PreviewPane({ runtime, previewHtml, className }: PreviewPaneProp
       ref={hostRef}
       className={["relative h-full w-full bg-surface", className].filter(Boolean).join(" ")}
       aria-label="Runtime preview pane"
-    />
+    >
+      <div className="absolute right-2 top-2 z-10">
+        <IconButton
+          label="重置预览"
+          icon={<RefreshCcw size={15} />}
+          size="sm"
+          variant="subtle"
+          onClick={() => runtime.reset()}
+        />
+      </div>
+    </div>
   );
 }

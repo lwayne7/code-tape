@@ -92,6 +92,35 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
     checkTarget("camera", capability.camera, lastCameraState, (s) => (lastCameraState = s));
   };
 
+  const emitMediaToggle = () => {
+    deps.bus.emit({
+      type: "media-toggle",
+      source: "media",
+      track: "media",
+      payload: {
+        microphoneEnabled,
+        cameraEnabled,
+      },
+    });
+  };
+
+  const normalizeCameraPosition = (position: { x: number; y: number }) => {
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return null;
+    return {
+      x: Math.min(Math.max(position.x, 0), 1),
+      y: Math.min(Math.max(position.y, 0), 1),
+    };
+  };
+
+  const emitCameraPosition = (position: { x: number; y: number }) => {
+    deps.bus.emit({
+      type: "camera-position",
+      source: "media",
+      track: "ui",
+      payload: position,
+    });
+  };
+
   return {
     start() {
       if (!isStopped || unsubscribeDevices) return;
@@ -121,40 +150,33 @@ export const createMediaProducer: CreateMediaProducer = (deps): MediaProducerHan
       stopProducer();
       deps.devices.release();
     },
+    primeInitialState(input) {
+      if (isPaused || isStopped) return;
+      const cameraPosition = normalizeCameraPosition(input.cameraPosition);
+      if (!cameraPosition) return;
+      microphoneEnabled = input.microphoneEnabled;
+      cameraEnabled = input.cameraEnabled;
+      emitMediaToggle();
+      emitCameraPosition(cameraPosition);
+      lastPositionTime = clock.now();
+    },
     setMicrophoneEnabled(enabled: boolean) {
       if (isPaused || isStopped) return;
       microphoneEnabled = enabled;
       deps.devices.setTrackEnabled("audio", enabled);
-      deps.bus.emit({
-        type: "media-toggle",
-        source: "media",
-        track: "media",
-        payload: {
-          microphoneEnabled,
-          cameraEnabled,
-        },
-      });
+      emitMediaToggle();
     },
     setCameraEnabled(enabled: boolean) {
       if (isPaused || isStopped) return;
       cameraEnabled = enabled;
       deps.devices.setTrackEnabled("camera", enabled);
-      deps.bus.emit({
-        type: "media-toggle",
-        source: "media",
-        track: "media",
-        payload: {
-          microphoneEnabled,
-          cameraEnabled,
-        },
-      });
+      emitMediaToggle();
     },
     reportCameraPosition(position: { x: number; y: number }) {
       if (isPaused || isStopped) return;
-      if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
-      const x = Math.min(Math.max(position.x, 0), 1);
-      const y = Math.min(Math.max(position.y, 0), 1);
-      pendingPosition = { x, y };
+      const nextPosition = normalizeCameraPosition(position);
+      if (!nextPosition) return;
+      pendingPosition = nextPosition;
 
       const now = clock.now();
       if (now - lastPositionTime >= 50) {

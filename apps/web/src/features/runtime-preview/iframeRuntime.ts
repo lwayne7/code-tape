@@ -12,6 +12,12 @@ export type IframeRuntimeOptions = {
 };
 
 const RUNTIME_SOURCE = "code-tape-runtime";
+export const RUNTIME_CONSOLE_ARG_LIMIT = 50;
+export const RUNTIME_CONSOLE_ARG_MAX_CHARS = 2_000;
+export const RUNTIME_PREVIEW_HTML_MAX_CHARS = 200_000;
+
+const RUNTIME_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
 
 /**
  * Validate that an incoming postMessage genuinely came from our iframe runtime
@@ -33,15 +39,16 @@ export function acceptRuntimeMessage(
   if (typeof m.type !== "string" || !validTypes.includes(m.type)) return null;
   if (!m.payload || typeof m.payload !== "object") return null;
   if (!isRuntimePayload(m.type, m.payload)) return null;
-  return m as RuntimeMessage;
+  return sanitizeRuntimeMessage(m as RuntimeMessage);
 }
 
 function buildSrcDoc(bootScript: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>code-tape runtime</title></head><body><script>${bootScript}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${RUNTIME_CSP}" /><title>code-tape runtime</title></head><body><script>${bootScript}</script></body></html>`;
 }
 
 function buildPreviewSrcDoc(previewHtml: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>code-tape replay preview</title></head>${previewHtml}</html>`;
+  const cappedPreviewHtml = limitString(previewHtml, RUNTIME_PREVIEW_HTML_MAX_CHARS);
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${RUNTIME_CSP}" /><title>code-tape replay preview</title></head>${cappedPreviewHtml}</html>`;
 }
 
 function isRuntimePayload(type: string, payload: object): boolean {
@@ -63,6 +70,49 @@ function isRuntimePayload(type: string, payload: object): boolean {
       return typeof p.previewHtml === "string";
     default:
       return false;
+  }
+}
+
+function limitString(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function sanitizeRuntimeMessage(message: RuntimeMessage): RuntimeMessage {
+  switch (message.type) {
+    case "console":
+      return {
+        ...message,
+        payload: {
+          ...message.payload,
+          args: message.payload.args
+            .slice(0, RUNTIME_CONSOLE_ARG_LIMIT)
+            .map((arg) => limitString(arg, RUNTIME_CONSOLE_ARG_MAX_CHARS)),
+        },
+      };
+    case "error":
+      return {
+        ...message,
+        payload: {
+          message: limitString(message.payload.message, RUNTIME_CONSOLE_ARG_MAX_CHARS),
+          ...(message.payload.stack
+            ? { stack: limitString(message.payload.stack, RUNTIME_CONSOLE_ARG_MAX_CHARS) }
+            : {}),
+        },
+      };
+    case "blocked-alert":
+      return {
+        ...message,
+        payload: { message: limitString(message.payload.message, RUNTIME_CONSOLE_ARG_MAX_CHARS) },
+      };
+    case "complete":
+      return {
+        ...message,
+        payload: {
+          previewHtml: limitString(message.payload.previewHtml, RUNTIME_PREVIEW_HTML_MAX_CHARS),
+        },
+      };
+    case "ready":
+      return message;
   }
 }
 
@@ -172,10 +222,7 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       await createIframe("", buildPreviewSrcDoc(previewHtml));
     },
     reset() {
-      if (iframe && host) {
-        host.removeChild(iframe);
-        iframe = null;
-      }
+      teardown();
     },
     destroy() {
       teardown();

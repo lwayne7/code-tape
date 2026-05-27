@@ -1,4 +1,5 @@
 import { generateId } from "@/shared/util/ids";
+import { createSnapshotBuilder } from "./snapshotBuilder";
 import type {
   EventProducer,
   PackageBuildInput,
@@ -8,19 +9,12 @@ import type {
   RecordingControllerStatus,
   RecordingEvent,
   RecordingPackageV1,
-  RecordingSnapshot,
   RecordStartPayload,
 } from "@/shared/recording-schema";
 
 export type RecordingControllerOptions = RecordingControllerDeps & {
   appVersion: string;
   generateTitle?: () => string;
-  /**
-   * Optional snapshot source. When provided, the controller takes a snapshot
-   * during `stop()` so packages always include at least one final snapshot.
-   * The recorder's editorProducer is the natural source.
-  */
-  snapshotSource?: () => Promise<RecordingSnapshot | null>;
   mediaSource?: () => Promise<PackageBuildInput["media"]>;
   onPersistenceFailure?: (failure: RecordingPersistenceFailure) => void | Promise<void>;
 };
@@ -56,6 +50,8 @@ export type RecordingPersistenceFailure = PendingPackageSave & { error: unknown 
 export function createRecordingController(options: RecordingControllerOptions): RecordingController {
   const { clock, bus, producers, packageBuilder, repository } = options;
   const listeners = new Set<(s: RecordingControllerState) => void>();
+  const snapshotBuilder = createSnapshotBuilder();
+  bus.subscribe((event) => snapshotBuilder.apply(event));
 
   let state: RecordingControllerState = {
     status: "idle",
@@ -101,6 +97,7 @@ export function createRecordingController(options: RecordingControllerOptions): 
     async start(input) {
       transitionTo("requestingPermission", { lastError: null });
       try {
+        snapshotBuilder.reset();
         startPayload = input;
         clock.start();
         const startedAt = new Date().toISOString();
@@ -164,9 +161,8 @@ export function createRecordingController(options: RecordingControllerOptions): 
           clock.stop();
           transitionTo("processing", { durationMs });
 
+          const snapshots = snapshotBuilder.finalize();
           const events = bus.drain();
-          const snapshot = options.snapshotSource ? await options.snapshotSource() : null;
-          const snapshots: RecordingSnapshot[] = snapshot ? [snapshot] : [];
           if (!startPayload) {
             throw new Error("RecordingController.start() must be called before stop().");
           }
@@ -227,6 +223,7 @@ export function createRecordingController(options: RecordingControllerOptions): 
       }
       forEachProducer((p) => p.dispose());
       bus.reset();
+      snapshotBuilder.reset();
       state = {
         status: "idle",
         startedAt: null,

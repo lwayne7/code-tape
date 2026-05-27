@@ -160,6 +160,55 @@ describe("createRecordingController", () => {
     expect(repository.commits.length).toBe(1);
   });
 
+  it("saves recorder-side snapshots that include runtime and media state", async () => {
+    const { controller, bus, repository } = setup();
+
+    await controller.start(makeStartPayload());
+    bus.emit({
+      type: "media-toggle",
+      source: "media",
+      track: "media",
+      payload: { microphoneEnabled: true, cameraEnabled: true },
+    });
+    bus.emit({
+      type: "camera-position",
+      source: "media",
+      track: "ui",
+      payload: { x: 0.8, y: 0.75 },
+    });
+    bus.emit({
+      type: "run-output",
+      source: "runtime",
+      track: "runtime",
+      payload: {
+        runId: "run-1",
+        stdout: ["ok"],
+        stderr: [],
+        previewHtml: "<body>ok</body>",
+        status: "success",
+      },
+    });
+    await controller.stop("user");
+
+    const snapshots = repository.drafts[0].snapshots;
+    expect(snapshots.length).toBeGreaterThanOrEqual(2);
+    expect(snapshots.at(-1)).toMatchObject({
+      eventSeq: repository.drafts[0].events.at(-1)?.seq,
+      state: {
+        media: {
+          microphoneEnabled: true,
+          cameraEnabled: true,
+          cameraPosition: { x: 0.8, y: 0.75 },
+        },
+        runtime: {
+          status: "success",
+          stdout: ["ok"],
+          previewHtml: "<body>ok</body>",
+        },
+      },
+    });
+  });
+
   it("includes finalized media from mediaSource in the saved package", async () => {
     const mediaBlob = new Blob(["media"], { type: "video/webm" });
     const mediaSource = vi.fn(async () => ({
