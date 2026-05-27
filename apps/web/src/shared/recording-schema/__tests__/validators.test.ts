@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   RECORDING_SCHEMA_VERSION,
   type EventBus,
+  type OpenStreamRequest,
   type RecordingEvent,
   type RecordingPackageV1,
 } from "../types";
@@ -190,6 +191,18 @@ describe("EventBus contract", () => {
     };
 
     expect(busContract.lastSeq()).toBe(12);
+  });
+});
+
+describe("OpenStreamRequest contract", () => {
+  it("distinguishes default devices, exact devices, and explicitly disabled tracks", () => {
+    const defaultDevices = {} satisfies OpenStreamRequest;
+    const exactAudio = { audioDeviceId: "mic-1" } satisfies OpenStreamRequest;
+    const eventOnly = { audioDeviceId: null, cameraDeviceId: null } satisfies OpenStreamRequest;
+
+    expect("audioDeviceId" in defaultDevices).toBe(false);
+    expect(exactAudio).toEqual({ audioDeviceId: "mic-1" });
+    expect(eventOnly).toEqual({ audioDeviceId: null, cameraDeviceId: null });
   });
 });
 

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayControlsProps } from "../ReplayControls";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
@@ -314,6 +314,85 @@ describe("ReplayPage", () => {
 
     expect(screen.getByLabelText("回放鼠标位置")).toBeInTheDocument();
     expect(screen.getByText("Comment")).toBeInTheDocument();
+  });
+
+  it("defaults display toggles on and hides replay layers when toggled off", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    const pointerToggle = screen.getByRole("button", { name: "显示鼠标轨迹" });
+    const shortcutToggle = screen.getByRole("button", { name: "显示快捷键" });
+    const cameraToggle = screen.getByRole("button", { name: "显示摄像头" });
+    const runtimeToggle = screen.getByRole("button", { name: "显示运行面板" });
+
+    expect(pointerToggle).toHaveAttribute("aria-pressed", "true");
+    expect(shortcutToggle).toHaveAttribute("aria-pressed", "true");
+    expect(cameraToggle).toHaveAttribute("aria-pressed", "true");
+    expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
+
+    act(() => {
+      replayPageMock.onTick?.(
+        {
+          editor: {
+            code: "",
+            language: "javascript",
+            cursor: null,
+            selection: null,
+            scrollTop: 0,
+            scrollLeft: 0,
+            fontSize: 14,
+            theme: "dark",
+          },
+          pointer: null,
+          media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+          runtime: {
+            status: "success",
+            stdout: ["ok"],
+            stderr: [],
+            previewHtml: "<main>preview</main>",
+            errorMessage: null,
+          },
+        },
+        [
+          {
+            id: "move-2",
+            seq: 1,
+            timestampMs: 100,
+            source: "pointer",
+            track: "ui",
+            type: "mouse-move",
+            payload: { x: 40, y: 30, containerWidth: 200, containerHeight: 100 },
+          },
+          {
+            id: "shortcut-2",
+            seq: 2,
+            timestampMs: 120,
+            source: "shortcut",
+            track: "ui",
+            type: "shortcut",
+            payload: { keys: ["Meta", "S"], label: "Cmd+S" },
+          },
+        ],
+        120,
+      );
+    });
+
+    expect(screen.getByLabelText("回放鼠标位置")).toBeInTheDocument();
+    expect(screen.getByText("Cmd+S")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mock preview pane")).toBeInTheDocument();
+
+    fireEvent.click(pointerToggle);
+    fireEvent.click(shortcutToggle);
+    fireEvent.click(runtimeToggle);
+
+    expect(screen.queryByLabelText("回放鼠标位置")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cmd+S")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mock preview pane")).not.toBeInTheDocument();
+    expect(pointerToggle).toHaveAttribute("aria-pressed", "false");
+    expect(shortcutToggle).toHaveAttribute("aria-pressed", "false");
+    expect(runtimeToggle).toHaveAttribute("aria-pressed", "false");
   });
 
   it("renders recorded camera media when the package has a camera track", async () => {

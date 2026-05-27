@@ -62,6 +62,7 @@ type DeviceOptions = {
   loaded: boolean;
 };
 type DeviceList = Pick<DeviceOptions, "audio" | "camera">;
+type MediaOpenRequest = { audioDeviceId?: string | null; cameraDeviceId?: string | null };
 
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
@@ -105,7 +106,7 @@ export function RecorderPage() {
     const pointerProducer = createPointerProducer({
       bus,
       clock,
-      getHost: () => document.querySelector<HTMLElement>("[data-recorder-host]"),
+      getHost: () => document.querySelector<HTMLElement>("[data-code-editor]"),
     });
     const shortcutProducer = createShortcutProducer({
       bus,
@@ -127,7 +128,6 @@ export function RecorderPage() {
       packageBuilder,
       repository,
       appVersion: APP_VERSION,
-      snapshotSource: () => editorProducer.takeSnapshot(),
       mediaSource: async () => {
         const recorder = mediaRecorderRef.current;
         mediaRecorderRef.current = null;
@@ -319,7 +319,14 @@ export function RecorderPage() {
       const cameraDeviceId = cameraDeviceSelectionTouchedRef.current
         ? selectedCameraDeviceId
         : selectedCameraDeviceId ?? available.camera[0]?.deviceId ?? null;
-      let media = await openSelectedMedia(stack.devices, { audioDeviceId, cameraDeviceId });
+      const explicitlyDisabledAllMedia = audioDeviceSelectionTouchedRef.current
+        && cameraDeviceSelectionTouchedRef.current
+        && audioDeviceId === null
+        && cameraDeviceId === null;
+      const shouldOpenMedia = audioDeviceId !== null || cameraDeviceId !== null || explicitlyDisabledAllMedia;
+      let media = shouldOpenMedia
+        ? await openSelectedMedia(stack.devices, { audioDeviceId, cameraDeviceId })
+        : eventOnlyMedia();
       if (!isCurrentStart(startToken)) {
         stack.devices.release();
         return;
@@ -356,8 +363,11 @@ export function RecorderPage() {
           media = eventOnlyMedia();
         }
       }
-      setMicrophoneEnabled(media.capability.audio === "available");
-      setCameraEnabled(media.capability.camera === "available");
+      const activeTracks = media.stream?.getTracks() ?? [];
+      const hasAudioTrack = activeTracks.some((track) => track.kind === "audio");
+      const hasCameraTrack = activeTracks.some((track) => track.kind === "video");
+      setMicrophoneEnabled(hasAudioTrack);
+      setCameraEnabled(hasCameraTrack);
       stack.setCurrentMediaCapability(media.capability);
 
       const payload: RecordStartPayload = {
@@ -370,6 +380,11 @@ export function RecorderPage() {
       };
       try {
         await stack.controller.start(payload);
+        stack.mediaProducer.primeInitialState({
+          microphoneEnabled: hasAudioTrack,
+          cameraEnabled: hasCameraTrack,
+          cameraPosition,
+        });
         if (!isCurrentStart(startToken) && isActiveRecordingStatus(stack.controller.state.status)) {
           stack.controller.reset();
         }
@@ -455,6 +470,7 @@ export function RecorderPage() {
     });
   };
   const handleRun = async () => {
+    if (stack.controller.state.status === "paused") return;
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
     stack.editorProducer.flushPending();
@@ -483,17 +499,13 @@ export function RecorderPage() {
         onResume={handleResume}
         onStop={handleStop}
         onToggleMicrophone={(next) => {
+          if (stack.controller.state.status === "paused") return;
           setMicrophoneEnabled(next);
-          if (stack.controller.state.status === "paused") {
-            stack.devices.setTrackEnabled("audio", next);
-          }
           stack.mediaProducer.setMicrophoneEnabled(next);
         }}
         onToggleCamera={(next) => {
+          if (stack.controller.state.status === "paused") return;
           setCameraEnabled(next);
-          if (stack.controller.state.status === "paused") {
-            stack.devices.setTrackEnabled("camera", next);
-          }
           stack.mediaProducer.setCameraEnabled(next);
         }}
         onRun={handleRun}
@@ -527,13 +539,15 @@ export function RecorderPage() {
             initialValue=""
             fontSize={editorFontSize}
             theme={theme.resolved}
+            readOnly={controllerState.status === "paused"}
           />
           <CameraPreview
             stream={mediaStream}
             enabled={cameraEnabled}
             position={cameraPosition}
-            draggable
+            draggable={controllerState.status !== "paused"}
             onPositionChange={(next) => {
+              if (stack.controller.state.status === "paused") return;
               setCameraPosition(next);
               stack.mediaProducer.reportCameraPosition(next);
             }}
@@ -547,15 +561,14 @@ export function RecorderPage() {
 
 async function openSelectedMedia(
   devices: MediaDevicesController,
-  request: { audioDeviceId: string | null; cameraDeviceId: string | null },
+  request: MediaOpenRequest,
 ): Promise<OpenStreamResult> {
   try {
-    if (!request.audioDeviceId && !request.cameraDeviceId) return eventOnlyMedia();
-
     const result = await devices.openStream(request);
-    if (!result.stream) {
+    const requestedAnyTrack = request.audioDeviceId !== null || request.cameraDeviceId !== null;
+    if (!result.stream && requestedAnyTrack) {
       devices.release();
-      return eventOnlyMedia(result.warnings);
+      return result;
     }
     return result;
   } catch (err) {

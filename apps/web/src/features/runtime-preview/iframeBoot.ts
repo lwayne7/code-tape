@@ -17,7 +17,15 @@
 export const IFRAME_BOOT_SCRIPT = `
 (function () {
   const RUNTIME_SOURCE = "code-tape-runtime";
+  const CONSOLE_ARG_LIMIT = 50;
+  const CONSOLE_ARG_MAX_CHARS = 2000;
+  const PREVIEW_HTML_MAX_CHARS = 200000;
   let currentRunId = null;
+
+  function limit(value, maxLength) {
+    const text = String(value ?? "");
+    return text.length > maxLength ? text.slice(0, maxLength) : text;
+  }
 
   function post(type, payload) {
     parent.postMessage({ source: RUNTIME_SOURCE, runId: currentRunId, type, payload }, "*");
@@ -36,30 +44,30 @@ export const IFRAME_BOOT_SCRIPT = `
   const originalConsole = { log: console.log, warn: console.warn, error: console.error };
   console.log = function () {
     originalConsole.log.apply(console, arguments);
-    post("console", { level: "log", args: Array.prototype.map.call(arguments, strArg) });
+    post("console", { level: "log", args: Array.prototype.map.call(arguments, strArg).slice(0, CONSOLE_ARG_LIMIT).map(function (arg) { return limit(arg, CONSOLE_ARG_MAX_CHARS); }) });
   };
   console.warn = function () {
     originalConsole.warn.apply(console, arguments);
-    post("console", { level: "warn", args: Array.prototype.map.call(arguments, strArg) });
+    post("console", { level: "warn", args: Array.prototype.map.call(arguments, strArg).slice(0, CONSOLE_ARG_LIMIT).map(function (arg) { return limit(arg, CONSOLE_ARG_MAX_CHARS); }) });
   };
   console.error = function () {
     originalConsole.error.apply(console, arguments);
-    post("console", { level: "error", args: Array.prototype.map.call(arguments, strArg) });
+    post("console", { level: "error", args: Array.prototype.map.call(arguments, strArg).slice(0, CONSOLE_ARG_LIMIT).map(function (arg) { return limit(arg, CONSOLE_ARG_MAX_CHARS); }) });
   };
 
   window.alert = function (message) {
-    post("blocked-alert", { message: String(message ?? "") });
+    post("blocked-alert", { message: limit(message, CONSOLE_ARG_MAX_CHARS) });
     return undefined;
   };
   window.confirm = function () { post("blocked-alert", { message: "confirm()" }); return false; };
   window.prompt = function () { post("blocked-alert", { message: "prompt()" }); return null; };
 
   window.addEventListener("error", function (event) {
-    post("error", { message: event.message || String(event.error || ""), stack: (event.error && event.error.stack) || undefined });
+    post("error", { message: limit(event.message || String(event.error || ""), CONSOLE_ARG_MAX_CHARS), stack: event.error && event.error.stack ? limit(event.error.stack, CONSOLE_ARG_MAX_CHARS) : undefined });
   });
   window.addEventListener("unhandledrejection", function (event) {
     const reason = event.reason || {};
-    post("error", { message: reason.message || String(reason), stack: reason.stack });
+    post("error", { message: limit(reason.message || String(reason), CONSOLE_ARG_MAX_CHARS), stack: reason.stack ? limit(reason.stack, CONSOLE_ARG_MAX_CHARS) : undefined });
   });
 
   window.addEventListener("message", async function (event) {
@@ -68,16 +76,24 @@ export const IFRAME_BOOT_SCRIPT = `
     if (currentRunId && msg.runId === currentRunId) return; // ignore replays
     currentRunId = msg.runId;
     post("ready", {});
-    try {
-      // eslint-disable-next-line no-new-func
-      const fn = new Function(msg.code);
-      const result = fn();
-      if (result && typeof result.then === "function") await result;
-      const previewHtml = document.body ? document.body.outerHTML : "";
-      post("complete", { previewHtml });
-    } catch (err) {
-      post("error", { message: (err && err.message) || String(err), stack: err && err.stack });
-    }
+    const userScript = document.createElement("script");
+    userScript.textContent = [
+      "(async function () {",
+      "  try {",
+      "    const result = (async function __codeTapeUserMain() {",
+      String(msg.code || ""),
+      "    })();",
+      "    if (result && typeof result.then === 'function') await result;",
+      "    const previewHtml = document.body ? document.body.outerHTML : '';",
+      "    parent.postMessage({ source: 'code-tape-runtime', runId: " + JSON.stringify(currentRunId) + ", type: 'complete', payload: { previewHtml: previewHtml.length > 200000 ? previewHtml.slice(0, 200000) : previewHtml } }, '*');",
+      "  } catch (err) {",
+      "    const message = String((err && err.message) || err || '');",
+      "    const stack = err && err.stack ? String(err.stack) : undefined;",
+      "    parent.postMessage({ source: 'code-tape-runtime', runId: " + JSON.stringify(currentRunId) + ", type: 'error', payload: { message: message.length > 2000 ? message.slice(0, 2000) : message, stack: stack && stack.length > 2000 ? stack.slice(0, 2000) : stack } }, '*');",
+      "  }",
+      "})();",
+    ].join("\\n");
+    document.body.appendChild(userScript);
   });
 })();
 `;

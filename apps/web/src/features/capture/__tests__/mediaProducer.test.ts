@@ -185,6 +185,69 @@ describe("createMediaProducer", () => {
     );
   });
 
+  it("should emit initial media-toggle and camera-position without touching tracks", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+    mockBus.emit.mockClear();
+
+    producer.primeInitialState({
+      microphoneEnabled: true,
+      cameraEnabled: false,
+      cameraPosition: { x: 0.8, y: 0.75 },
+    });
+
+    expect(mockDevices.setTrackEnabled).not.toHaveBeenCalled();
+    expect(mockBus.emit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: "media-toggle",
+        payload: { microphoneEnabled: true, cameraEnabled: false },
+      }),
+    );
+    expect(mockBus.emit).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "camera-position",
+        payload: { x: 0.8, y: 0.75 },
+      }),
+    );
+  });
+
+  it("should emit initial media-toggle even when the initial camera position is invalid", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+    mockBus.emit.mockClear();
+
+    producer.primeInitialState({
+      microphoneEnabled: true,
+      cameraEnabled: false,
+      cameraPosition: { x: Number.NaN, y: 0.75 },
+    });
+
+    expect(mockBus.emit).toHaveBeenCalledTimes(1);
+    expect(mockBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "media-toggle",
+        payload: { microphoneEnabled: true, cameraEnabled: false },
+      }),
+    );
+  });
+
+  it("should ignore initial media priming while paused", () => {
+    const producer = createMediaProducer(deps);
+    producer.start();
+    producer.pause();
+    mockBus.emit.mockClear();
+
+    producer.primeInitialState({
+      microphoneEnabled: true,
+      cameraEnabled: true,
+      cameraPosition: { x: 0.8, y: 0.75 },
+    });
+
+    expect(mockBus.emit).not.toHaveBeenCalled();
+  });
+
   it("should emit camera-position with 50ms throttle using injected clock and clamp coordinates", () => {
     const producer = createMediaProducer(deps);
     producer.start();

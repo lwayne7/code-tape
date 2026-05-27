@@ -88,6 +88,12 @@ export type MediaProducerDeps = ProducerCommonDeps & {
 };
 
 export type MediaProducerHandle = EventProducer & {
+  /** Emit the recorder's initial media state without mutating physical tracks. */
+  primeInitialState(input: {
+    microphoneEnabled: boolean;
+    cameraEnabled: boolean;
+    cameraPosition: { x: number; y: number };
+  }): void;
   /** Toggle microphone (also emits media-toggle). */
   setMicrophoneEnabled(enabled: boolean): void;
   /** Toggle camera (also emits media-toggle). */

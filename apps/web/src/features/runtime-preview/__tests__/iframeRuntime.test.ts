@@ -1,5 +1,27 @@
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
-import { acceptRuntimeMessage, createIframeRuntime } from "../iframeRuntime";
+import {
+  RUNTIME_CONSOLE_ARG_LIMIT,
+  RUNTIME_CONSOLE_ARG_MAX_CHARS,
+  RUNTIME_PREVIEW_HTML_MAX_CHARS,
+  acceptRuntimeMessage,
+  createIframeRuntime,
+} from "../iframeRuntime";
+import { IFRAME_BOOT_SCRIPT } from "../iframeBoot";
+
+const require = createRequire(import.meta.url);
+const { JSDOM, VirtualConsole } = require("jsdom") as {
+  JSDOM: new (
+    html: string,
+    options: {
+      runScripts: "dangerously";
+      url: string;
+      virtualConsole: { on(event: "jsdomError", listener: () => void): unknown };
+      beforeParse(window: Window): void;
+    },
+  ) => { window: Window & typeof globalThis & { close(): void } };
+  VirtualConsole: new () => { on(event: "jsdomError", listener: () => void): unknown };
+};
 
 describe("acceptRuntimeMessage — schema + source validation", () => {
   const expected = { runId: "run-1", source: null };
@@ -95,9 +117,49 @@ describe("acceptRuntimeMessage — schema + source validation", () => {
     expect(acceptRuntimeMessage("hi", expected)).toBeNull();
     expect(acceptRuntimeMessage(42, expected)).toBeNull();
   });
+
+  it("caps console args and previewHtml to P0 runtime budgets", () => {
+    const consoleResult = acceptRuntimeMessage(
+      {
+        source: "code-tape-runtime",
+        runId: "run-1",
+        type: "console",
+        payload: {
+          level: "log",
+          args: Array.from({ length: RUNTIME_CONSOLE_ARG_LIMIT + 10 }, () =>
+            "x".repeat(RUNTIME_CONSOLE_ARG_MAX_CHARS + 10),
+          ),
+        },
+      },
+      expected,
+    );
+    const previewResult = acceptRuntimeMessage(
+      {
+        source: "code-tape-runtime",
+        runId: "run-1",
+        type: "complete",
+        payload: { previewHtml: "x".repeat(RUNTIME_PREVIEW_HTML_MAX_CHARS + 10) },
+      },
+      expected,
+    );
+
+    expect(consoleResult?.type).toBe("console");
+    if (consoleResult?.type === "console") {
+      expect(consoleResult.payload.args).toHaveLength(RUNTIME_CONSOLE_ARG_LIMIT);
+      expect(consoleResult.payload.args[0]).toHaveLength(RUNTIME_CONSOLE_ARG_MAX_CHARS);
+    }
+    expect(previewResult?.type).toBe("complete");
+    if (previewResult?.type === "complete") {
+      expect(previewResult.payload.previewHtml).toHaveLength(RUNTIME_PREVIEW_HTML_MAX_CHARS);
+    }
+  });
 });
 
 describe("IframeRuntime sandbox lifecycle", () => {
+  it("does not require unsafe-eval to execute user code", () => {
+    expect(IFRAME_BOOT_SCRIPT).not.toContain("new Function");
+  });
+
   it("creates a fresh run iframe for every run", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -116,6 +178,22 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("injects the technical-plan CSP into executable runtime srcdoc", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("Content-Security-Policy");
+    expect(frame?.srcdoc).toContain("default-src 'none'");
+    expect(frame?.srcdoc).toContain("connect-src 'none'");
+    runtime.destroy();
+    host.remove();
+  });
+
   it("renders replay preview in a no-script sandbox", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -129,4 +207,118 @@ describe("IframeRuntime sandbox lifecycle", () => {
     runtime.destroy();
     host.remove();
   });
+
+  it("keeps the mounted host usable after reset", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.renderPreview("<body><p>first</p></body>");
+    runtime.reset();
+    expect(host.querySelector("iframe")).toBeNull();
+
+    await runtime.renderPreview("<body><p>second</p></body>");
+    expect(host.querySelector("iframe")?.srcdoc).toContain("second");
+
+    runtime.reset();
+    await runtime.run({ runId: "run-after-reset", compiledCode: "", timeoutMs: 1 });
+    expect(host.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+
+    runtime.destroy();
+    host.remove();
+  });
 });
+
+describe("IFRAME_BOOT_SCRIPT error reporting", () => {
+  it("reports syntax errors as runtime errors without completing", async () => {
+    const messages = await runBootScript("const broken = ;");
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).not.toHaveLength(0);
+  });
+
+  it("reports synchronous throws as runtime errors without completing", async () => {
+    const messages = await runBootScript('throw new Error("sync boom");');
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).toContain("sync boom");
+  });
+
+  it("reports rejected promises as runtime errors without completing", async () => {
+    const messages = await runBootScript('await Promise.reject(new Error("async boom"));');
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).toContain("async boom");
+  });
+});
+
+type PostedRuntimeMessage = {
+  source?: unknown;
+  runId?: unknown;
+  type?: unknown;
+  payload?: unknown;
+};
+
+async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
+  const messages: PostedRuntimeMessage[] = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", () => undefined);
+  const dom = new JSDOM(
+    `<!doctype html><html><body><script>${IFRAME_BOOT_SCRIPT}</script></body></html>`,
+    {
+      runScripts: "dangerously",
+      url: "https://runtime.code-tape.test/",
+      virtualConsole,
+      beforeParse(window) {
+        Object.defineProperty(window, "parent", {
+          configurable: true,
+          value: {
+            postMessage(message: PostedRuntimeMessage) {
+              messages.push(message);
+            },
+          },
+        });
+      },
+    },
+  );
+
+  try {
+    dom.window.dispatchEvent(
+      new dom.window.MessageEvent("message", {
+        data: { type: "init", runId: "run-error-path", code },
+      }),
+    );
+    await waitForBootScript(dom.window);
+    return messages;
+  } finally {
+    dom.window.close();
+  }
+}
+
+function waitForBootScript(window: Window & typeof globalThis): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      window.setTimeout(resolve, 0);
+    }, 0);
+  });
+}
+
+function expectSingleRuntimeError(messages: PostedRuntimeMessage[]): {
+  payload: { message: string };
+} {
+  const errors = messages.filter((message) => message.type === "error");
+
+  expect(messages.some((message) => message.type === "ready")).toBe(true);
+  expect(messages.some((message) => message.type === "complete")).toBe(false);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toEqual(
+    expect.objectContaining({
+      source: "code-tape-runtime",
+      runId: "run-error-path",
+      type: "error",
+      payload: expect.objectContaining({ message: expect.any(String) }),
+    }),
+  );
+  return errors[0] as { payload: { message: string } };
+}

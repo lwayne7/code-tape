@@ -47,16 +47,19 @@ export function RecorderControls({
     state.status === "requestingPermission" ||
     state.status === "stopping" ||
     state.status === "processing";
-  const audioDisabled = state.mediaCapability.audio !== "available";
-  const cameraDisabled = state.mediaCapability.camera !== "available";
+  const stateLocked = isPaused || isBusy;
+  const audioUnavailable = state.mediaCapability.audio !== "available";
+  const cameraUnavailable = state.mediaCapability.camera !== "available";
+  const audioDisabled = stateLocked || audioUnavailable;
+  const cameraDisabled = stateLocked || cameraUnavailable;
   const canStop = isRecording || isPaused;
   const statusLabel = STATUS_LABELS[state.status];
-  const audioLabel = audioDisabled
+  const audioLabel = audioUnavailable
     ? `麦克风不可用：${capabilityLabel(state.mediaCapability.audio)}`
     : microphoneEnabled
       ? "关闭麦克风"
       : "开启麦克风";
-  const cameraLabel = cameraDisabled
+  const cameraLabel = cameraUnavailable
     ? `摄像头不可用：${capabilityLabel(state.mediaCapability.camera)}`
     : cameraEnabled
       ? "关闭摄像头"
@@ -145,7 +148,7 @@ export function RecorderControls({
         label="运行代码"
         icon={<Code2 size={18} />}
         variant="ghost"
-        disabled={isBusy}
+        disabled={stateLocked}
         onClick={onRun}
       />
 
