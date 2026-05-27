@@ -41,6 +41,7 @@ export const Slider = forwardRef<HTMLSpanElement, SliderProps>(function Slider(
         <RadixSlider.Range className="absolute h-full rounded-full bg-primary" />
       </RadixSlider.Track>
       <RadixSlider.Thumb
+        aria-label={ariaLabel}
         className={cn(
           "block rounded-full bg-foreground shadow-elevation-2 transition-transform duration-150 ease-out-soft",
           variant === "compact" ? "h-3 w-3" : "h-4 w-4",

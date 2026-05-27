@@ -224,19 +224,28 @@ async function readStoredRecording(page: Page, recordingId: string): Promise<Sto
 
 async function seekByProgress(page: Page, targetMs: number, durationMs: number): Promise<void> {
   const percent = durationMs > 0 ? Math.max(0, Math.min(targetMs / durationMs, 1)) : 0;
-  const sliderThumb = page.locator('[aria-label="播放进度"]').first();
+  const targetPercent = Math.round(percent * 1000) / 10;
+  const progressControl = page.locator("[data-replay-progress-control]");
+  const sliderRoot = progressControl.locator('[aria-label="播放进度"]').first();
+  const sliderThumb = progressControl.getByRole("slider", { name: "播放进度" });
+
   await expect(sliderThumb).toBeEnabled();
-  const box = await sliderThumb.evaluate((thumb) => {
-    const root = thumb.parentElement;
-    const rect = root?.getBoundingClientRect();
-    if (!rect) return null;
-    return {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-    };
+  const rootBox = await sliderRoot.boundingBox();
+  const thumbBox = await sliderThumb.boundingBox();
+  if (!rootBox || !thumbBox) throw new Error("Replay progress slider is not visible");
+
+  await page.mouse.move(thumbBox.x + thumbBox.width / 2, thumbBox.y + thumbBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rootBox.x + rootBox.width * percent, rootBox.y + rootBox.height / 2, {
+    steps: 4,
   });
-  if (!box) throw new Error("Replay progress slider is not visible");
-  await page.mouse.click(box.x + box.width * percent, box.y + box.height / 2);
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const value = Number(await sliderThumb.getAttribute("aria-valuenow"));
+      return Math.round(value * 10) / 10;
+    })
+    .toBe(targetPercent);
+  await expect(sliderThumb).toBeEnabled();
 }

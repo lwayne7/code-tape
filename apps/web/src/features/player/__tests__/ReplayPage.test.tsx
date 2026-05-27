@@ -370,6 +370,62 @@ describe("ReplayPage", () => {
     expect(pointer.querySelector(".animate-ping")).toBeInTheDocument();
   });
 
+  it("keeps the latest pointer position after the click pulse expires", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    try {
+      render(<ReplayPage />);
+      await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+      vi.useFakeTimers();
+      act(() => {
+        replayPageMock.onTick?.(
+          {
+            editor: {
+              code: "",
+              language: "javascript",
+              cursor: null,
+              selection: null,
+              scrollTop: 0,
+              scrollLeft: 0,
+              fontSize: 14,
+              theme: "dark",
+            },
+            pointer: null,
+            media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0.8, y: 0.75 } },
+            runtime: { status: "idle", stdout: [], stderr: [], previewHtml: null, errorMessage: null },
+          },
+          [
+            {
+              id: "click-ttl",
+              seq: 1,
+              timestampMs: 100,
+              source: "pointer",
+              track: "ui",
+              type: "mouse-click",
+              payload: { x: 30, y: 16, containerWidth: 100, containerHeight: 80, button: 0 },
+            },
+          ],
+          100,
+        );
+      });
+
+      const pointer = screen.getByLabelText("回放鼠标位置");
+      expect(pointer).toHaveStyle({ left: "30%", top: "20%" });
+      expect(pointer.querySelector(".animate-ping")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(901);
+      });
+
+      const retainedPointer = screen.getByLabelText("回放鼠标位置");
+      expect(retainedPointer).toHaveStyle({ left: "30%", top: "20%" });
+      expect(retainedPointer.querySelector(".animate-ping")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("defaults display toggles on and hides replay layers when toggled off", async () => {
     const { ReplayPage } = await import("../ReplayPage");
 

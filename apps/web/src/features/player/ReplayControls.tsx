@@ -124,7 +124,7 @@ export function ReplayControls({
         </span>
       </div>
 
-      <div className="flex-1 min-w-[120px]">
+      <div className="flex-1 min-w-[120px]" data-replay-progress-control>
         <Slider
           value={currentProgressPercent}
           min={0}
