@@ -134,8 +134,12 @@ function recordingIdFromUrl(url: string): string {
 async function readStoredRecording(page: Page, recordingId: string): Promise<StoredRecording | null> {
   return page.evaluate(
     async ({ databaseName, id }) => {
-      const openRequest = indexedDB.open(databaseName, 1);
+      const openRequest = indexedDB.open(databaseName);
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        openRequest.onupgradeneeded = () => {
+          openRequest.transaction?.abort();
+          reject(new Error(`IndexedDB ${databaseName} unexpectedly required an upgrade`));
+        };
         openRequest.onerror = () => reject(openRequest.error);
         openRequest.onsuccess = () => resolve(openRequest.result);
       });

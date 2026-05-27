@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, forwardRef, useImperativeHandle } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EditorProducerDeps,
   EditorProducerHandle,
@@ -340,6 +340,11 @@ function mockDownloadApis() {
 describe("RecorderPage", () => {
   beforeEach(() => {
     recorderPageMock.reset();
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 60));
   });
 
   it("runs with the current editor language after producer-driven language changes", async () => {
