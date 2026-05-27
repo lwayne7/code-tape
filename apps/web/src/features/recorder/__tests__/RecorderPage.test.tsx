@@ -361,6 +361,12 @@ function mockDownloadApis() {
   return { createObjectURL, revokeObjectURL, click };
 }
 
+async function flushAsyncWork(turns = 6): Promise<void> {
+  for (let index = 0; index < turns; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe("RecorderPage", () => {
   beforeEach(() => {
     recorderPageMock.reset();
@@ -520,6 +526,35 @@ describe("RecorderPage", () => {
         selectedCameraDeviceId: "cam-1",
       }),
     );
+  });
+
+  it("refreshes the elapsed duration while recording", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T00:00:00.000Z"));
+    try {
+      const { RecorderPage } = await import("../RecorderPage");
+
+      render(<RecorderPage />);
+      await act(async () => {
+        await flushAsyncWork();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+      await act(async () => {
+        await flushAsyncWork();
+      });
+
+      expect(screen.getByText("录制中")).toBeInTheDocument();
+      expect(screen.getByText("00:00")).toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1_250);
+        await flushAsyncWork();
+      });
+
+      expect(screen.getByText("00:01")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("primes initial media state and camera position after recording starts", async () => {

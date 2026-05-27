@@ -62,6 +62,7 @@ const INITIAL_RUNTIME_STATE: RecorderRuntimeState = {
 const APP_VERSION = "0.0.0";
 const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20] as const;
 const IDLE_CLEANUP_GRACE_MS = 50;
+const LIVE_DURATION_REFRESH_MS = 1000;
 
 type DeviceOptions = {
   audio: DeviceInfo[];
@@ -192,12 +193,14 @@ export function RecorderPage() {
       },
       getCurrentEditorLanguage: () => currentEditorLanguage,
       getCurrentRuntimeLanguage,
+      getCurrentDurationMs: () => clock.durationMs(),
     };
   }, []);
 
   const [controllerState, setControllerState] = useState<RecordingControllerState>(
     INITIAL_CONTROLLER_STATE,
   );
+  const [displayDurationMs, setDisplayDurationMs] = useState(0);
   const [microphoneEnabled, setMicrophoneEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [editorLanguage, setEditorLanguage] = useState<RecordingLanguage>("javascript");
@@ -269,6 +272,20 @@ export function RecorderPage() {
     },
     [stack.controller],
   );
+  useEffect(() => {
+    if (controllerState.status !== "recording") {
+      setDisplayDurationMs(controllerState.durationMs);
+      return;
+    }
+
+    const refreshDuration = () => {
+      setDisplayDurationMs(stack.getCurrentDurationMs());
+    };
+
+    refreshDuration();
+    const timer = window.setInterval(refreshDuration, LIVE_DURATION_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [controllerState.durationMs, controllerState.status, stack]);
   useEffect(() => {
     void loadDevices();
   }, [loadDevices]);
@@ -559,11 +576,15 @@ export function RecorderPage() {
       stack.editorProducer.setLanguage(next);
     }
   };
+  const displayControllerState = useMemo(
+    () => ({ ...controllerState, durationMs: displayDurationMs }),
+    [controllerState, displayDurationMs],
+  );
 
   return (
     <div className="flex h-full flex-col" data-recorder-host>
       <RecorderControls
-        state={controllerState}
+        state={displayControllerState}
         microphoneEnabled={microphoneEnabled}
         cameraEnabled={cameraEnabled}
         onStart={handleStart}
