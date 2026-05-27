@@ -30,6 +30,46 @@ test("createUploadSession is idempotent per owner and idempotency key", async ()
   assert.ok(second.value.uploadTargets.every((target) => target.method === "PUT"));
 });
 
+for (const input of [
+  {
+    name: "changed local package id",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      localPackageId: "pkg-other",
+    }),
+  },
+  {
+    name: "changed asset checksum",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, sha256: "f".repeat(64) } : asset,
+      ),
+    }),
+  },
+] as const) {
+  test(`createUploadSession rejects idempotency key reuse with ${input.name}`, async () => {
+    const service = createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    });
+    const pkg = await makePackage();
+    const request = await makeCreateSessionRequest(pkg);
+
+    const first = await service.createUploadSession({ ownerId: "owner-1", input: request });
+    const second = await service.createUploadSession({
+      ownerId: "owner-1",
+      input: input.makeRequest(request),
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, false);
+    if (second.ok) return;
+    assert.equal(second.error.code, "upload-session-conflict");
+    assert.equal(second.error.message, "idempotency key reused with a different upload request");
+  });
+}
+
 test("createUploadSession rejects incomplete package asset sets", async () => {
   const service = createCloudRecordingService({
     metadata: createMemoryMetadataRepository(),

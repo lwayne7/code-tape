@@ -205,6 +205,51 @@ test("cloud API rejects duplicate upload-session asset kinds with the unified er
   });
 });
 
+test("cloud API rejects idempotency key reuse with a different upload-session body", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-idempotency-conflict",
+  });
+  const request = await makeCreateSessionRequest(await makePackage());
+  const first = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify(request),
+    }),
+  );
+
+  const second = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({ ...request, localPackageId: "pkg-other" }),
+    }),
+  );
+  const body = (await second.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 409);
+  assert.deepEqual(body, {
+    error: {
+      code: "upload-session-conflict",
+      message: "idempotency key reused with a different upload request",
+      requestId: "req-idempotency-conflict",
+    },
+  });
+});
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

@@ -53,6 +53,9 @@ export function createCloudRecordingService(deps: {
       );
       if (existing) {
         const assets = await deps.metadata.listAssets(existing.recordingId);
+        const recording = await deps.metadata.getRecording(existing.recordingId);
+        const conflict = findIdempotencyConflict(recording, assets, input);
+        if (conflict) return { ok: false, error: conflict };
         return {
           ok: true,
           value: {
@@ -206,6 +209,47 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
 
 function isRecordingAssetKind(value: string): value is RecordingAssetKind {
   return RECORDING_ASSET_KIND_SET.has(value);
+}
+
+function findIdempotencyConflict(
+  recording: CloudRecordingRecord | null,
+  assets: CloudRecordingAssetRecord[],
+  input: CreateUploadSessionRequest,
+): CloudApiError | null {
+  if (!recording) return idempotencyConflictError();
+  if (
+    recording.localPackageId !== input.localPackageId ||
+    recording.title !== input.title.trim() ||
+    recording.schemaVersion !== input.schemaVersion ||
+    recording.durationMs !== input.durationMs ||
+    recording.initialLanguage !== input.initialLanguage ||
+    recording.hasAudio !== input.hasAudio ||
+    recording.hasCamera !== input.hasCamera
+  ) {
+    return idempotencyConflictError();
+  }
+
+  const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
+  if (assetsByKind.size !== input.assets.length) return idempotencyConflictError();
+  for (const asset of input.assets) {
+    const existing = assetsByKind.get(asset.kind);
+    if (
+      !existing ||
+      existing.sha256 !== asset.sha256 ||
+      existing.sizeBytes !== asset.sizeBytes ||
+      existing.mimeType !== asset.mimeType
+    ) {
+      return idempotencyConflictError();
+    }
+  }
+  return null;
+}
+
+function idempotencyConflictError(): CloudApiError {
+  return {
+    code: "upload-session-conflict",
+    message: "idempotency key reused with a different upload request",
+  };
 }
 
 function createUploadTargets(
