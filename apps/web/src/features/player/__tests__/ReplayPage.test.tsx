@@ -402,6 +402,93 @@ describe("ReplayPage", () => {
     pause.mockRestore();
   });
 
+  it("shows a non-blocking notice when media is missing but the event stream loads", async () => {
+    replayPageMock.repository.load.mockResolvedValueOnce({
+      ok: true,
+      package: replayPageMock.packageData,
+      mediaBlob: null,
+      warnings: [{ code: "media-missing", blobId: "blob-1" }],
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    expect(screen.getByText("音视频不可用，已切换为纯事件流回放")).toBeInTheDocument();
+    expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Mock code editor")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mock replay controls")).toBeInTheDocument();
+  });
+
+  it("blocks replay when media checksum mismatches", async () => {
+    replayPageMock.repository.load.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "checksum-mismatch", target: "media" },
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+    const { MemoryRouter } = await import("react-router-dom");
+
+    render(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <ReplayPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/加载失败：checksum-mismatch/)).toBeInTheDocument());
+    expect(replayPageMock.scheduler.load).not.toHaveBeenCalled();
+    expect(screen.queryByText("音视频不可用，已切换为纯事件流回放")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["invalid-manifest", { code: "invalid-manifest" as const, message: "manifest missing" }],
+    ["unsupported-schema", { code: "unsupported-schema" as const, schemaVersion: "9.9.9" }],
+  ])("blocks replay when package load fails with %s", async (expectedCode, error) => {
+    replayPageMock.repository.load.mockResolvedValueOnce({
+      ok: false,
+      error,
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+    const { MemoryRouter } = await import("react-router-dom");
+
+    render(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <ReplayPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(new RegExp(`加载失败：${expectedCode}`))).toBeInTheDocument(),
+    );
+    expect(replayPageMock.scheduler.load).not.toHaveBeenCalled();
+    expect(screen.queryByText("音视频不可用，已切换为纯事件流回放")).not.toBeInTheDocument();
+  });
+
+  it("keeps replay controls usable in event-only mode when media is missing", async () => {
+    replayPageMock.repository.load.mockResolvedValueOnce({
+      ok: true,
+      package: replayPageMock.packageData,
+      mediaBlob: null,
+      warnings: [{ code: "media-missing", blobId: "blob-1" }],
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(replayPageMock.controlsProps).not.toBeNull());
+
+    await act(async () => {
+      await replayPageMock.controlsProps?.onSeek(10_000);
+    });
+    act(() => {
+      replayPageMock.controlsProps?.onPlayPause();
+      replayPageMock.controlsProps?.onRate(2);
+    });
+
+    expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(10_000);
+    expect(replayPageMock.scheduler.play).toHaveBeenCalled();
+    expect(replayPageMock.scheduler.setRate).toHaveBeenCalledWith(2);
+  });
+
   it("clears a load error when navigating to another replay id", async () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     replayPageMock.repository.load.mockResolvedValueOnce({
