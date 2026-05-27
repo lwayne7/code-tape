@@ -121,6 +121,9 @@ async function loadMonaco() {
     await Promise.all([
       import("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution"),
       import("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution"),
+      import("monaco-editor/esm/vs/editor/contrib/comment/browser/comment"),
+      import("monaco-editor/esm/vs/editor/contrib/format/browser/formatActions"),
+      import("monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess"),
       import("monaco-editor/esm/vs/language/typescript/monaco.contribution"),
     ]);
     defineThemes(monaco);
@@ -308,25 +311,64 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
 });
 
 function registerEditorCommands(
-  monaco: MonacoModule,
+  _monaco: MonacoModule,
   editor: Monaco.editor.IStandaloneCodeEditor,
   onCommand: (command: CodeEditorCommand) => void,
 ) {
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-    onCommand("run");
+  editor.onKeyDown((event) => {
+    const browserEvent = event.browserEvent;
+    if (browserEvent.isComposing || browserEvent.repeat) return;
+
+    if (isPrimaryShortcut(event, "Enter")) {
+      consumeShortcut(event);
+      onCommand("run");
+      return;
+    }
+
+    if (isFormatShortcut(event)) {
+      consumeShortcut(event);
+      editor.trigger("keyboard", "editor.action.formatDocument", null);
+      onCommand("format");
+      return;
+    }
+
+    if (isPrimaryShortcut(event, "/")) {
+      consumeShortcut(event);
+      editor.trigger("keyboard", "editor.action.commentLine", null);
+      onCommand("comment");
+      return;
+    }
+
+    if (isPrimaryShortcut(event, "g")) {
+      consumeShortcut(event);
+      editor.trigger("keyboard", "editor.action.gotoLine", null);
+      onCommand("go-to-line");
+    }
   });
-  editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
-    editor.trigger("keyboard", "editor.action.formatDocument", null);
-    onCommand("format");
-  });
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash, () => {
-    editor.trigger("keyboard", "editor.action.commentLine", null);
-    onCommand("comment");
-  });
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG, () => {
-    editor.trigger("keyboard", "editor.action.gotoLine", null);
-    onCommand("go-to-line");
-  });
+}
+
+function isPrimaryShortcut(event: Monaco.IKeyboardEvent, key: string): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && matchesKey(event, key);
+}
+
+function isFormatShortcut(event: Monaco.IKeyboardEvent): boolean {
+  return !event.metaKey && !event.ctrlKey && event.shiftKey && event.altKey && matchesKey(event, "f");
+}
+
+function matchesKey(event: Monaco.IKeyboardEvent, key: string): boolean {
+  const expected = key.toLowerCase();
+  const actualKey = event.browserEvent.key.toLowerCase();
+  const expectedCode = `key${expected}`;
+  return (
+    actualKey === expected
+    || event.code.toLowerCase() === expectedCode
+    || event.browserEvent.code.toLowerCase() === expectedCode
+  );
+}
+
+function consumeShortcut(event: Monaco.IKeyboardEvent) {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function applyControlledEditorState(

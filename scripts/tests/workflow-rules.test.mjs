@@ -539,6 +539,17 @@ test('extractImpactSummary stops at the next PR template section', () => {
   assert.match(result.reasons.join('\n'), /structured GitNexus impact summary/);
 });
 
+test('pull request template references the control issue without closing it', () => {
+  const template = readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
+
+  assert.match(template, /Refs #2（总控 issue，不在本 PR 中关闭）/u);
+  assert.doesNotMatch(template, /Closes #/u);
+  assert.match(template, /## 改动点/u);
+  assert.match(template, /## 影响范围/u);
+  assert.match(template, /## GitNexus 影响分析摘要/u);
+  assert.match(template, /已说明改动点和影响范围/u);
+});
+
 test('evaluateGitNexusContract accepts critical changes with matching tests and impact summary', () => {
   const result = evaluateGitNexusContract({
     changedFiles: [
