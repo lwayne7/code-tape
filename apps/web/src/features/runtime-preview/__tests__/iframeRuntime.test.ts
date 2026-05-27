@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import {
   RUNTIME_CONSOLE_ARG_LIMIT,
@@ -7,6 +8,20 @@ import {
   createIframeRuntime,
 } from "../iframeRuntime";
 import { IFRAME_BOOT_SCRIPT } from "../iframeBoot";
+
+const require = createRequire(import.meta.url);
+const { JSDOM, VirtualConsole } = require("jsdom") as {
+  JSDOM: new (
+    html: string,
+    options: {
+      runScripts: "dangerously";
+      url: string;
+      virtualConsole: { on(event: "jsdomError", listener: () => void): unknown };
+      beforeParse(window: Window): void;
+    },
+  ) => { window: Window & typeof globalThis & { close(): void } };
+  VirtualConsole: new () => { on(event: "jsdomError", listener: () => void): unknown };
+};
 
 describe("acceptRuntimeMessage — schema + source validation", () => {
   const expected = { runId: "run-1", source: null };
@@ -214,3 +229,96 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 });
+
+describe("IFRAME_BOOT_SCRIPT error reporting", () => {
+  it("reports syntax errors as runtime errors without completing", async () => {
+    const messages = await runBootScript("const broken = ;");
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).not.toHaveLength(0);
+  });
+
+  it("reports synchronous throws as runtime errors without completing", async () => {
+    const messages = await runBootScript('throw new Error("sync boom");');
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).toContain("sync boom");
+  });
+
+  it("reports rejected promises as runtime errors without completing", async () => {
+    const messages = await runBootScript('await Promise.reject(new Error("async boom"));');
+    const error = expectSingleRuntimeError(messages);
+
+    expect(error.payload.message).toContain("async boom");
+  });
+});
+
+type PostedRuntimeMessage = {
+  source?: unknown;
+  runId?: unknown;
+  type?: unknown;
+  payload?: unknown;
+};
+
+async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
+  const messages: PostedRuntimeMessage[] = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", () => undefined);
+  const dom = new JSDOM(
+    `<!doctype html><html><body><script>${IFRAME_BOOT_SCRIPT}</script></body></html>`,
+    {
+      runScripts: "dangerously",
+      url: "https://runtime.code-tape.test/",
+      virtualConsole,
+      beforeParse(window) {
+        Object.defineProperty(window, "parent", {
+          configurable: true,
+          value: {
+            postMessage(message: PostedRuntimeMessage) {
+              messages.push(message);
+            },
+          },
+        });
+      },
+    },
+  );
+
+  try {
+    dom.window.dispatchEvent(
+      new dom.window.MessageEvent("message", {
+        data: { type: "init", runId: "run-error-path", code },
+      }),
+    );
+    await waitForBootScript(dom.window);
+    return messages;
+  } finally {
+    dom.window.close();
+  }
+}
+
+function waitForBootScript(window: Window & typeof globalThis): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      window.setTimeout(resolve, 0);
+    }, 0);
+  });
+}
+
+function expectSingleRuntimeError(messages: PostedRuntimeMessage[]): {
+  payload: { message: string };
+} {
+  const errors = messages.filter((message) => message.type === "error");
+
+  expect(messages.some((message) => message.type === "ready")).toBe(true);
+  expect(messages.some((message) => message.type === "complete")).toBe(false);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toEqual(
+    expect.objectContaining({
+      source: "code-tape-runtime",
+      runId: "run-error-path",
+      type: "error",
+      payload: expect.objectContaining({ message: expect.any(String) }),
+    }),
+  );
+  return errors[0] as { payload: { message: string } };
+}
