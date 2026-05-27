@@ -47,6 +47,22 @@ function shortcut(seq: number, t: number): RecordingEvent {
   };
 }
 
+function mediaWarning(seq: number, t: number): RecordingEvent {
+  return {
+    id: `e-${seq}`,
+    seq,
+    timestampMs: t,
+    source: "media",
+    track: "media",
+    type: "media-warning",
+    payload: {
+      target: "recorder",
+      code: "recorder-error",
+      message: "Media could not be saved. Event timeline was preserved.",
+    },
+  };
+}
+
 function makePkg(
   events: RecordingEvent[],
   snapshots: RecordingSnapshot[] = [],
@@ -466,6 +482,25 @@ describe("createReplayScheduler", () => {
     expect(latest().mediaStatus).toBe("missing");
     expect(latest().timelineTimeMs).toBe(400);
     expect(scheduler.getStableState().editor.code).toBe("timeline-fallback");
+  });
+
+  it("plays an event-only package with media-warning using the timeline clock", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([mediaWarning(1, 0), content(2, 300, "event-only")], [], 5000, false));
+
+    scheduler.play();
+    wall = 400;
+    scheduler.tick();
+
+    expect(latest().mediaStatus).toBe("none");
+    expect(latest().timelineTimeMs).toBe(400);
+    expect(scheduler.getStableState().editor.code).toBe("event-only");
   });
 
   it("records drift and asks the media adapter to correct large drift", async () => {

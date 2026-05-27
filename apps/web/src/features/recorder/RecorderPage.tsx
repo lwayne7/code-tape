@@ -76,6 +76,7 @@ export function RecorderPage() {
   const startTokenRef = useRef(0);
   const stopTokenRef = useRef(0);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null);
 
   const stack = useMemo(() => {
     const clock = createRecordingClock();
@@ -149,6 +150,11 @@ export function RecorderPage() {
         console.warn("[recorder-page] persistence failed, downloading fallback package:", error);
         const zipBlob = await buildRecordingZip(pkg, mediaBlob);
         downloadBlob(zipBlob, `${safeFilenameStem(pkg.meta.title, pkg.meta.id)}.zip`);
+        if (mountedRef.current) {
+          setPersistenceNotice(
+            "保存未进入本地回放中心，已为你导出 ZIP 兜底文件。请保留该文件以便后续导入回放。",
+          );
+        }
       },
     });
     return {
@@ -280,6 +286,7 @@ export function RecorderPage() {
   const handleStart = async () => {
     if (startInFlightRef.current) return;
     startInFlightRef.current = true;
+    setPersistenceNotice(null);
     const startToken = (startTokenRef.current += 1);
     try {
       const currentDeviceOptions = deviceOptionsRef.current;
@@ -368,6 +375,7 @@ export function RecorderPage() {
     try {
       const pkg = await stack.controller.stop("user");
       if (mountedRef.current && stopTokenRef.current === stopToken) {
+        setPersistenceNotice(null);
         navigate(`/replay/${pkg.meta.id}`);
       } else {
         stack.controller.reset();
@@ -470,6 +478,14 @@ export function RecorderPage() {
         }}
         onRun={handleRun}
       />
+      {persistenceNotice ? (
+        <div
+          role="alert"
+          className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-foreground"
+        >
+          {persistenceNotice}
+        </div>
+      ) : null}
       <RecorderSetupToolbar
         language={editorLanguage}
         fontSize={editorFontSize}

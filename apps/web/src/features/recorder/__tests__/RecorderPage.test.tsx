@@ -138,7 +138,10 @@ const recorderPageMock = vi.hoisted(() => {
     exportZip: vi.fn(),
     importZip: vi.fn(),
     sweep: vi.fn(),
-    estimateQuota: vi.fn(),
+    estimateQuota: vi.fn<RecordingRepository["estimateQuota"]>(async () => ({
+      usageBytes: 0,
+      quotaBytes: 1024 * 1024 * 1024,
+    })),
   };
   let editorProducerDeps: EditorProducerDeps | null = null;
   let mediaProducerDeps: MediaProducerDeps | null = null;
@@ -224,6 +227,7 @@ const recorderPageMock = vi.hoisted(() => {
       mediaRecorder.stop.mockClear();
       repository.saveDraft.mockClear();
       repository.commit.mockClear();
+      repository.estimateQuota.mockClear();
       this.codeEditorProps = null;
       this.cameraPreviewProps = null;
       editorProducerDeps = null;
@@ -892,10 +896,38 @@ describe("RecorderPage", () => {
 
     await waitFor(() => expect(downloadApis.createObjectURL).toHaveBeenCalledWith(expect.any(Blob)));
     expect(downloadApis.click).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("保存未进入本地回放中心");
     expect(recorderPageMock.navigate).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("button", { name: "开始录制" })).not.toBeDisabled());
     expect(screen.getByRole("button", { name: "停止录制" })).toBeDisabled();
     expect(recorderPageMock.devices.release).toHaveBeenCalled();
+
+    warn.mockRestore();
+    downloadApis.click.mockRestore();
+    if ("mockRestore" in downloadApis.createObjectURL) downloadApis.createObjectURL.mockRestore();
+    if ("mockRestore" in downloadApis.revokeObjectURL) downloadApis.revokeObjectURL.mockRestore();
+  });
+
+  it("shows fallback guidance when quota preflight blocks local save", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const downloadApis = mockDownloadApis();
+    recorderPageMock.repository.estimateQuota.mockResolvedValueOnce({
+      usageBytes: 1020 * 1024,
+      quotaBytes: 1024 * 1024,
+    });
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+    await waitFor(() => expect(screen.getByRole("button", { name: "停止录制" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "停止录制" }));
+
+    await waitFor(() => expect(downloadApis.click).toHaveBeenCalledTimes(1));
+    expect(recorderPageMock.repository.saveDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("ZIP 兜底文件");
+    expect(recorderPageMock.navigate).not.toHaveBeenCalled();
 
     warn.mockRestore();
     downloadApis.click.mockRestore();

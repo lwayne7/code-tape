@@ -120,10 +120,20 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       // Materialize the blob to ArrayBuffer BEFORE opening the transaction so
       // IDB sees a structured-clone-safe value (some engines lose Blob prototype
       // through structured clone, breaking later .arrayBuffer() reads).
-      const bufferToStore = input.mediaBlob ? await input.mediaBlob.arrayBuffer() : null;
-      const mediaSha256 = bufferToStore
-        ? await sha256Blob(new Blob([bufferToStore], { type: input.mediaBlob?.type }))
-        : undefined;
+      let bufferToStore: ArrayBuffer | null = null;
+      let mediaSha256: string | undefined;
+      try {
+        bufferToStore = input.mediaBlob ? await input.mediaBlob.arrayBuffer() : null;
+        mediaSha256 = bufferToStore
+          ? await sha256Blob(new Blob([bufferToStore], { type: input.mediaBlob?.type }))
+          : undefined;
+      } catch (err) {
+        return {
+          ok: false,
+          reason: "media-write-failed",
+          message: formatErrorMessage(err, "media blob could not be prepared for storage"),
+        };
+      }
 
       const stored: StoredRecording = {
         id: recordingId,
@@ -173,8 +183,9 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
         await awaitTransaction(tx);
         return { ok: true, recordingId };
       } catch (err) {
-        const message = (err as Error).message ?? "unknown";
-        const isQuota = /QuotaExceededError/i.test(message);
+        const error = err as Error;
+        const message = error.message ?? "unknown";
+        const isQuota = /QuotaExceededError/i.test(`${error.name}:${message}`);
         return {
           ok: false,
           reason: isQuota ? "quota-exceeded" : "media-write-failed",
@@ -418,6 +429,17 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+function formatErrorMessage(err: unknown, fallback: string): string {
+  const error = err as { name?: unknown; message?: unknown };
+  const name = typeof error.name === "string" ? error.name.trim() : "";
+  const message = typeof error.message === "string" ? error.message.trim() : "";
+  if (name && message) return `${name}: ${message}`;
+  if (name) return `${name}: ${fallback}`;
+  if (message) return message;
+  const text = typeof err === "string" ? err.trim() : "";
+  return text || fallback;
 }
 
 function emptyIndexes(): RecordingIndexes {
