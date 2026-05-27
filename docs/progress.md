@@ -8,7 +8,7 @@
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| ceilf6 | #86 Fix recorder runtime output and sandbox replay | 2026-05-27 08:13:48Z |
+| - | - | - |
 
 ## 积分总览
 
