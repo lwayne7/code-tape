@@ -15,6 +15,7 @@ import { createMediaRecorderWrapper } from "@/features/media/mediaRecorder";
 import { buildRecordingZip } from "@/features/library/recordingArchive";
 import { downloadBlob, safeFilenameStem } from "@/features/library/recordingDownload";
 import { createRecordingStore } from "@/features/library/recordingStore";
+import { ShieldCheck } from "lucide-react";
 import {
   createEditorProducer,
   createMediaProducer,
@@ -22,7 +23,7 @@ import {
   createRuntimeProducer,
   createShortcutProducer,
 } from "@/features/capture";
-import { useTheme } from "@/shared/ui";
+import { IconButton, useTheme } from "@/shared/ui";
 import type {
   CameraPositionPayload,
   DeviceInfo,
@@ -51,6 +52,12 @@ const INITIAL_CONTROLLER_STATE: RecordingControllerState = {
 };
 
 const INITIAL_CAMERA_POSITION: CameraPositionPayload = { x: 0.85, y: 0.85 };
+const INITIAL_RUNTIME_STATE: RecorderRuntimeState = {
+  status: "idle",
+  stdout: [],
+  stderr: [],
+  errorMessage: null,
+};
 
 const APP_VERSION = "0.0.0";
 const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20] as const;
@@ -63,6 +70,13 @@ type DeviceOptions = {
 };
 type DeviceList = Pick<DeviceOptions, "audio" | "camera">;
 type MediaOpenRequest = { audioDeviceId?: string | null; cameraDeviceId?: string | null };
+type PermissionStatus = "granted" | "denied" | "not-found" | "busy";
+type RecorderRuntimeState = {
+  status: "idle" | "running" | "success" | "error" | "timeout";
+  stdout: string[];
+  stderr: string[];
+  errorMessage: string | null;
+};
 
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
@@ -195,6 +209,7 @@ export function RecorderPage() {
   });
   const deviceOptionsRef = useRef<DeviceOptions>(deviceOptions);
   const deviceLoadPromiseRef = useRef<Promise<DeviceList> | null>(null);
+  const deviceLoadIdRef = useRef(0);
   const audioDeviceSelectionTouchedRef = useRef(false);
   const cameraDeviceSelectionTouchedRef = useRef(false);
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string | null>(null);
@@ -202,13 +217,17 @@ export function RecorderPage() {
   const [cameraPosition, setCameraPosition] = useState<CameraPositionPayload>(
     INITIAL_CAMERA_POSITION,
   );
+  const [mediaPermissionNotice, setMediaPermissionNotice] = useState<string | null>(null);
+  const [mediaPermissionRequesting, setMediaPermissionRequesting] = useState(false);
+  const [runtimeState, setRuntimeState] = useState<RecorderRuntimeState>(INITIAL_RUNTIME_STATE);
 
-  const loadDevices = useCallback(() => {
-    if (deviceLoadPromiseRef.current) return deviceLoadPromiseRef.current;
+  const loadDevices = useCallback((options: { force?: boolean } = {}) => {
+    if (deviceLoadPromiseRef.current && !options.force) return deviceLoadPromiseRef.current;
+    const loadId = ++deviceLoadIdRef.current;
     const promise = (async () => {
       try {
         const available = await stack.devices.enumerate();
-        if (!mountedRef.current) return available;
+        if (!mountedRef.current || deviceLoadIdRef.current !== loadId) return available;
         const nextOptions = { ...available, loaded: true };
         deviceOptionsRef.current = nextOptions;
         setDeviceOptions(nextOptions);
@@ -222,7 +241,7 @@ export function RecorderPage() {
       } catch (err) {
         console.warn("[recorder-page] media devices unavailable:", err);
         stack.devices.release();
-        if (mountedRef.current) {
+        if (mountedRef.current && deviceLoadIdRef.current === loadId) {
           const nextOptions = { audio: [], camera: [], loaded: true };
           deviceOptionsRef.current = nextOptions;
           setDeviceOptions(nextOptions);
@@ -302,6 +321,25 @@ export function RecorderPage() {
     cameraDeviceSelectionTouchedRef.current = true;
     setSelectedCameraDeviceId(deviceId);
   }, []);
+  const handleRequestMediaPermission = useCallback(async () => {
+    if (mediaPermissionRequesting || stack.controller.state.status !== "idle") return;
+    setMediaPermissionRequesting(true);
+    setMediaPermissionNotice("正在请求浏览器设备权限...");
+    try {
+      const [audio, camera] = await Promise.all([
+        stack.devices.requestPermission("audio"),
+        stack.devices.requestPermission("camera"),
+      ]);
+      await loadDevices({ force: true });
+      setMediaPermissionNotice(formatPermissionNotice(audio, camera));
+    } catch (err) {
+      console.warn("[recorder-page] media permission request failed:", err);
+      await loadDevices({ force: true });
+      setMediaPermissionNotice("设备权限申请失败，可选择无媒体录制。");
+    } finally {
+      if (mountedRef.current) setMediaPermissionRequesting(false);
+    }
+  }, [loadDevices, mediaPermissionRequesting, stack.controller, stack.devices]);
 
   const handleStart = async () => {
     if (startInFlightRef.current) return;
@@ -474,10 +512,44 @@ export function RecorderPage() {
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
     stack.editorProducer.flushPending();
-    await stack.runtimeProducer.trigger({
-      language: stack.getCurrentRuntimeLanguage(),
-      source: editor.getValue(),
-    });
+    setRuntimeState({ status: "running", stdout: [], stderr: [], errorMessage: null });
+    try {
+      const result = await stack.runtimeProducer.trigger({
+        language: stack.getCurrentRuntimeLanguage(),
+        source: editor.getValue(),
+      });
+      if (result.status === "complete") {
+        setRuntimeState({
+          status: "success",
+          stdout: result.stdout,
+          stderr: result.stderr,
+          errorMessage: null,
+        });
+        return;
+      }
+      if (result.status === "timeout") {
+        setRuntimeState({
+          status: "timeout",
+          stdout: result.stdout,
+          stderr: result.stderr,
+          errorMessage: "runtime-timeout",
+        });
+        return;
+      }
+      setRuntimeState({
+        status: "error",
+        stdout: result.stdout,
+        stderr: result.stderr,
+        errorMessage: result.message,
+      });
+    } catch (err) {
+      setRuntimeState({
+        status: "error",
+        stdout: [],
+        stderr: [],
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleLanguageChange = (next: RecordingLanguage) => {
@@ -525,11 +597,14 @@ export function RecorderPage() {
         cameraDevices={deviceOptions.camera}
         selectedAudioDeviceId={selectedAudioDeviceId}
         selectedCameraDeviceId={selectedCameraDeviceId}
+        permissionNotice={mediaPermissionNotice}
+        permissionRequesting={mediaPermissionRequesting}
         disabled={controllerState.status !== "idle"}
         onLanguageChange={handleLanguageChange}
         onFontSizeChange={setEditorFontSize}
         onAudioDeviceChange={handleAudioDeviceChange}
         onCameraDeviceChange={handleCameraDeviceChange}
+        onRequestMediaPermission={handleRequestMediaPermission}
       />
       <div className="grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
         <div className="relative border-r border-border">
@@ -553,7 +628,14 @@ export function RecorderPage() {
             }}
           />
         </div>
-        <PreviewPane runtime={stack.runtime} />
+        <div className="flex min-h-0 flex-col">
+          <PreviewPane
+            runtime={stack.runtime}
+            className="min-h-0 flex-1"
+            onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
+          />
+          <RecorderRuntimeOutputPanel runtime={runtimeState} />
+        </div>
       </div>
     </div>
   );
@@ -585,11 +667,14 @@ type RecorderSetupToolbarProps = {
   cameraDevices: DeviceInfo[];
   selectedAudioDeviceId: string | null;
   selectedCameraDeviceId: string | null;
+  permissionNotice: string | null;
+  permissionRequesting: boolean;
   disabled: boolean;
   onLanguageChange(language: RecordingLanguage): void;
   onFontSizeChange(size: number): void;
   onAudioDeviceChange(deviceId: string | null): void;
   onCameraDeviceChange(deviceId: string | null): void;
+  onRequestMediaPermission(): void;
 };
 
 function RecorderSetupToolbar({
@@ -599,11 +684,14 @@ function RecorderSetupToolbar({
   cameraDevices,
   selectedAudioDeviceId,
   selectedCameraDeviceId,
+  permissionNotice,
+  permissionRequesting,
   disabled,
   onLanguageChange,
   onFontSizeChange,
   onAudioDeviceChange,
   onCameraDeviceChange,
+  onRequestMediaPermission,
 }: RecorderSetupToolbarProps) {
   return (
     <div className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-2">
@@ -651,6 +739,19 @@ function RecorderSetupToolbar({
           })),
         ]}
       />
+      <IconButton
+        label="申请设备权限"
+        icon={<ShieldCheck size={15} />}
+        size="sm"
+        variant="subtle"
+        disabled={disabled || permissionRequesting}
+        onClick={onRequestMediaPermission}
+      />
+      {permissionNotice ? (
+        <span role="status" aria-live="polite" className="text-xs text-muted">
+          {permissionNotice}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -690,6 +791,63 @@ function eventOnlyMedia(warnings: OpenStreamResult["warnings"] = []): OpenStream
     warnings,
     capability: INITIAL_CONTROLLER_STATE.mediaCapability,
   };
+}
+
+function RecorderRuntimeOutputPanel({ runtime }: { runtime: RecorderRuntimeState }) {
+  const hasOutput = runtime.stdout.length > 0 || runtime.stderr.length > 0 || runtime.errorMessage;
+
+  return (
+    <section className="border-t border-border bg-background px-4 py-3" aria-label="Runtime output">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-xs font-semibold uppercase text-muted">Console</h2>
+        <span className="rounded-sm border border-border px-2 py-0.5 text-[11px] font-medium text-muted">
+          {runtime.status}
+        </span>
+      </div>
+      {hasOutput ? (
+        <div className="max-h-40 space-y-2 overflow-auto font-mono text-xs leading-5">
+          {runtime.stdout.map((line, index) => (
+            <pre key={`stdout-${index}`} className="whitespace-pre-wrap text-foreground">
+              {line}
+            </pre>
+          ))}
+          {runtime.stderr.map((line, index) => (
+            <pre key={`stderr-${index}`} className="whitespace-pre-wrap text-warning">
+              {line}
+            </pre>
+          ))}
+          {runtime.errorMessage ? (
+            <pre className="whitespace-pre-wrap text-danger">{runtime.errorMessage}</pre>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-xs text-muted">No output</p>
+      )}
+    </section>
+  );
+}
+
+function formatPermissionNotice(audio: PermissionStatus, camera: PermissionStatus): string {
+  if (audio === "granted" && camera === "granted") return "设备权限已授权。";
+  if (audio === "denied" && camera === "denied") return "麦克风和摄像头权限被拒绝，可选择无媒体录制。";
+  const parts = [
+    `麦克风${permissionStatusLabel(audio)}`,
+    `摄像头${permissionStatusLabel(camera)}`,
+  ];
+  return `${parts.join("，")}。`;
+}
+
+function permissionStatusLabel(status: PermissionStatus): string {
+  switch (status) {
+    case "granted":
+      return "已授权";
+    case "denied":
+      return "权限被拒绝";
+    case "not-found":
+      return "未找到设备";
+    case "busy":
+      return "设备被占用";
+  }
 }
 
 function isActiveRecordingStatus(status: RecordingControllerStatus): boolean {

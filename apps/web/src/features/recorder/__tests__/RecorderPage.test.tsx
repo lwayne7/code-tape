@@ -6,6 +6,7 @@ import type {
   EditorProducerHandle,
   MediaProducerDeps,
   PointerProducerDeps,
+  RuntimeProducerHandle,
 } from "@/features/capture/types";
 import type { CodeEditorHandle, CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { CameraPreviewProps } from "@/features/media/CameraPreview";
@@ -33,7 +34,7 @@ const recorderPageMock = vi.hoisted(() => {
   const getVideoTracks = vi.fn(() => [videoTrack]);
   const setModelLanguage = vi.fn();
   const navigate = vi.fn();
-  const trigger = vi.fn(async () => ({
+  const trigger = vi.fn<RuntimeProducerHandle["trigger"]>(async () => ({
     runId: "run-test",
     status: "complete" as const,
     stdout: [],
@@ -234,6 +235,7 @@ const recorderPageMock = vi.hoisted(() => {
       shortcutProducer.stop.mockClear();
       shortcutProducer.dispose.mockClear();
       devices.enumerate.mockClear();
+      devices.requestPermission.mockClear();
       devices.openStream.mockClear();
       devices.setTrackEnabled.mockClear();
       devices.release.mockClear();
@@ -393,6 +395,40 @@ describe("RecorderPage", () => {
     expect(recorderPageMock.flushPending.mock.invocationCallOrder[0]).toBeLessThan(
       recorderPageMock.trigger.mock.invocationCallOrder[0],
     );
+  });
+
+  it("renders console output from a run in the recorder right panel", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    recorderPageMock.editorValue.current = "console.log(1);";
+    recorderPageMock.trigger.mockResolvedValueOnce({
+      runId: "run-console",
+      status: "complete",
+      stdout: ["1"],
+      stderr: [],
+      previewHtml: "<body></body>",
+    });
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "运行代码" }));
+
+    const output = await screen.findByRole("region", { name: "Runtime output" });
+    expect(output).toHaveTextContent("success");
+    expect(output).toHaveTextContent("1");
+  });
+
+  it("requests browser media permissions from the setup toolbar and refreshes devices", async () => {
+    recorderPageMock.devices.requestPermission.mockResolvedValue("granted");
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
+    recorderPageMock.devices.enumerate.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "申请设备权限" }));
+
+    await waitFor(() => expect(recorderPageMock.devices.requestPermission).toHaveBeenCalledWith("audio"));
+    expect(recorderPageMock.devices.requestPermission).toHaveBeenCalledWith("camera");
+    await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
   });
 
   it("keeps producers reusable after StrictMode idle cleanup", async () => {
