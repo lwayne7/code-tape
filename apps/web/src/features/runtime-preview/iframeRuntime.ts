@@ -21,6 +21,11 @@ const RUNTIME_CSP =
 const REPLAY_PREVIEW_CSP =
   "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
 
+type SanitizedPreviewHtml = {
+  headHtml: string;
+  bodyHtml: string;
+};
+
 /**
  * Validate that an incoming postMessage genuinely came from our iframe runtime
  * and matches the current run. Exported so unit tests can poke at the predicate
@@ -50,7 +55,7 @@ function buildSrcDoc(bootScript: string): string {
 
 function buildPreviewSrcDoc(previewHtml: string): string {
   const safePreviewHtml = sanitizePreviewHtml(previewHtml);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${REPLAY_PREVIEW_CSP}" /><title>code-tape replay preview</title></head>${safePreviewHtml}</html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${REPLAY_PREVIEW_CSP}" /><title>code-tape replay preview</title>${safePreviewHtml.headHtml}</head>${safePreviewHtml.bodyHtml}</html>`;
 }
 
 function isRuntimePayload(type: string, payload: object): boolean {
@@ -79,14 +84,27 @@ function limitString(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
 
-function sanitizePreviewHtml(previewHtml: string): string {
+function sanitizePreviewHtml(previewHtml: string): SanitizedPreviewHtml {
   const cappedPreviewHtml = limitString(previewHtml, RUNTIME_PREVIEW_HTML_MAX_CHARS);
   if (typeof DOMParser === "undefined") {
-    return cappedPreviewHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+    return sanitizePreviewHtmlWithoutParser(cappedPreviewHtml);
   }
   const doc = new DOMParser().parseFromString(cappedPreviewHtml, "text/html");
   doc.querySelectorAll("script").forEach((script) => script.remove());
-  return doc.body ? doc.body.outerHTML : "";
+  return {
+    headHtml: doc.head?.innerHTML ?? "",
+    bodyHtml: doc.body?.outerHTML ?? "<body></body>",
+  };
+}
+
+function sanitizePreviewHtmlWithoutParser(previewHtml: string): SanitizedPreviewHtml {
+  const withoutScripts = previewHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const headMatch = withoutScripts.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
+  const bodyMatch = withoutScripts.match(/<body\b([^>]*)>([\s\S]*?)<\/body>/i);
+  return {
+    headHtml: headMatch?.[1] ?? "",
+    bodyHtml: bodyMatch ? `<body${bodyMatch[1]}>${bodyMatch[2]}</body>` : `<body>${withoutScripts}</body>`,
+  };
 }
 
 function sanitizeRuntimeMessage(message: RuntimeMessage): RuntimeMessage {
