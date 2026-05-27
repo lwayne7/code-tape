@@ -1,9 +1,11 @@
 import type { CloudRecordingService } from "../cloud/cloudRecordingService.js";
+import { RECORDING_ASSET_KINDS } from "../cloud/types.js";
 import type {
   CloudApiError,
   CloudApiErrorCode,
   CloudResult,
   CreateUploadSessionRequest,
+  RecordingAssetKind,
 } from "../cloud/types.js";
 
 export type CloudApiHandler = (request: Request) => Promise<Response>;
@@ -23,6 +25,8 @@ const STATUS_BY_ERROR: Record<CloudApiErrorCode, number> = {
   "media-type-not-supported": 415,
   "rate-limited": 429,
 };
+const RECORDING_ASSET_KIND_SET = new Set<string>(RECORDING_ASSET_KINDS);
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 
 export function createCloudApiHandler(deps: {
   service: CloudRecordingService;
@@ -93,14 +97,17 @@ function parseCreateUploadSessionRequest(
     return { ok: false, error: badRequestError() };
   }
 
-  const assets = [];
+  const assets: CreateUploadSessionRequest["assets"] = [];
   for (const asset of value.assets) {
     if (
       !isJsonObject(asset) ||
       !isString(asset.kind) ||
+      !isRecordingAssetKind(asset.kind) ||
       !isString(asset.sha256) ||
-      !isFiniteNumber(asset.sizeBytes) ||
-      !isString(asset.mimeType)
+      !SHA256_HEX_PATTERN.test(asset.sha256) ||
+      !isPositiveSafeInteger(asset.sizeBytes) ||
+      !isString(asset.mimeType) ||
+      asset.mimeType.trim().length < 1
     ) {
       return { ok: false, error: badRequestError() };
     }
@@ -118,14 +125,18 @@ function parseCreateUploadSessionRequest(
       idempotencyKey: value.idempotencyKey,
       localPackageId: value.localPackageId,
       title: value.title,
-      schemaVersion: value.schemaVersion,
+      schemaVersion: value.schemaVersion as CreateUploadSessionRequest["schemaVersion"],
       durationMs: value.durationMs,
-      initialLanguage: value.initialLanguage,
+      initialLanguage: value.initialLanguage as CreateUploadSessionRequest["initialLanguage"],
       hasAudio: value.hasAudio,
       hasCamera: value.hasCamera,
-      assets: assets as CreateUploadSessionRequest["assets"],
-    } as CreateUploadSessionRequest,
+      assets,
+    },
   };
+}
+
+function isRecordingAssetKind(value: string): value is RecordingAssetKind {
+  return RECORDING_ASSET_KIND_SET.has(value);
 }
 
 function isString(value: unknown): value is string {
@@ -134,6 +145,10 @@ function isString(value: unknown): value is string {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function readOwnerToken(request: Request): string | null {

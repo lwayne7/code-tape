@@ -16,7 +16,7 @@ test("createUploadSession is idempotent per owner and idempotency key", async ()
     objectStorage: createMemoryObjectStorage(),
   });
   const pkg = await makePackage();
-  const request = makeCreateSessionRequest(pkg);
+  const request = await makeCreateSessionRequest(pkg);
 
   const first = await service.createUploadSession({ ownerId: "owner-1", input: request });
   const second = await service.createUploadSession({ ownerId: "owner-1", input: request });
@@ -36,7 +36,7 @@ test("createUploadSession rejects incomplete package asset sets", async () => {
     objectStorage: createMemoryObjectStorage(),
   });
   const pkg = await makePackage();
-  const request = makeCreateSessionRequest(pkg);
+  const request = await makeCreateSessionRequest(pkg);
 
   const result = await service.createUploadSession({
     ownerId: "owner-1",
@@ -52,6 +52,80 @@ test("createUploadSession rejects incomplete package asset sets", async () => {
   assert.match(result.error.message, /snapshots/);
 });
 
+for (const input of [
+  {
+    name: "unsupported asset kind",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: [
+        ...request.assets,
+        {
+          ...request.assets[0]!,
+          kind: "trace" as CreateUploadSessionRequest["assets"][number]["kind"],
+        },
+      ],
+    }),
+    message: /unsupported asset kind: trace/,
+  },
+  {
+    name: "duplicate asset kind",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: [...request.assets, { ...request.assets[0]! }],
+    }),
+    message: /duplicate asset kind: manifest/,
+  },
+  {
+    name: "invalid asset checksum",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, sha256: "sha256-placeholder" } : asset,
+      ),
+    }),
+    message: /invalid asset checksum: manifest/,
+  },
+  {
+    name: "invalid asset size",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, sizeBytes: -1 } : asset,
+      ),
+    }),
+    message: /invalid asset size: manifest/,
+  },
+  {
+    name: "empty asset mime type",
+    makeRequest: (request: CreateUploadSessionRequest): CreateUploadSessionRequest => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, mimeType: " " } : asset,
+      ),
+    }),
+    message: /invalid asset mime type: manifest/,
+  },
+] as const) {
+  test(`createUploadSession rejects ${input.name}`, async () => {
+    const service = createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    });
+    const pkg = await makePackage();
+    const request = await makeCreateSessionRequest(pkg);
+
+    const result = await service.createUploadSession({
+      ownerId: "owner-1",
+      input: input.makeRequest(request),
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.error.code, "invalid-manifest");
+    assert.match(result.error.message, input.message);
+  });
+}
+
 test("completeUpload does not regress a completed recording back to processing", async () => {
   const metadata = createMemoryMetadataRepository();
   const service = createCloudRecordingService({
@@ -59,7 +133,7 @@ test("completeUpload does not regress a completed recording back to processing",
     objectStorage: createMemoryObjectStorage(),
   });
   const pkg = await makePackage();
-  const request = makeCreateSessionRequest(pkg);
+  const request = await makeCreateSessionRequest(pkg);
   const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
   assert.equal(created.ok, true);
   if (!created.ok) return;
@@ -135,7 +209,7 @@ async function makePackage(): Promise<RecordingPackageV1> {
   };
 }
 
-function makeCreateSessionRequest(pkg: RecordingPackageV1): CreateUploadSessionRequest {
+async function makeCreateSessionRequest(pkg: RecordingPackageV1): Promise<CreateUploadSessionRequest> {
   return {
     idempotencyKey: "idem-1",
     localPackageId: pkg.manifest.packageId,
@@ -145,20 +219,20 @@ function makeCreateSessionRequest(pkg: RecordingPackageV1): CreateUploadSessionR
     initialLanguage: pkg.meta.initialLanguage,
     hasAudio: false,
     hasCamera: false,
-    assets: [
+    assets: await Promise.all([
       asset("manifest", pkg.manifest),
       asset("meta", pkg.meta),
       asset("events", pkg.events),
       asset("snapshots", pkg.snapshots),
-    ],
+    ]),
   };
 }
 
-function asset(kind: "manifest" | "meta" | "events" | "snapshots", value: unknown) {
+async function asset(kind: "manifest" | "meta" | "events" | "snapshots", value: unknown) {
   const body = canonicalStringify(value);
   return {
     kind,
-    sha256: "sha256-placeholder",
+    sha256: await sha256Hex(body),
     sizeBytes: new TextEncoder().encode(body).byteLength,
     mimeType: "application/json",
   };

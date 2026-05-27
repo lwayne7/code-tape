@@ -98,6 +98,42 @@ for (const input of [
       assets: [{ kind: "manifest", sha256: 123, sizeBytes: "bad", mimeType: null }],
     }),
   },
+  {
+    name: "unknown asset kind",
+    body: await makeCreateSessionBody((request) => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, kind: "trace" } : asset,
+      ),
+    })),
+  },
+  {
+    name: "invalid asset checksum",
+    body: await makeCreateSessionBody((request) => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, sha256: "sha256-placeholder" } : asset,
+      ),
+    })),
+  },
+  {
+    name: "invalid asset size",
+    body: await makeCreateSessionBody((request) => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, sizeBytes: -1 } : asset,
+      ),
+    })),
+  },
+  {
+    name: "empty asset mime type",
+    body: await makeCreateSessionBody((request) => ({
+      ...request,
+      assets: request.assets.map((asset) =>
+        asset.kind === "manifest" ? { ...asset, mimeType: " " } : asset,
+      ),
+    })),
+  },
 ] as const) {
   test(`cloud API returns the unified error shape for ${input.name} upload-session bodies`, async () => {
     const handler = createCloudApiHandler({
@@ -132,6 +168,42 @@ for (const input of [
     });
   });
 }
+
+test("cloud API rejects duplicate upload-session asset kinds with the unified error shape", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-duplicate-kind",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: await makeCreateSessionBody((request) => ({
+        ...request,
+        assets: [...request.assets, { ...request.assets[0]! }],
+      })),
+    }),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(body, {
+    error: {
+      code: "invalid-manifest",
+      message: "duplicate asset kind: manifest",
+      requestId: "req-duplicate-kind",
+    },
+  });
+});
 
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
@@ -190,6 +262,12 @@ async function makeCreateSessionRequest(pkg: RecordingPackageV1) {
       asset("snapshots", pkg.snapshots),
     ]),
   };
+}
+
+async function makeCreateSessionBody(
+  mutate: (request: Awaited<ReturnType<typeof makeCreateSessionRequest>>) => unknown,
+) {
+  return JSON.stringify(mutate(await makeCreateSessionRequest(await makePackage())));
 }
 
 async function asset(kind: "manifest" | "meta" | "events" | "snapshots", value: unknown) {

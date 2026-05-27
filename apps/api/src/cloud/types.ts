@@ -1,13 +1,16 @@
 import type { RecordingLanguage, RecordingSchemaVersion } from "@code-tape/recording-schema";
 
-export type RecordingAssetKind =
-  | "manifest"
-  | "meta"
-  | "events"
-  | "snapshots"
-  | "indexes"
-  | "media"
-  | "thumbnail";
+export const RECORDING_ASSET_KINDS = [
+  "manifest",
+  "meta",
+  "events",
+  "snapshots",
+  "indexes",
+  "media",
+  "thumbnail",
+] as const;
+
+export type RecordingAssetKind = (typeof RECORDING_ASSET_KINDS)[number];
 
 export type RecordingStatus =
   | "uploading"

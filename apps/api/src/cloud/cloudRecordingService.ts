@@ -1,6 +1,7 @@
 import { RECORDING_SCHEMA_VERSION } from "@code-tape/recording-schema";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
+import { RECORDING_ASSET_KINDS } from "./types.js";
 import type {
   CloudApiError,
   CloudRecordingAssetRecord,
@@ -17,6 +18,8 @@ import type {
 
 const REQUIRED_ASSETS: RecordingAssetKind[] = ["manifest", "meta", "events", "snapshots"];
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const RECORDING_ASSET_KIND_SET = new Set<string>(RECORDING_ASSET_KINDS);
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 
 export type CloudRecordingService = {
   createUploadSession(input: {
@@ -168,6 +171,25 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
       message: `unsupported schemaVersion: ${input.schemaVersion}`,
     };
   }
+  const seenKinds = new Set<RecordingAssetKind>();
+  for (const asset of input.assets) {
+    if (!isRecordingAssetKind(asset.kind)) {
+      return { code: "invalid-manifest", message: `unsupported asset kind: ${asset.kind}` };
+    }
+    if (seenKinds.has(asset.kind)) {
+      return { code: "invalid-manifest", message: `duplicate asset kind: ${asset.kind}` };
+    }
+    seenKinds.add(asset.kind);
+    if (!SHA256_HEX_PATTERN.test(asset.sha256)) {
+      return { code: "invalid-manifest", message: `invalid asset checksum: ${asset.kind}` };
+    }
+    if (!Number.isSafeInteger(asset.sizeBytes) || asset.sizeBytes <= 0) {
+      return { code: "invalid-manifest", message: `invalid asset size: ${asset.kind}` };
+    }
+    if (asset.mimeType.trim().length < 1) {
+      return { code: "invalid-manifest", message: `invalid asset mime type: ${asset.kind}` };
+    }
+  }
   const kinds = new Set(input.assets.map((asset) => asset.kind));
   const missing = REQUIRED_ASSETS.filter((kind) => !kinds.has(kind));
   if (missing.length > 0) {
@@ -180,6 +202,10 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     return { code: "invalid-manifest", message: "title must be 1 to 80 characters" };
   }
   return null;
+}
+
+function isRecordingAssetKind(value: string): value is RecordingAssetKind {
+  return RECORDING_ASSET_KIND_SET.has(value);
 }
 
 function createUploadTargets(
