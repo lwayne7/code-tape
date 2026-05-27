@@ -413,7 +413,10 @@ function scheduleOverlayCleanup(
   if (hasPointer) {
     if (pointerTimerRef.current) clearTimeout(pointerTimerRef.current);
     pointerTimerRef.current = setTimeout(() => {
-      setOverlayState((current) => ({ ...current, pointer: null }));
+      setOverlayState((current) => ({
+        ...current,
+        pointer: current.pointer ? { ...current.pointer, clicked: false } : null,
+      }));
     }, TRANSIENT_OVERLAY_TTL_MS);
   }
   if (hasShortcut) {
