@@ -1,10 +1,18 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SubtitlePanel } from "../SubtitlePanel";
-import type { SubtitleStore, SubtitleTrack, SubtitleTrackDraft, SubtitleTranscriber } from "../types";
+import type {
+  SubtitleChapter,
+  SubtitlePostProcessor,
+  SubtitleStore,
+  SubtitleTrack,
+  SubtitleTrackDraft,
+  SubtitleTranscriber,
+} from "../types";
 
 function createMemorySubtitleStore(): SubtitleStore {
   const tracks = new Map();
+  const chaptersByRecordingId = new Map<string, SubtitleChapter[]>();
   return {
     async load(recordingId) {
       return tracks.get(recordingId) ?? null;
@@ -12,8 +20,15 @@ function createMemorySubtitleStore(): SubtitleStore {
     async save(track) {
       tracks.set(track.recordingId, track);
     },
+    async loadChapters(recordingId) {
+      return chaptersByRecordingId.get(recordingId) ?? [];
+    },
+    async saveChapters(recordingId, chapters) {
+      chaptersByRecordingId.set(recordingId, chapters);
+    },
     async remove(recordingId) {
       tracks.delete(recordingId);
+      chaptersByRecordingId.delete(recordingId);
     },
   };
 }
@@ -86,6 +101,102 @@ describe("SubtitlePanel", () => {
     );
   });
 
+  it("runs local LLM post-processing to correct subtitles and render seekable chapters", async () => {
+    const store = createMemorySubtitleStore();
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(async () => ({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [
+          { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+          { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
+        ],
+      })),
+    };
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => ({
+        segments: [
+          { id: "subtitle-1", text: "useState hook" },
+          { id: "subtitle-2", text: "渲染 result" },
+        ],
+        chapters: [{ title: "代码实现", startMs: 1_000, endMs: 3_000 }],
+      })),
+    };
+    const onSeek = vi.fn();
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={1_500}
+        onSeek={onSeek}
+        store={store}
+        transcriber={transcriber}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "生成字幕" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /代码实现/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /代码实现/ }));
+
+    expect(postProcessor.process).toHaveBeenCalled();
+    expect(onSeek).toHaveBeenCalledWith(1_000);
+    await expect(store.loadChapters("recording-1")).resolves.toEqual([
+      { id: "chapter-1", title: "代码实现", startMs: 1_000, endMs: 3_000 },
+    ]);
+  });
+
+  it("keeps ASR subtitles when local LLM post-processing fails", async () => {
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(async () => ({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" }],
+      })),
+    };
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => {
+        throw new Error("LLM JSON parse failed");
+      }),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={transcriber}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "生成字幕" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"));
+    expect(screen.getByText("use state hook")).toBeInTheDocument();
+  });
+
   it("surfaces generation failure without blocking replay controls", async () => {
     const transcriber: SubtitleTranscriber = {
       transcribe: vi.fn(async () => {
@@ -120,6 +231,8 @@ describe("SubtitlePanel", () => {
     const store: SubtitleStore = {
       load: vi.fn(() => loadedTrack.promise),
       save: vi.fn(),
+      loadChapters: vi.fn(async () => []),
+      saveChapters: vi.fn(),
       remove: vi.fn(),
     };
 
@@ -154,11 +267,53 @@ describe("SubtitlePanel", () => {
     expect(generateButton).not.toBeDisabled();
   });
 
+  it("keeps saved subtitles visible when saved chapters fail to load", async () => {
+    const store: SubtitleStore = {
+      load: vi.fn(async () => ({
+        recordingId: "recording-1",
+        generatedAt: "2026-05-28T00:00:00.000Z",
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "useState hook" }],
+      })),
+      save: vi.fn(),
+      loadChapters: vi.fn(async () => {
+        throw new Error("chapter store unavailable");
+      }),
+      saveChapters: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("ignores a generated track after switching to another recording", async () => {
     const generatedTrack = createDeferred<SubtitleTrackDraft>();
     const store: SubtitleStore = {
       load: vi.fn(async () => null),
       save: vi.fn(async () => undefined),
+      loadChapters: vi.fn(async () => []),
+      saveChapters: vi.fn(),
       remove: vi.fn(),
     };
     const transcriber: SubtitleTranscriber = {

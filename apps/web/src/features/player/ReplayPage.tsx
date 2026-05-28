@@ -312,6 +312,12 @@ export function ReplayPage() {
           durationMs={pkg?.meta.durationMs ?? 0}
           currentTimeMs={schedulerState.timelineTimeMs}
           onSeek={(target) => scheduler.seek(target)}
+          postProcessorContext={{
+            language: stableState.editor.language,
+            code: stableState.editor.code,
+            runtimeOutput: replayRuntimeOutputText(stableState.runtime),
+            glossary: DEFAULT_SUBTITLE_GLOSSARY,
+          }}
         />
       ) : null}
       <ReplayControls
@@ -337,6 +343,26 @@ export function ReplayPage() {
       />
     </div>
   );
+}
+
+const DEFAULT_SUBTITLE_GLOSSARY = [
+  "React",
+  "Vue",
+  "TypeScript",
+  "JavaScript",
+  "CSS",
+  "Vite",
+  "Monaco",
+  "WebRTC",
+  "IndexedDB",
+  "code-tape",
+  "RecordingPackageV1",
+];
+
+function replayRuntimeOutputText(runtime: ReplayStableState["runtime"]): string {
+  return [...runtime.stdout, ...runtime.stderr, runtime.errorMessage]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 }
 
 function overlayStateFromEvents(
