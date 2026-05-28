@@ -123,6 +123,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       expect.objectContaining({ do_sample: false, return_full_text: false }),
     );
     expect(JSON.stringify(pipeline.mock.calls[0]?.[0])).toContain("use state hook");
+    expect(JSON.stringify(pipeline.mock.calls[0]?.[0])).not.toContain('"language"');
     expect(result).toEqual({
       segments: [
         { id: "subtitle-1", text: "useState hook" },
@@ -154,7 +155,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
     });
     expect(pipeline).toHaveBeenCalledTimes(2);
-    expect(JSON.stringify(pipeline.mock.calls[1]?.[0])).toContain("上一次输出未包含可解析的 JSON");
+    expect(JSON.stringify(pipeline.mock.calls[1]?.[0])).toContain("Previous output did not contain a parseable JSON");
   });
 
   it("drops invented chapters that start after the final input subtitle", async () => {
@@ -353,8 +354,8 @@ describe("buildSubtitlePostProcessorPrompt", () => {
     });
 
     expect(prompt).toContain("只输出 JSON");
-    expect(prompt).toContain("中文内容输出简体中文");
-    expect(prompt).toContain("英文原句、英文短句和英文自然语言保持英文");
+    expect(prompt).toContain("修正前端术语、变量名、函数名、组件名");
+    expect(prompt).not.toContain("简体中文");
     expect(prompt).toContain("只返回需要修改的 segments");
     expect(prompt).toContain("segments");
     expect(prompt).toContain("chapters");

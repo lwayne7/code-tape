@@ -17,7 +17,7 @@
 2. 调用 teacher 模型：让 `gpt-5.5` 按 code-tape 输出契约生成修正字幕和章节 JSON。
 3. 校验 teacher 输出：`segments` 可以只包含需要修改的字幕段，但不能包含未知或重复 segment id；必须包含非空 `chapters` 数组，不能包含密钥形态文本。
 4. 生成 SFT JSONL：保存为三轮 chat record，供 LoRA / SFT 训练 student 模型。
-5. 训练 student：使用小型 instruct 模型做 LoRA，评估 JSON 合法率、术语准确率、简体中文一致性、中英混合保真率和章节边界误差。
+5. 训练 student：使用小型 instruct 模型做 LoRA，评估 JSON 合法率、术语准确率、稀疏 segment 合法性和章节边界误差。
 6. 发布公开模型：将 adapter 或合并后的模型发布到 Hugging Face，再导出 Transformers.js 兼容 ONNX。
 
 ## 本地命令
@@ -91,6 +91,8 @@ python3 ml/subtitle-postprocessor/merge_lora.py \
   --hub-model-id ceilf6/code-tape-subtitle-postprocessor-merged
 ```
 
+合并脚本会优先尝试 adapter 目录中的 tokenizer；adapter-only 目录没有 tokenizer 文件时，自动回退到 `--base-model` 的 tokenizer。
+
 需要临时验证其他模型时，可以用环境变量覆盖：
 
 ```bash
@@ -105,6 +107,4 @@ VITE_SUBTITLE_POSTPROCESSOR_MODEL=onnx-community/Qwen2.5-0.5B-Instruct npm run d
   - JSON 合法率。
   - `segments` 稀疏输出不包含未知或重复 id，未返回字幕段能保留原文。
   - React / TypeScript / code-tape 术语保持。
-  - 中文输出为简体中文。
-  - 中文一句、英文一句的字幕保持自然混合。
   - 章节按时间递增且不重叠。

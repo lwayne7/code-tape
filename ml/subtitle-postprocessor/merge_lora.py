@@ -27,6 +27,18 @@ def require_supported_python() -> None:
         raise SystemExit("Python >= 3.10 is required for the subtitle fine-tuning toolchain")
 
 
+def load_tokenizer(auto_tokenizer, adapter_dir: str, base_model: str, trust_remote_code: bool):
+    last_error: Exception | None = None
+    for source in (adapter_dir, base_model):
+        try:
+            return auto_tokenizer.from_pretrained(source, trust_remote_code=trust_remote_code)
+        except (OSError, ValueError) as error:
+            last_error = error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no tokenizer source configured")
+
+
 def main() -> None:
     require_supported_python()
     args = build_parser().parse_args()
@@ -38,7 +50,7 @@ def main() -> None:
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(args.adapter_dir, trust_remote_code=args.trust_remote_code)
+    tokenizer = load_tokenizer(AutoTokenizer, args.adapter_dir, args.base_model, args.trust_remote_code)
     model = AutoModelForCausalLM.from_pretrained(args.base_model, device_map="auto", trust_remote_code=args.trust_remote_code)
     merged_model = PeftModel.from_pretrained(model, args.adapter_dir).merge_and_unload()
     merged_model.save_pretrained(args.output_dir, safe_serialization=True)

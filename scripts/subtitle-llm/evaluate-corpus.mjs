@@ -3,8 +3,6 @@ import { readFile } from 'node:fs/promises';
 
 import { parseJsonObject, validateSubtitleTrainingRecord } from './schema.mjs';
 
-const TRADITIONAL_CHINESE_MARKERS = /[臺體裡這後於與為開關態錯輸]/u;
-
 async function main() {
   const paths = process.argv.slice(2);
   if (paths.length === 0) throw new Error('Usage: evaluate-corpus <training.jsonl> [...]');
@@ -29,13 +27,11 @@ export function evaluateRecords(records) {
     jsonValidRate: 0,
     segmentCoverageRate: 0,
     chapterSignalRate: 0,
-    simplifiedChineseRate: 0,
     glossaryPreservationRate: 0,
   };
   let jsonValid = 0;
   let segmentCoverage = 0;
   let chapterSignal = 0;
-  let simplifiedChinese = 0;
   let glossaryPreserved = 0;
   let glossaryTotal = 0;
 
@@ -48,7 +44,6 @@ export function evaluateRecords(records) {
       const assistantPayload = parseJsonObject(record.messages[2].content, 'assistant training content');
       const assistantText = assistantPayload.segments.map((segment) => segment.text).join('\n');
       if (assistantPayload.chapters.length > 0) chapterSignal += 1;
-      if (!TRADITIONAL_CHINESE_MARKERS.test(assistantText)) simplifiedChinese += 1;
 
       const glossary = Array.isArray(userPayload.context?.glossary)
         ? userPayload.context.glossary.filter(isCodeLikeTerm)
@@ -73,7 +68,6 @@ export function evaluateRecords(records) {
   metrics.jsonValidRate = ratio(jsonValid, records.length);
   metrics.segmentCoverageRate = ratio(segmentCoverage, records.length);
   metrics.chapterSignalRate = ratio(chapterSignal, records.length);
-  metrics.simplifiedChineseRate = ratio(simplifiedChinese, records.length);
   metrics.glossaryPreservationRate = glossaryTotal === 0 ? 1 : ratio(glossaryPreserved, glossaryTotal);
   return metrics;
 }

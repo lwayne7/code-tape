@@ -232,8 +232,7 @@ export function buildSubtitlePostProcessorPrompt({
     "任务：修正 ASR 字幕里的前端领域术语、变量名、函数名、组件名和中英混合文本，并基于字幕内容生成章节跳转点。",
     "规则：",
     "- 只输出 JSON，不要输出解释、Markdown 或额外文本。",
-    "- 中文内容输出简体中文；英文原句、英文短句和英文自然语言保持英文，不要翻译成中文。",
-    "- 英文术语、变量名、函数名、组件名保持英文原样。",
+    "- 修正前端术语、变量名、函数名、组件名和明显的 ASR 误识别。",
     "- segments 只返回需要修改的 segments；不需要修改的字幕段请省略，应用会保留原文。",
     "- segments 只能引用输入中已有的 id，不能改 startMs/endMs。",
     "- chapters 必须按时间递增、互不重叠，标题要短，适合回放导航。",
@@ -260,9 +259,7 @@ export function buildSubtitlePostProcessorMessages(
       content: [
         "You are the code-tape subtitle post-processing model.",
         "Only output one JSON object. Do not output Markdown, explanations, prefixes, suffixes, or code fences. 只输出 JSON。",
-        "Correct frontend domain terms, package names, variable names, component names, and mixed Chinese/English ASR text.",
-        "Chinese content must be Simplified Chinese. 中文内容必须输出简体中文。",
-        "Preserve code identifiers, package names, component names, and natural English phrases in English.",
+        "Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.",
         "For speed, output only changed subtitle segments in segments. Omit unchanged segments; the app keeps their original text.",
         "Generate short playback chapter jump points from subtitle content and timestamps.",
         "Chapters must stay inside the input subtitle timeline. Do not create chapters at or after the final segment endMs.",
@@ -284,9 +281,9 @@ export function buildSubtitlePostProcessorMessages(
       {
         role: "user",
         content: [
-          "上一次输出未包含可解析的 JSON 对象。",
-          "请重新输出唯一一个 JSON 对象，必须包含 segments 和 chapters 两个数组。",
-          "不要输出解释、Markdown、代码块或任何 JSON 外的文字。",
+          "Previous output did not contain a parseable JSON object.",
+          "Output exactly one JSON object with segments and chapters arrays.",
+          "No explanations, Markdown, code fences, or text outside JSON.",
         ].join("\n"),
       },
     );
@@ -302,7 +299,6 @@ function buildSubtitlePostProcessorPayload({
   context?: SubtitlePostProcessorContext;
 }) {
   return {
-    language: context?.language ?? track.language ?? "unknown",
     context: {
       fileName: context?.fileName ?? null,
       code: budgetPromptText(context?.code ?? "", MAX_PROMPT_CODE_CHARS),

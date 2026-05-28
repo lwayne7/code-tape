@@ -94,7 +94,7 @@ export function createHuggingFaceSubtitleTranscriber(
         return {
           model,
           source: "huggingface-local",
-          language: DEFAULT_TRANSCRIPTION_LANGUAGE,
+          language: readTranscriptionLanguage(result),
           segments: normalizeTranscriptionResult(result, durationMs),
         };
       } finally {
@@ -134,6 +134,12 @@ function segmentFromChunk(
 
 function reindexSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
   return segments.map((segment, index) => ({ ...segment, id: `subtitle-${index + 1}` }));
+}
+
+function readTranscriptionLanguage(result: RawAsrResult): string {
+  return typeof result.language === "string" && result.language.trim()
+    ? result.language.trim()
+    : DEFAULT_TRANSCRIPTION_LANGUAGE;
 }
 
 function readTimestamp(value: unknown): [number, number | null] {

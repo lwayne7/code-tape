@@ -134,7 +134,7 @@ describe("normalizeTranscriptionResult", () => {
     );
   });
 
-  it("forces Whisper to transcribe Chinese when generating subtitles", async () => {
+  it("sets Whisper to transcribe Chinese for the primary product scenario", async () => {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       value: vi.fn(() => "blob:subtitle-source"),
@@ -157,6 +157,28 @@ describe("normalizeTranscriptionResult", () => {
       "blob:subtitle-source",
       expect.objectContaining({ language: "chinese", task: "transcribe" }),
     );
+  });
+
+  it("uses the ASR reported language when available", async () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:subtitle-source"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pipeline = vi.fn(async () => ({ chunks: [], language: "en" }));
+    const transcriber = createHuggingFaceSubtitleTranscriber({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(
+      transcriber.transcribe({
+        mediaBlob: new Blob(["audio"], { type: "audio/webm" }),
+        durationMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ language: "en" });
   });
 
   it("warms up the ASR model before the first transcription", async () => {
