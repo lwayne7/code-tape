@@ -65,6 +65,8 @@ python3 ml/subtitle-postprocessor/train_lora.py \
   --hub-model-id ceilf6/code-tape-subtitle-postprocessor-lora
 ```
 
+训练脚本默认不信任远端模型仓库代码。只有确认 base model 需要自定义 Python 代码且来源可信时，才可以添加 `--trust-remote-code`；该模式不能与 `--hub-model-id` 同时使用，避免远端模型加载阶段接触发布 token。需要 remote code 的特殊模型应先只输出本地 adapter，再用可信发布流程单独上传。
+
 ## 发布到浏览器本地推理
 
 训练完成后还需要执行模型合并、ONNX 导出和量化。优先目标是发布公开仓库：

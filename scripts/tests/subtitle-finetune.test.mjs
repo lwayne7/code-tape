@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
@@ -41,6 +42,23 @@ test('rejects distillation samples that omit chapters', () => {
   assert.throws(
     () => validateSubtitleTeacherResult({ segments: teacherResult.segments }, seedExample),
     /chapters/,
+  );
+});
+
+test('rejects duplicate input subtitle segment ids before distillation', () => {
+  assert.throws(
+    () =>
+      validateSubtitleDistillationExample({
+        ...seedExample,
+        segments: [
+          seedExample.segments[0],
+          {
+            ...seedExample.segments[1],
+            id: seedExample.segments[0].id,
+          },
+        ],
+      }),
+    /duplicate segment id/,
   );
 });
 
@@ -148,4 +166,47 @@ test('builds SFT records with an assistant JSON contract', () => {
   assert.equal(record.messages[2].role, 'assistant');
   assert.match(record.messages[2].content, /"chapters"/);
   assert.deepEqual(record.metadata.inputSegmentIds, ['subtitle-1', 'subtitle-2']);
+});
+
+test('LoRA training parser does not trust remote code unless explicitly requested', () => {
+  const python = [
+    'import importlib.util',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'parser = module.build_parser()',
+    'default_args = parser.parse_args(["--train-jsonl", "train.jsonl"])',
+    'opt_in_args = parser.parse_args(["--train-jsonl", "train.jsonl", "--trust-remote-code"])',
+    'print(f"{default_args.trust_remote_code},{opt_in_args.trust_remote_code}")',
+  ].join('; ');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'False,True');
+});
+
+test('LoRA training script rejects remote code trust with hub publishing', () => {
+  const fakeHfToken = `${'h'}${'f'}_${'c'.repeat(30)}`;
+  const result = spawnSync(
+    'python3',
+    [
+      'ml/subtitle-postprocessor/train_lora.py',
+      '--train-jsonl',
+      'train.jsonl',
+      '--trust-remote-code',
+      '--hub-model-id',
+      'ceilf6/test-model',
+    ],
+    {
+      cwd: new URL('../..', import.meta.url),
+      encoding: 'utf8',
+      env: { ...process.env, HF_TOKEN: fakeHfToken },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Do not combine --trust-remote-code with --hub-model-id/);
 });

@@ -18,6 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Opt in to model repository Python code. Do not combine with --hub-model-id.",
+    )
     return parser
 
 
@@ -25,20 +30,22 @@ def main() -> None:
     args = build_parser().parse_args()
     if args.hub_model_id and not os.environ.get("HF_TOKEN"):
         raise SystemExit("HF_TOKEN is required when --hub-model-id is set")
+    if args.trust_remote_code and args.hub_model_id:
+        raise SystemExit("Do not combine --trust-remote-code with --hub-model-id; publish from a separate trusted process.")
 
     from datasets import load_dataset
     from peft import LoraConfig
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import SFTConfig, SFTTrainer
 
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=args.trust_remote_code)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         device_map="auto",
-        trust_remote_code=True,
+        trust_remote_code=args.trust_remote_code,
     )
     train_dataset = load_dataset("json", data_files=args.train_jsonl, split="train")
 

@@ -11,7 +11,14 @@ export function validateSubtitleDistillationExample(value) {
   if (!Array.isArray(value.segments) || value.segments.length === 0) {
     throw new Error('distillation example segments are required');
   }
-  value.segments.forEach((segment, index) => validateInputSegment(segment, index));
+  const seenSegmentIds = new Set();
+  value.segments.forEach((segment, index) => {
+    validateInputSegment(segment, index);
+    if (seenSegmentIds.has(segment.id)) {
+      throw new Error(`duplicate segment id: ${segment.id}`);
+    }
+    seenSegmentIds.add(segment.id);
+  });
   if (value.context !== undefined && !isPlainObject(value.context)) {
     throw new Error('distillation example context must be an object');
   }
