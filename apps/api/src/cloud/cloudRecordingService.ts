@@ -228,6 +228,12 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
       message: "durationMs must be a non-negative safe integer",
     };
   }
+  if (input.durationMs > 15 * 60 * 1000) {
+    return {
+      code: "quota-exceeded",
+      message: `duration exceeds budget limit of 15 minutes: ${input.durationMs}ms`,
+    };
+  }
   if (!RECORDING_LANGUAGE_SET.has(input.initialLanguage)) {
     return {
       code: "invalid-manifest",
@@ -249,9 +255,22 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     if (!Number.isSafeInteger(asset.sizeBytes) || asset.sizeBytes <= 0) {
       return { code: "invalid-manifest", message: `invalid asset size: ${asset.kind}` };
     }
+    if (asset.kind === "media" && asset.sizeBytes > 200 * 1024 * 1024) {
+      return {
+        code: "quota-exceeded",
+        message: `media size exceeds budget limit of 200MB: ${asset.sizeBytes} bytes`,
+      };
+    }
     if (asset.mimeType.trim().length < 1) {
       return { code: "invalid-manifest", message: `invalid asset mime type: ${asset.kind}` };
     }
+  }
+  const totalSizeBytes = input.assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
+  if (totalSizeBytes > 250 * 1024 * 1024) {
+    return {
+      code: "quota-exceeded",
+      message: `total asset size exceeds budget limit of 250MB: ${totalSizeBytes} bytes`,
+    };
   }
   const kinds = new Set(input.assets.map((asset) => asset.kind));
   const missing = REQUIRED_ASSETS.filter((kind) => !kinds.has(kind));

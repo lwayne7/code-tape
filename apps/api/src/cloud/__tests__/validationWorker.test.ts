@@ -199,6 +199,207 @@ test("validation worker marks checksum-matching malformed JSON packages failed",
   assert.match(job.recording.failureMessage ?? "", /malformed JSON/);
 });
 
+test("validation worker rejects upload session with duration exceeding limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  
+  // Set duration to 16 minutes
+  pkg.meta.durationMs = 16 * 60 * 1000;
+  
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  
+  assert.equal(created.ok, false);
+  if (created.ok) return;
+  assert.equal(created.error.code, "quota-exceeded");
+  assert.match(created.error.message, /duration exceeds budget limit/);
+});
+
+test("validation worker rejects package with duration exceeding limit during worker validation", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  
+  // Set duration in meta to 16 minutes
+  pkg.meta.durationMs = 16 * 60 * 1000;
+  
+  // Create upload session with valid durationMs in the request, but with the checksum of the 16-min meta package
+  const request = await makeCreateSessionRequest(pkg);
+  request.durationMs = 1000; // override to pass session creation check
+  
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: request,
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "quota-exceeded");
+  assert.match(job.recording.failureMessage ?? "", /duration exceeds budget limit/);
+});
+
+test("validation worker rejects package with event count exceeding limit during worker validation", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  
+  // Create 20001 events of a valid type (selection-change)
+  const events = Array.from({ length: 20001 }, (_, i) => ({
+    id: `ev-${i}`,
+    seq: i + 1,
+    timestampMs: i,
+    source: "editor",
+    track: "main",
+    type: "selection-change",
+    payload: { cursor: null, selection: null },
+  }));
+  
+  const pkg = await makePackage();
+  pkg.events = events as any;
+  pkg.manifest.checksums.eventsSha256 = await sha256Hex(canonicalStringify(events));
+  
+  // Create upload session
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "quota-exceeded");
+  assert.match(job.recording.failureMessage ?? "", /event count exceeds budget limit/);
+});
+
+test("validation worker rejects upload session with media exceeding limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  
+  const request = await makeCreateSessionRequest(pkg);
+  request.assets.push({
+    kind: "media",
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    sizeBytes: 200 * 1024 * 1024 + 1,
+    mimeType: "video/webm",
+  });
+  
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: request,
+  });
+  
+  assert.equal(created.ok, false);
+  if (created.ok) return;
+  assert.equal(created.error.code, "quota-exceeded");
+  assert.match(created.error.message, /media size exceeds budget limit/);
+});
+
+test("validation worker rejects upload session with total size exceeding limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  
+  const request = await makeCreateSessionRequest(pkg);
+  request.assets.push({
+    kind: "media",
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    sizeBytes: 200 * 1024 * 1024, // exactly 200MB (passes media check)
+    mimeType: "video/webm",
+  });
+  request.assets.push({
+    kind: "thumbnail",
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    sizeBytes: 51 * 1024 * 1024, // 51MB (total becomes > 250MB)
+    mimeType: "image/webp",
+  });
+  
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: request,
+  });
+  
+  assert.equal(created.ok, false);
+  if (created.ok) return;
+  assert.equal(created.error.code, "quota-exceeded");
+  assert.match(created.error.message, /total asset size exceeds budget limit/);
+});
+
+test("validation worker allows missing optional media asset and degrades gracefully", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  
+  // Set initial recording hasAudio/hasCamera as true
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: {
+      ...(await makeCreateSessionRequest(pkg)),
+      hasAudio: true,
+      hasCamera: true,
+    },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  // Upload assets, but do not upload media since it's optional
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg), // no media
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+  // Check that metadata is degraded to medialess (hasAudio/hasCamera set to false)
+  assert.equal(job.recording.hasAudio, false);
+  assert.equal(job.recording.hasCamera, false);
+});
+
 async function makePackage(input: { mediaSha256?: string } = {}): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

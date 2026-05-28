@@ -39,6 +39,7 @@ export async function processNextRecordingValidationJob(deps: {
   }
 
   let integrity: Awaited<ReturnType<typeof verifyRecordingPackageIntegrity>>;
+  let mediaBlob: Blob | null = null;
   try {
     const manifest = await readJsonAsset<RecordingManifest>(
       deps.objectStorage,
@@ -55,7 +56,7 @@ export async function processNextRecordingValidationJob(deps: {
     );
     const mediaAsset = assetsByKind.get("media");
     const mediaObject = mediaAsset ? await deps.objectStorage.getObject(mediaAsset.objectKey) : null;
-    const mediaBlob = mediaObject
+    mediaBlob = mediaObject
       ? new Blob([toArrayBuffer(mediaObject.body)], { type: mediaObject.contentType })
       : null;
     const media = mediaBlob
@@ -92,6 +93,53 @@ export async function processNextRecordingValidationJob(deps: {
     );
   }
 
+  // P1 Budget Constraints Check
+  const MAX_DURATION_MS = 15 * 60 * 1000;
+  const MAX_EVENT_COUNT = 20000;
+  const MAX_MEDIA_SIZE_BYTES = 200 * 1024 * 1024;
+  const MAX_TOTAL_ASSET_SIZE_BYTES = 250 * 1024 * 1024;
+
+  const pkgMeta = integrity.package.meta;
+  const pkgEvents = integrity.package.events;
+
+  if (pkgMeta.durationMs > MAX_DURATION_MS) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `duration exceeds budget limit of 15 minutes: ${pkgMeta.durationMs}ms`,
+    );
+  }
+  if (pkgEvents.length > MAX_EVENT_COUNT) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `event count exceeds budget limit of 20000: ${pkgEvents.length}`,
+    );
+  }
+  if (mediaBlob && mediaBlob.size > MAX_MEDIA_SIZE_BYTES) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `media size exceeds budget limit of 200MB: ${mediaBlob.size} bytes`,
+    );
+  }
+  const totalAssetSize = assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
+  if (totalAssetSize > MAX_TOTAL_ASSET_SIZE_BYTES) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `total asset size exceeds budget limit of 250MB: ${totalAssetSize} bytes`,
+    );
+  }
+
   const completedAt = now().toISOString();
   await Promise.all(
     assets.map((asset) =>
@@ -101,6 +149,8 @@ export async function processNextRecordingValidationJob(deps: {
       }),
     ),
   );
+
+  const hasMedia = !!mediaBlob;
   const ready: CloudRecordingRecord = {
     ...recording,
     status: "ready",
@@ -108,6 +158,8 @@ export async function processNextRecordingValidationJob(deps: {
     updatedAt: completedAt,
     eventCount: integrity.package.events.length,
     snapshotCount: integrity.package.snapshots.length,
+    hasAudio: hasMedia ? recording.hasAudio : false,
+    hasCamera: hasMedia ? recording.hasCamera : false,
     failureCode: null,
     failureMessage: null,
   };
@@ -125,7 +177,12 @@ async function findObjectChecksumFailure(
 ): Promise<string | null> {
   for (const asset of assets) {
     const object = await objectStorage.getObject(asset.objectKey);
-    if (!object) return `missing object: ${asset.kind}`;
+    if (!object) {
+      if (isOptionalAssetKind(asset.kind)) {
+        continue;
+      }
+      return `missing object: ${asset.kind}`;
+    }
     if (object.sizeBytes !== asset.sizeBytes) return `size mismatch: ${asset.kind}`;
     const sha256 = isBinaryAssetKind(asset.kind)
       ? await sha256Blob(new Blob([toArrayBuffer(object.body)], { type: object.contentType }))
@@ -133,6 +190,10 @@ async function findObjectChecksumFailure(
     if (sha256 !== asset.sha256) return `checksum mismatch: ${asset.kind}`;
   }
   return null;
+}
+
+function isOptionalAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
+  return kind === "media" || kind === "thumbnail" || kind === "indexes";
 }
 
 function isBinaryAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
