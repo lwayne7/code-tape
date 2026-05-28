@@ -1,7 +1,12 @@
 import { RECORDING_SCHEMA_VERSION, type RecordingLanguage } from "@code-tape/recording-schema";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
-import { RECORDING_ASSET_KINDS } from "./types.js";
+import {
+  RECORDING_ASSET_KINDS,
+  MAX_RECORDING_DURATION_MS,
+  MAX_RECORDING_MEDIA_SIZE_BYTES,
+  MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+} from "./types.js";
 import type {
   CloudApiError,
   CloudRecordingAssetRecord,
@@ -228,7 +233,7 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
       message: "durationMs must be a non-negative safe integer",
     };
   }
-  if (input.durationMs > 15 * 60 * 1000) {
+  if (input.durationMs > MAX_RECORDING_DURATION_MS) {
     return {
       code: "quota-exceeded",
       message: `duration exceeds budget limit of 15 minutes: ${input.durationMs}ms`,
@@ -255,7 +260,7 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     if (!Number.isSafeInteger(asset.sizeBytes) || asset.sizeBytes <= 0) {
       return { code: "invalid-manifest", message: `invalid asset size: ${asset.kind}` };
     }
-    if (asset.kind === "media" && asset.sizeBytes > 200 * 1024 * 1024) {
+    if (asset.kind === "media" && asset.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
       return {
         code: "quota-exceeded",
         message: `media size exceeds budget limit of 200MB: ${asset.sizeBytes} bytes`,
@@ -266,7 +271,7 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     }
   }
   const totalSizeBytes = input.assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
-  if (totalSizeBytes > 250 * 1024 * 1024) {
+  if (totalSizeBytes > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
     return {
       code: "quota-exceeded",
       message: `total asset size exceeds budget limit of 250MB: ${totalSizeBytes} bytes`,

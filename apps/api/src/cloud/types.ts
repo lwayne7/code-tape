@@ -12,6 +12,11 @@ export const RECORDING_ASSET_KINDS = [
 
 export type RecordingAssetKind = (typeof RECORDING_ASSET_KINDS)[number];
 
+export const MAX_RECORDING_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+export const MAX_RECORDING_EVENT_COUNT = 20000;
+export const MAX_RECORDING_MEDIA_SIZE_BYTES = 200 * 1024 * 1024; // 200MB
+export const MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES = 250 * 1024 * 1024; // 250MB
+
 export type RecordingStatus =
   | "uploading"
   | "processing"

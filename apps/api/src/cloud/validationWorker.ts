@@ -11,10 +11,14 @@ import {
 } from "@code-tape/recording-schema";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
-import type {
-  CloudApiErrorCode,
-  CloudRecordingAssetRecord,
-  CloudRecordingRecord,
+import {
+  MAX_RECORDING_DURATION_MS,
+  MAX_RECORDING_EVENT_COUNT,
+  MAX_RECORDING_MEDIA_SIZE_BYTES,
+  MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+  type CloudApiErrorCode,
+  type CloudRecordingAssetRecord,
+  type CloudRecordingRecord,
 } from "./types.js";
 
 export type ValidationWorkerResult =
@@ -32,6 +36,28 @@ export async function processNextRecordingValidationJob(deps: {
   const now = deps.now ?? (() => new Date());
   const assets = await deps.metadata.listAssets(recording.id);
   const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
+
+  // Early budget size checks (before loading/hashing any objects from object storage)
+  const mediaAsset = assetsByKind.get("media");
+  if (mediaAsset && mediaAsset.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `media size exceeds budget limit of 200MB: ${mediaAsset.sizeBytes} bytes`,
+    );
+  }
+  const totalAssetSize = assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
+  if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
+    return failRecording(
+      deps.metadata,
+      recording,
+      now,
+      "quota-exceeded",
+      `total asset size exceeds budget limit of 250MB: ${totalAssetSize} bytes`,
+    );
+  }
 
   const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets);
   if (checksumFailure) {
@@ -94,15 +120,10 @@ export async function processNextRecordingValidationJob(deps: {
   }
 
   // P1 Budget Constraints Check
-  const MAX_DURATION_MS = 15 * 60 * 1000;
-  const MAX_EVENT_COUNT = 20000;
-  const MAX_MEDIA_SIZE_BYTES = 200 * 1024 * 1024;
-  const MAX_TOTAL_ASSET_SIZE_BYTES = 250 * 1024 * 1024;
-
   const pkgMeta = integrity.package.meta;
   const pkgEvents = integrity.package.events;
 
-  if (pkgMeta.durationMs > MAX_DURATION_MS) {
+  if (pkgMeta.durationMs > MAX_RECORDING_DURATION_MS) {
     return failRecording(
       deps.metadata,
       recording,
@@ -111,33 +132,13 @@ export async function processNextRecordingValidationJob(deps: {
       `duration exceeds budget limit of 15 minutes: ${pkgMeta.durationMs}ms`,
     );
   }
-  if (pkgEvents.length > MAX_EVENT_COUNT) {
+  if (pkgEvents.length > MAX_RECORDING_EVENT_COUNT) {
     return failRecording(
       deps.metadata,
       recording,
       now,
       "quota-exceeded",
       `event count exceeds budget limit of 20000: ${pkgEvents.length}`,
-    );
-  }
-  const mediaAsset = assetsByKind.get("media");
-  if (mediaAsset && mediaAsset.sizeBytes > MAX_MEDIA_SIZE_BYTES) {
-    return failRecording(
-      deps.metadata,
-      recording,
-      now,
-      "quota-exceeded",
-      `media size exceeds budget limit of 200MB: ${mediaAsset.sizeBytes} bytes`,
-    );
-  }
-  const totalAssetSize = assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
-  if (totalAssetSize > MAX_TOTAL_ASSET_SIZE_BYTES) {
-    return failRecording(
-      deps.metadata,
-      recording,
-      now,
-      "quota-exceeded",
-      `total asset size exceeds budget limit of 250MB: ${totalAssetSize} bytes`,
     );
   }
 
@@ -179,9 +180,6 @@ async function findObjectChecksumFailure(
   for (const asset of assets) {
     const object = await objectStorage.getObject(asset.objectKey);
     if (!object) {
-      if (isOptionalAssetKind(asset.kind)) {
-        continue;
-      }
       return `missing object: ${asset.kind}`;
     }
     if (object.sizeBytes !== asset.sizeBytes) return `size mismatch: ${asset.kind}`;
@@ -191,10 +189,6 @@ async function findObjectChecksumFailure(
     if (sha256 !== asset.sha256) return `checksum mismatch: ${asset.kind}`;
   }
   return null;
-}
-
-function isOptionalAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
-  return kind === "media" || kind === "thumbnail" || kind === "indexes";
 }
 
 function isBinaryAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {

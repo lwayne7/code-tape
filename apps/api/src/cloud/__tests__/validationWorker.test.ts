@@ -467,7 +467,13 @@ test("validation worker allows exact budget limits (15 mins duration, 20000 even
   pkg.manifest.checksums.eventsSha256 = await sha256Hex(canonicalStringify(events));
   pkg.meta.durationMs = 15 * 60 * 1000; // exactly 15 mins
 
-  // Setup mock sizes for JSON assets
+  // Setup media size and mock bytes
+  const mediaSizeBytes = 200 * 1024 * 1024; // exactly 200MB
+  const mediaBytes = new Uint8Array(mediaSizeBytes);
+  const mediaSha256 = await sha256Blob(new Blob([mediaBytes], { type: "video/webm" }));
+  pkg.manifest.checksums.mediaSha256 = mediaSha256;
+
+  // Setup final JSON bodies and sizes
   const manifestBody = canonicalStringify(pkg.manifest);
   const metaBody = canonicalStringify(pkg.meta);
   const eventsBody = canonicalStringify(pkg.events);
@@ -480,18 +486,21 @@ test("validation worker allows exact budget limits (15 mins duration, 20000 even
 
   const jsonSizeBytes = manifestSize + metaSize + eventsSize + snapshotsSize;
 
-  const mediaSizeBytes = 200 * 1024 * 1024; // exactly 200MB
+  // Setup thumbnail size and mock bytes to reach exactly 250MB total size
   const targetTotalSizeBytes = 250 * 1024 * 1024; // exactly 250MB
   const thumbnailSizeBytes = targetTotalSizeBytes - mediaSizeBytes - jsonSizeBytes;
   assert.ok(thumbnailSizeBytes > 0);
+
+  const thumbnailBytes = new Uint8Array(thumbnailSizeBytes);
+  const thumbnailSha256 = await sha256Blob(new Blob([thumbnailBytes], { type: "image/webp" }));
 
   const assets = [
     { kind: "manifest" as const, sha256: await sha256Hex(manifestBody), sizeBytes: manifestSize, mimeType: "application/json" },
     { kind: "meta" as const, sha256: await sha256Hex(metaBody), sizeBytes: metaSize, mimeType: "application/json" },
     { kind: "events" as const, sha256: await sha256Hex(eventsBody), sizeBytes: eventsSize, mimeType: "application/json" },
     { kind: "snapshots" as const, sha256: await sha256Hex(snapshotsBody), sizeBytes: snapshotsSize, mimeType: "application/json" },
-    { kind: "media" as const, sha256: "0000000000000000000000000000000000000000000000000000000000000000", sizeBytes: mediaSizeBytes, mimeType: "video/webm" },
-    { kind: "thumbnail" as const, sha256: "0000000000000000000000000000000000000000000000000000000000000000", sizeBytes: thumbnailSizeBytes, mimeType: "image/webp" },
+    { kind: "media" as const, sha256: mediaSha256, sizeBytes: mediaSizeBytes, mimeType: "video/webm" },
+    { kind: "thumbnail" as const, sha256: thumbnailSha256, sizeBytes: thumbnailSizeBytes, mimeType: "image/webp" },
   ];
 
   const created = await service.createUploadSession({
@@ -511,11 +520,8 @@ test("validation worker allows exact budget limits (15 mins duration, 20000 even
   assert.equal(created.ok, true);
   if (!created.ok) return;
 
-  // Upload ONLY JSON assets
-  const jsonTargets = created.value.uploadTargets.filter(
-    (t) => t.kind !== "media" && t.kind !== "thumbnail",
-  );
-  await uploadPackageAssets(objectStorage, jsonTargets, pkg);
+  // Upload ALL assets including media and thumbnail
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg, { mediaBytes, thumbnailBytes });
 
   const completed = await service.completeUpload({
     ownerId: "owner-1",
@@ -531,6 +537,44 @@ test("validation worker allows exact budget limits (15 mins duration, 20000 even
   if (!job.ok) return;
   assert.equal(job.recording.status, "ready");
   assert.equal(job.recording.eventCount, 20000);
+});
+
+test("validation worker rejects missing optional media asset if it was declared in upload session", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  
+  const mediaBytes = new Uint8Array(100);
+  const mediaBlob = new Blob([mediaBytes], { type: "video/webm" });
+  const pkg = await makePackage({ mediaSha256: await sha256Blob(mediaBlob) });
+
+  // Create session request declaring media asset
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg, { mediaBytes }),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  // Upload ONLY JSON assets (omit media)
+  const jsonTargets = created.value.uploadTargets.filter((t) => t.kind !== "media");
+  await uploadPackageAssets(objectStorage, jsonTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg, { mediaBytes }),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "checksum-mismatch");
+  assert.match(job.recording.failureMessage ?? "", /missing object: media/);
 });
 
 
