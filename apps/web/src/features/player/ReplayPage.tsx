@@ -245,7 +245,7 @@ export function ReplayPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {eventOnlyNotice ? (
         <div
           role="status"
@@ -260,13 +260,14 @@ export function ReplayPage() {
       ) : null}
       <ReplayDisplayToolbar options={displayOptions} onChange={setDisplayOption} />
       <div
+        aria-label="回放工作区"
         className={
           displayOptions.runtime
-            ? "grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]"
-            : "grid flex-1 grid-cols-1"
+            ? "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]"
+            : "grid min-h-0 flex-1 grid-cols-1"
         }
       >
-        <div className="relative border-r border-border">
+        <div className="relative min-h-0 border-r border-border">
           <CodeEditor
             language={stableState.editor.language}
             initialValue={stableState.editor.code}

@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-28T04:54:53Z",
+  "updatedAt": "2026-05-28T07:49:02Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 110,
       "completedIssues": [
         11,
         10,
@@ -15,7 +15,8 @@
         76,
         78,
         86,
-        98
+        98,
+        107
       ],
       "reviewedIssues": [
         4,
@@ -27,17 +28,18 @@
         77
       ],
       "bugPenalties": [],
-      "developmentScore": 25.5,
+      "developmentScore": 27.75,
       "reviewScore": 3.25,
       "penaltyScore": 0,
-      "totalScore": 28.75
+      "totalScore": 31
     },
     "MINTPIPERAS": {
-      "activeIssue": 94,
+      "activeIssue": null,
       "completedIssues": [
         9,
         60,
-        67
+        67,
+        94
       ],
       "reviewedIssues": [
         11,
@@ -48,10 +50,10 @@
         98
       ],
       "bugPenalties": [],
-      "developmentScore": 6.25,
+      "developmentScore": 7.75,
       "reviewScore": 4.25,
       "penaltyScore": 0,
-      "totalScore": 10.5
+      "totalScore": 12
     },
     "Suxian2001": {
       "activeIssue": 96,
@@ -65,13 +67,14 @@
         65,
         66,
         67,
-        58
+        58,
+        94
       ],
       "bugPenalties": [],
       "developmentScore": 4,
-      "reviewScore": 4.5,
+      "reviewScore": 5,
       "penaltyScore": 0,
-      "totalScore": 8.5
+      "totalScore": 9
     },
     "yangchloeeeee": {
       "activeIssue": 95,
@@ -86,13 +89,14 @@
         10,
         40,
         55,
-        76
+        76,
+        107
       ],
       "bugPenalties": [],
       "developmentScore": 9.25,
-      "reviewScore": 3.75,
+      "reviewScore": 4.5,
       "penaltyScore": 0,
-      "totalScore": 13
+      "totalScore": 13.75
     },
     "JunMang01": {
       "activeIssue": null,
@@ -441,11 +445,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "MINTPIPERAS",
       "claimedAt": "2026-05-28T01:42:23Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-28T05:00:36Z",
+      "mergedPr": 100
     },
     "95": {
       "number": 95,
@@ -492,7 +496,7 @@
     "98": {
       "number": 98,
       "title": "[P1+] 本地 AI 字幕生成与回放交互",
-      "score": 8,
+      "score": 6,
       "stack": [
         "react",
         "typescript"
@@ -502,6 +506,26 @@
       "claimedAt": "2026-05-28T01:32:49Z",
       "closedAt": "2026-05-28T04:54:53Z",
       "mergedPr": 102
+    },
+    "107": {
+      "number": 107,
+      "status": "closed",
+      "closedAt": "2026-05-28T06:31:26Z",
+      "mergedPr": 106
+    },
+    "110": {
+      "number": 110,
+      "title": "[P1+] AI 字幕 LLM 纠错与章节生成补齐",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-28T07:49:02Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
@@ -834,6 +858,30 @@
       "developerDelta": 4.5,
       "reviewerDelta": 1.5,
       "createdAt": "2026-05-28T04:54:53Z"
+    },
+    {
+      "id": "pr-100-merge",
+      "type": "feature_merge",
+      "issue": 94,
+      "pr": 100,
+      "score": 2,
+      "developer": "MINTPIPERAS",
+      "reviewer": "Suxian2001",
+      "developerDelta": 1.5,
+      "reviewerDelta": 0.5,
+      "createdAt": "2026-05-28T05:00:36Z"
+    },
+    {
+      "id": "pr-106-merge",
+      "type": "feature_merge",
+      "issue": 107,
+      "pr": 106,
+      "score": 3,
+      "developer": "ceilf6",
+      "reviewer": "yangchloeeeee",
+      "developerDelta": 2.25,
+      "reviewerDelta": 0.75,
+      "createdAt": "2026-05-28T06:31:26Z"
     }
   ]
 }
