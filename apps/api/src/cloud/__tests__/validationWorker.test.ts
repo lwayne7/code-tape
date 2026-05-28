@@ -10,7 +10,10 @@ import { createCloudRecordingService } from "../cloudRecordingService.js";
 import { createMemoryMetadataRepository } from "../memoryMetadataRepository.js";
 import { createMemoryObjectStorage } from "../memoryObjectStorage.js";
 import { processNextRecordingValidationJob } from "../validationWorker.js";
-import type { CreateUploadSessionRequest } from "../types.js";
+import {
+  MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+  type CreateUploadSessionRequest,
+} from "../types.js";
 
 test("validation worker marks a completed upload ready after schema and checksum checks", async () => {
   const metadata = createMemoryMetadataRepository();
@@ -395,6 +398,8 @@ test("validation worker allows missing optional media asset and degrades gracefu
   assert.equal(job.ok, true);
   if (!job.ok) return;
   assert.equal(job.recording.status, "ready");
+  assert.equal(job.recording.hasAudio, false);
+  assert.equal(job.recording.hasCamera, false);
 });
 
 test("validation worker rejects missing optional media asset if declared size exceeds limit", async () => {
@@ -644,6 +649,68 @@ test("validation worker allows missing optional thumbnail and indexes assets eve
     },
   });
   assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+});
+
+test("validation worker excludes missing optional assets from total asset size budget", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+
+  const thumbnailBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0x80, 0x57, 0x45]);
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg, { thumbnailBytes });
+  request.idempotencyKey = "idem-missing-optional-large-total";
+  request.assets.push({
+    kind: "indexes",
+    sha256: await sha256Hex("indexes"),
+    sizeBytes: 10,
+    mimeType: "application/json",
+  });
+
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: request,
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const requiredTargets = created.value.uploadTargets.filter(
+    (target) => target.kind !== "thumbnail" && target.kind !== "indexes",
+  );
+  await uploadPackageAssets(objectStorage, requiredTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: request.assets,
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const assets = await metadata.listAssets(created.value.recordingId);
+  await Promise.all(
+    assets.map((asset) => {
+      if (asset.kind === "thumbnail") {
+        return metadata.updateAsset({
+          ...asset,
+          sizeBytes: MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+        });
+      }
+      if (asset.kind === "indexes") {
+        return metadata.updateAsset({
+          ...asset,
+          sizeBytes: 1024 * 1024,
+        });
+      }
+      return Promise.resolve();
+    }),
+  );
 
   const job = await processNextRecordingValidationJob({ metadata, objectStorage });
   assert.equal(job.ok, true);

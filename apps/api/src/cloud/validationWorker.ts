@@ -48,20 +48,6 @@ export async function processNextRecordingValidationJob(deps: {
       `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${mediaAsset.sizeBytes} bytes`,
     );
   }
-  let totalAssetSize = 0;
-  for (const asset of assets) {
-    totalAssetSize += asset.sizeBytes;
-    if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
-      return failRecording(
-        deps.metadata,
-        recording,
-        now,
-        "quota-exceeded",
-        `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalAssetSize} bytes`,
-      );
-    }
-  }
-
   const fetchedObjects = new Map<string, StoredObject>();
   const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets, fetchedObjects);
   if (checksumFailure) {
@@ -186,6 +172,7 @@ async function findObjectChecksumFailure(
   assets: CloudRecordingAssetRecord[],
   fetchedObjects: Map<string, StoredObject>,
 ): Promise<string | null> {
+  let totalAssetSize = 0;
   for (const asset of assets) {
     const object = await objectStorage.getObject(asset.objectKey);
     if (!object) {
@@ -198,11 +185,15 @@ async function findObjectChecksumFailure(
       return `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${object.sizeBytes} bytes`;
     }
     if (object.sizeBytes !== asset.sizeBytes) return `size mismatch: ${asset.kind}`;
+    totalAssetSize += object.sizeBytes;
+    if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
+      return `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalAssetSize} bytes`;
+    }
     const sha256 = isBinaryAssetKind(asset.kind)
       ? await sha256Blob(new Blob([toArrayBuffer(object.body)], { type: object.contentType }))
       : await sha256Hex(new TextDecoder().decode(object.body));
     if (sha256 !== asset.sha256) return `checksum mismatch: ${asset.kind}`;
-    
+
     fetchedObjects.set(asset.objectKey, object);
   }
   return null;
@@ -252,4 +243,3 @@ async function failRecording(
   await metadata.updateRecording(failed);
   return { ok: false, recording: failed };
 }
-
