@@ -494,7 +494,7 @@
     "98": {
       "number": 98,
       "title": "[P1+] 本地 AI 字幕生成与回放交互",
-      "score": 8,
+      "score": 6,
       "stack": [
         "react",
         "typescript"
