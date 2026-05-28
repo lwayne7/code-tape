@@ -10,7 +10,7 @@ import {
   type RecordingSnapshot,
 } from "@code-tape/recording-schema";
 import type { MetadataRepository } from "./metadataRepository.js";
-import type { ObjectStorage } from "./objectStorage.js";
+import type { ObjectStorage, StoredObject } from "./objectStorage.js";
 import {
   MAX_RECORDING_DURATION_MS,
   MAX_RECORDING_EVENT_COUNT,
@@ -45,43 +45,51 @@ export async function processNextRecordingValidationJob(deps: {
       recording,
       now,
       "quota-exceeded",
-      `media size exceeds budget limit of 200MB: ${mediaAsset.sizeBytes} bytes`,
+      `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${mediaAsset.sizeBytes} bytes`,
     );
   }
-  const totalAssetSize = assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
-  if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
-    return failRecording(
-      deps.metadata,
-      recording,
-      now,
-      "quota-exceeded",
-      `total asset size exceeds budget limit of 250MB: ${totalAssetSize} bytes`,
-    );
+  let totalAssetSize = 0;
+  for (const asset of assets) {
+    totalAssetSize += asset.sizeBytes;
+    if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
+      return failRecording(
+        deps.metadata,
+        recording,
+        now,
+        "quota-exceeded",
+        `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalAssetSize} bytes`,
+      );
+    }
   }
 
-  const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets);
+  const fetchedObjects = new Map<string, StoredObject>();
+  const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets, fetchedObjects);
   if (checksumFailure) {
-    return failRecording(deps.metadata, recording, now, "checksum-mismatch", checksumFailure);
+    const code = checksumFailure.includes("exceeds budget") ? "quota-exceeded" : "checksum-mismatch";
+    return failRecording(deps.metadata, recording, now, code, checksumFailure);
   }
 
   let integrity: Awaited<ReturnType<typeof verifyRecordingPackageIntegrity>>;
   let mediaBlob: Blob | null = null;
   try {
     const manifest = await readJsonAsset<RecordingManifest>(
-      deps.objectStorage,
       assetsByKind.get("manifest"),
+      fetchedObjects,
     );
-    const meta = await readJsonAsset<RecordingMeta>(deps.objectStorage, assetsByKind.get("meta"));
+    const meta = await readJsonAsset<RecordingMeta>(
+      assetsByKind.get("meta"),
+      fetchedObjects,
+    );
     const events = await readJsonAsset<RecordingEvent[]>(
-      deps.objectStorage,
       assetsByKind.get("events"),
+      fetchedObjects,
     );
     const snapshots = await readJsonAsset<RecordingSnapshot[]>(
-      deps.objectStorage,
       assetsByKind.get("snapshots"),
+      fetchedObjects,
     );
     const mediaAsset = assetsByKind.get("media");
-    const mediaObject = mediaAsset ? await deps.objectStorage.getObject(mediaAsset.objectKey) : null;
+    const mediaObject = mediaAsset ? fetchedObjects.get(mediaAsset.objectKey) : null;
     mediaBlob = mediaObject
       ? new Blob([toArrayBuffer(mediaObject.body)], { type: mediaObject.contentType })
       : null;
@@ -89,7 +97,7 @@ export async function processNextRecordingValidationJob(deps: {
       ? ({
           blobId: mediaAsset?.objectKey ?? "cloud-media",
           mimeType: mediaBlob.type,
-          durationMs: recording.durationMs,
+          durationMs: meta.durationMs,
           sizeBytes: mediaBlob.size,
           timelineOffsetMs: 0,
           hasAudio: recording.hasAudio,
@@ -129,7 +137,7 @@ export async function processNextRecordingValidationJob(deps: {
       recording,
       now,
       "quota-exceeded",
-      `duration exceeds budget limit of 15 minutes: ${pkgMeta.durationMs}ms`,
+      `duration exceeds budget limit of ${MAX_RECORDING_DURATION_MS / 60000} minutes: ${pkgMeta.durationMs}ms`,
     );
   }
   if (pkgEvents.length > MAX_RECORDING_EVENT_COUNT) {
@@ -138,7 +146,7 @@ export async function processNextRecordingValidationJob(deps: {
       recording,
       now,
       "quota-exceeded",
-      `event count exceeds budget limit of 20000: ${pkgEvents.length}`,
+      `event count exceeds budget limit of ${MAX_RECORDING_EVENT_COUNT}: ${pkgEvents.length}`,
     );
   }
 
@@ -176,19 +184,32 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 async function findObjectChecksumFailure(
   objectStorage: ObjectStorage,
   assets: CloudRecordingAssetRecord[],
+  fetchedObjects: Map<string, StoredObject>,
 ): Promise<string | null> {
   for (const asset of assets) {
     const object = await objectStorage.getObject(asset.objectKey);
     if (!object) {
+      if (isOptionalAssetKind(asset.kind)) {
+        continue;
+      }
       return `missing object: ${asset.kind}`;
+    }
+    if (asset.kind === "media" && object.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
+      return `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${object.sizeBytes} bytes`;
     }
     if (object.sizeBytes !== asset.sizeBytes) return `size mismatch: ${asset.kind}`;
     const sha256 = isBinaryAssetKind(asset.kind)
       ? await sha256Blob(new Blob([toArrayBuffer(object.body)], { type: object.contentType }))
       : await sha256Hex(new TextDecoder().decode(object.body));
     if (sha256 !== asset.sha256) return `checksum mismatch: ${asset.kind}`;
+    
+    fetchedObjects.set(asset.objectKey, object);
   }
   return null;
+}
+
+function isOptionalAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
+  return kind === "media" || kind === "thumbnail" || kind === "indexes";
 }
 
 function isBinaryAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
@@ -196,11 +217,11 @@ function isBinaryAssetKind(kind: CloudRecordingAssetRecord["kind"]): boolean {
 }
 
 async function readJsonAsset<T>(
-  objectStorage: ObjectStorage,
   asset: CloudRecordingAssetRecord | undefined,
+  fetchedObjects: Map<string, StoredObject>,
 ): Promise<T> {
   if (!asset) throw new Error("missing required asset");
-  const object = await objectStorage.getObject(asset.objectKey);
+  const object = fetchedObjects.get(asset.objectKey);
   if (!object) throw new Error(`missing object: ${asset.kind}`);
   try {
     return JSON.parse(new TextDecoder().decode(object.body)) as T;
@@ -231,3 +252,4 @@ async function failRecording(
   await metadata.updateRecording(failed);
   return { ok: false, recording: failed };
 }
+

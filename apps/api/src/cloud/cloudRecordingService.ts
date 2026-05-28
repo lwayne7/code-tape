@@ -236,7 +236,7 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
   if (input.durationMs > MAX_RECORDING_DURATION_MS) {
     return {
       code: "quota-exceeded",
-      message: `duration exceeds budget limit of 15 minutes: ${input.durationMs}ms`,
+      message: `duration exceeds budget limit of ${MAX_RECORDING_DURATION_MS / 60000} minutes: ${input.durationMs}ms`,
     };
   }
   if (!RECORDING_LANGUAGE_SET.has(input.initialLanguage)) {
@@ -263,19 +263,22 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     if (asset.kind === "media" && asset.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
       return {
         code: "quota-exceeded",
-        message: `media size exceeds budget limit of 200MB: ${asset.sizeBytes} bytes`,
+        message: `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${asset.sizeBytes} bytes`,
       };
     }
     if (asset.mimeType.trim().length < 1) {
       return { code: "invalid-manifest", message: `invalid asset mime type: ${asset.kind}` };
     }
   }
-  const totalSizeBytes = input.assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);
-  if (totalSizeBytes > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
-    return {
-      code: "quota-exceeded",
-      message: `total asset size exceeds budget limit of 250MB: ${totalSizeBytes} bytes`,
-    };
+  let totalSizeBytes = 0;
+  for (const asset of input.assets) {
+    totalSizeBytes += asset.sizeBytes;
+    if (totalSizeBytes > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
+      return {
+        code: "quota-exceeded",
+        message: `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalSizeBytes} bytes`,
+      };
+    }
   }
   const kinds = new Set(input.assets.map((asset) => asset.kind));
   const missing = REQUIRED_ASSETS.filter((kind) => !kinds.has(kind));
