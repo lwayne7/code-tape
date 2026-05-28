@@ -46,17 +46,94 @@ describe("applySubtitleCorrection", () => {
     ]);
   });
 
-  it("keeps the original subtitles when generated chapters overlap", () => {
+  it("keeps the original subtitles when the LLM output omits a segment", () => {
     const track = makeTrack();
     const result = applySubtitleCorrection(track, {
       segments: [{ id: "subtitle-1", text: "useState hook" }],
+    });
+
+    expect(result.track).toEqual(track);
+    expect(result.chapters).toEqual([]);
+    expect(result.warnings).toEqual([
+      { code: "invalid-correction", message: "correction must include every subtitle segment exactly once" },
+    ]);
+  });
+
+  it("derives missing chapter end times from the next chapter or recording end", () => {
+    const result = applySubtitleCorrection(makeTrack(), {
+      segments: [
+        { id: "subtitle-1", text: "问题分析" },
+        { id: "subtitle-2", text: "代码实现" },
+      ],
+      chapters: [
+        { title: "问题分析", startMs: 0 },
+        { title: "代码实现", startMs: 1_000 },
+      ],
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.chapters).toEqual([
+      { id: "chapter-1", title: "问题分析", startMs: 0, endMs: 1_000 },
+      { id: "chapter-2", title: "代码实现", startMs: 1_000, endMs: 3_000 },
+    ]);
+  });
+
+  it("uses the recording duration when deriving the final chapter end time", () => {
+    const result = applySubtitleCorrection(
+      makeTrack(),
+      {
+        segments: [
+          { id: "subtitle-1", text: "问题分析" },
+          { id: "subtitle-2", text: "代码实现" },
+        ],
+        chapters: [
+          { title: "问题分析", startMs: 0 },
+          { title: "代码实现", startMs: 1_000 },
+        ],
+      },
+      { durationMs: 5_000 },
+    );
+
+    expect(result.warnings).toEqual([]);
+    expect(result.chapters).toEqual([
+      { id: "chapter-1", title: "问题分析", startMs: 0, endMs: 1_000 },
+      { id: "chapter-2", title: "代码实现", startMs: 1_000, endMs: 5_000 },
+    ]);
+  });
+
+  it("accepts chapter end times after the final subtitle when they fit the recording duration", () => {
+    const result = applySubtitleCorrection(
+      makeTrack(),
+      {
+        segments: [
+          { id: "subtitle-1", text: "问题分析" },
+          { id: "subtitle-2", text: "代码实现" },
+        ],
+        chapters: [{ title: "代码实现", startMs: 1_000, endMs: 4_000 }],
+      },
+      { durationMs: 5_000 },
+    );
+
+    expect(result.warnings).toEqual([]);
+    expect(result.chapters).toEqual([
+      { id: "chapter-1", title: "代码实现", startMs: 1_000, endMs: 4_000 },
+    ]);
+  });
+
+  it("keeps valid subtitle corrections when generated chapters overlap", () => {
+    const track = makeTrack();
+    const result = applySubtitleCorrection(track, {
+      segments: [
+        { id: "subtitle-1", text: "useState hook" },
+        { id: "subtitle-2", text: "render result" },
+      ],
       chapters: [
         { title: "First", startMs: 0, endMs: 2_000 },
         { title: "Overlap", startMs: 1_500, endMs: 3_000 },
       ],
     });
 
-    expect(result.track).toEqual(track);
+    expect(result.track.segments[0]?.text).toBe("useState hook");
     expect(result.chapters).toEqual([]);
     expect(result.warnings).toEqual([
       { code: "invalid-chapter", message: "chapters must be ordered and non-overlapping" },
