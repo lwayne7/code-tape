@@ -47,6 +47,7 @@ export type SubtitleTranscriberInput = {
 };
 
 export type SubtitleTranscriber = {
+  warmUp?(): Promise<void>;
   transcribe(input: SubtitleTranscriberInput): Promise<SubtitleTrackDraft>;
 };
 

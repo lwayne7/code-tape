@@ -40,6 +40,7 @@ export function SubtitlePanel({
   const activeSegmentRef = useRef<HTMLButtonElement | null>(null);
   const requestVersionRef = useRef(0);
   const generationAbortRef = useRef<AbortController | null>(null);
+  const warmUpRequestRef = useRef<{ recordingId: string; mediaBlob: Blob } | null>(null);
 
   useEffect(() => {
     const requestVersion = requestVersionRef.current + 1;
@@ -78,6 +79,19 @@ export function SubtitlePanel({
   useEffect(() => {
     activeSegmentRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [activeSegment?.id]);
+
+  useEffect(() => {
+    if (!recordingId || !mediaBlob || !hasAudio || !transcriber.warmUp) {
+      warmUpRequestRef.current = null;
+      return;
+    }
+    const lastWarmUpRequest = warmUpRequestRef.current;
+    if (lastWarmUpRequest?.recordingId === recordingId && lastWarmUpRequest.mediaBlob === mediaBlob) {
+      return;
+    }
+    warmUpRequestRef.current = { recordingId, mediaBlob };
+    void transcriber.warmUp().catch(() => undefined);
+  }, [hasAudio, mediaBlob, recordingId, transcriber]);
 
   const canGenerate = Boolean(
     recordingId && mediaBlob && hasAudio && status !== "loading" && status !== "generating",
@@ -121,7 +135,7 @@ export function SubtitlePanel({
   return (
     <section
       aria-label="字幕"
-      className="border-t border-border bg-background px-3 py-2"
+      className="shrink-0 border-t border-border bg-background px-3 py-2"
     >
       <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
@@ -159,7 +173,7 @@ export function SubtitlePanel({
       {!hasAudio ? (
         <p className="text-xs text-muted">无音频轨道</p>
       ) : track && track.segments.length > 0 ? (
-        <div className="flex max-h-32 flex-col gap-1 overflow-auto pr-1">
+        <div className="flex max-h-32 min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
           {track.segments.map((segment) => {
             const isActive = activeSegment?.id === segment.id;
             return (

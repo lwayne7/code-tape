@@ -300,6 +300,15 @@ describe("ReplayPage", () => {
     expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(2_400);
   });
 
+  it("keeps the replay work area shrinkable so subtitles cannot push controls offscreen", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    expect(screen.getByLabelText("回放工作区")).toHaveClass("min-h-0");
+  });
+
   it("renders transient pointer and shortcut overlays from scheduler ticks", async () => {
     const { ReplayPage } = await import("../ReplayPage");
 

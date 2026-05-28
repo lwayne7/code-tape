@@ -209,4 +209,77 @@ describe("SubtitlePanel", () => {
     expect(store.save).not.toHaveBeenCalled();
     expect(screen.queryByText("Old recording text.")).not.toBeInTheDocument();
   });
+
+  it("warms up the transcriber when audio is available", async () => {
+    const warmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          warmUp,
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(warmUp).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not repeat warm-up for the same recording media when transcriber identity changes", async () => {
+    const mediaBlob = new Blob(["webm"], { type: "video/webm" });
+    const firstWarmUp = vi.fn(async () => undefined);
+    const secondWarmUp = vi.fn(async () => undefined);
+    const createTranscriber = (warmUp: () => Promise<void>): SubtitleTranscriber => ({
+      warmUp,
+      transcribe: vi.fn(async () => ({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [],
+      })),
+    });
+
+    const { rerender } = render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={mediaBlob}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={createTranscriber(firstWarmUp)}
+      />,
+    );
+    await waitFor(() => expect(firstWarmUp).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={mediaBlob}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={createTranscriber(secondWarmUp)}
+      />,
+    );
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(firstWarmUp).toHaveBeenCalledTimes(1);
+    expect(secondWarmUp).not.toHaveBeenCalled();
+  });
 });
