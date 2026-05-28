@@ -419,26 +419,34 @@ function configureQuietBrowserCache(env: TransformersEnvironment | undefined): v
 }
 
 function readGeneratedText(output: unknown): string {
-  if (typeof output === "string") return output;
-  if (Array.isArray(output) && output.length > 0) {
-    return readGeneratedText(output[0]);
-  }
-  if (isPlainObject(output) && typeof output.generated_text === "string") {
-    return output.generated_text;
-  }
-  if (isPlainObject(output) && Array.isArray(output.generated_text)) {
-    const generatedMessages = output.generated_text;
-    const assistantMessage = [...generatedMessages]
-      .reverse()
-      .find(
-        (message): message is { role: string; content: string } =>
-          isPlainObject(message) &&
-          message.role === "assistant" &&
-          typeof message.content === "string",
-      );
-    if (assistantMessage) return assistantMessage.content;
-  }
+  const text = readGeneratedTextCandidate(output);
+  if (text !== null) return text;
   throw new Error("LLM 输出缺少 generated_text");
+}
+
+function readGeneratedTextCandidate(output: unknown): string | null {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) {
+    const assistantContent = readAssistantMessageContent(output);
+    if (assistantContent !== null) return assistantContent;
+    return output.length > 0 ? readGeneratedTextCandidate(output[0]) : null;
+  }
+  if (isPlainObject(output)) {
+    return readGeneratedTextCandidate(output.generated_text);
+  }
+  return null;
+}
+
+function readAssistantMessageContent(messages: unknown[]): string | null {
+  const assistantMessage = [...messages]
+    .reverse()
+    .find(
+      (message): message is { role: string; content: string } =>
+        isPlainObject(message) &&
+        message.role === "assistant" &&
+        typeof message.content === "string",
+    );
+  return assistantMessage?.content ?? null;
 }
 
 function extractJsonObjectText(text: string): string {

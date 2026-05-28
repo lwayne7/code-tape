@@ -158,6 +158,29 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(JSON.stringify(pipeline.mock.calls[1]?.[0])).toContain("Previous output did not contain a parseable JSON");
   });
 
+  it("parses Transformers.js chat message arrays nested inside generated_text", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text: [
+          { role: "user", content: "input subtitle payload" },
+          {
+            role: "assistant",
+            content:
+              '{"segments":[{"id":"subtitle-1","text":"useState hook"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":3000}]}',
+          },
+        ],
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
+    });
+  });
+
   it("drops invented chapters that start after the final input subtitle", async () => {
     const pipeline = vi.fn(async () => [
       {
