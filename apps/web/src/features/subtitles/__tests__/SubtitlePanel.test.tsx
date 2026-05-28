@@ -273,7 +273,7 @@ describe("SubtitlePanel", () => {
     await store.saveWithChapters(originalTrack, existingChapters);
     const postProcessor: SubtitlePostProcessor = {
       process: vi.fn(async () => ({
-        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        segments: [{ id: "missing-subtitle", text: "useState hook" }],
         chapters: [],
       })),
     };
@@ -304,7 +304,7 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "correction must include every subtitle segment exactly once",
+        "correction references unknown segment: missing-subtitle",
       ),
     );
     expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
@@ -540,6 +540,35 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
     expect(process).not.toHaveBeenCalled();
+  });
+
+  it("warms up the local LLM before the media blob finishes loading", async () => {
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={null}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
   });
 
   it("does not repeat warm-up for the same recording media when transcriber identity changes", async () => {

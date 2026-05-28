@@ -28,17 +28,13 @@ export function applySubtitleCorrection(
       return invalid(track, "invalid-correction", `correction references unknown segment: ${segment.id}`);
     }
     if (correctedTextById.has(segment.id)) {
-      return invalid(track, "invalid-correction", "correction must include every subtitle segment exactly once");
+      return invalid(track, "invalid-correction", `correction repeats subtitle segment: ${segment.id}`);
     }
     const text = segment.text.trim();
     if (!text) {
       return invalid(track, "invalid-correction", `correction text is empty for segment: ${segment.id}`);
     }
     correctedTextById.set(segment.id, text);
-  }
-
-  if (correctedTextById.size !== track.segments.length) {
-    return invalid(track, "invalid-correction", "correction must include every subtitle segment exactly once");
   }
 
   const correctedTrack: SubtitleTrack = {

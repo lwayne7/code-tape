@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import os
 import re
+import sys
 
 
 SECRET_PATTERNS = (
@@ -16,11 +18,27 @@ SECRET_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{20,}\b"),
 )
 
+ASSISTANT_MASK_CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{% if loop.first and messages[0]['role'] != 'system' %}"
+    "{{ '<|im_start|>system\nYou are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>\n' }}"
+    "{% endif %}"
+    "{{ '<|im_start|>' + message['role'] + '\n' }}"
+    "{% if message['role'] == 'assistant' %}"
+    "{% generation %}{{ message['content'] }}{% endgeneration %}"
+    "{% else %}"
+    "{{ message['content'] }}"
+    "{% endif %}"
+    "{{ '<|im_end|>\n' }}"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fine-tune a small subtitle postprocessor model with LoRA.")
     parser.add_argument("--train-jsonl", required=True, help="Distilled SFT JSONL from scripts/subtitle-llm/distill-corpus.mjs")
-    parser.add_argument("--base-model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Base instruct model for LoRA")
+    parser.add_argument("--base-model", default="HuggingFaceTB/SmolLM2-135M-Instruct", help="Base instruct model for LoRA")
     parser.add_argument("--output-dir", default="ml/subtitle-postprocessor/output/lora", help="Adapter output directory")
     parser.add_argument("--hub-model-id", help="Optional Hugging Face Hub repo id to push the adapter")
     parser.add_argument("--max-seq-length", type=int, default=4096)
@@ -34,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Opt in to model repository Python code. Do not combine with --hub-model-id.",
     )
     return parser
+
+
+def require_supported_python() -> None:
+    if sys.version_info < (3, 10):
+        raise SystemExit("Python >= 3.10 is required for the subtitle fine-tuning toolchain")
 
 
 def validate_train_jsonl(path: str) -> None:
@@ -148,11 +171,11 @@ def validate_assistant_payload(payload: dict, input_segments: list[dict], path: 
         segment_id = segment.get("id")
         if not is_non_empty_string(segment_id) or not is_non_empty_string(segment.get("text")):
             raise SystemExit(f"{path}:{line_number} assistant segments[{index}] must contain id and text strings")
-        if segment_id not in input_ids or segment_id in seen_ids:
-            raise SystemExit(f"{path}:{line_number} assistant must include every input segment exactly once")
+        if segment_id not in input_ids:
+            raise SystemExit(f"{path}:{line_number} assistant references unknown segment: {segment_id}")
+        if segment_id in seen_ids:
+            raise SystemExit(f"{path}:{line_number} assistant repeats segment: {segment_id}")
         seen_ids.add(segment_id)
-    if len(seen_ids) != len(input_ids):
-        raise SystemExit(f"{path}:{line_number} assistant must include every input segment exactly once")
 
     validate_chapters(chapters, input_segments[0]["startMs"], input_segments[-1]["endMs"], path, line_number)
 
@@ -198,6 +221,7 @@ def main() -> None:
     if args.trust_remote_code and args.hub_model_id:
         raise SystemExit("Do not combine --trust-remote-code with --hub-model-id; publish from a separate trusted process.")
     validate_train_jsonl(args.train_jsonl)
+    require_supported_python()
 
     from datasets import load_dataset
     from peft import LoraConfig
@@ -205,6 +229,7 @@ def main() -> None:
     from trl import SFTConfig, SFTTrainer
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=args.trust_remote_code)
+    tokenizer.chat_template = ASSISTANT_MASK_CHAT_TEMPLATE
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -215,17 +240,30 @@ def main() -> None:
     )
     train_dataset = load_dataset("json", data_files=args.train_jsonl, split="train")
 
-    def format_record(record: dict) -> str:
-        return tokenizer.apply_chat_template(
-            record["messages"],
-            tokenize=False,
-            add_generation_prompt=False,
-        )
+    sft_config_kwargs = {
+        "output_dir": args.output_dir,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.learning_rate,
+        "per_device_train_batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "logging_steps": 5,
+        "save_strategy": "no",
+        "packing": False,
+        "report_to": [],
+        "optim": "adamw_torch",
+    }
+    sft_config_signature = inspect.signature(SFTConfig)
+    if "max_seq_length" in sft_config_signature.parameters:
+        sft_config_kwargs["max_seq_length"] = args.max_seq_length
+    else:
+        sft_config_kwargs["max_length"] = args.max_seq_length
+    if "assistant_only_loss" in sft_config_signature.parameters:
+        sft_config_kwargs["assistant_only_loss"] = True
 
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_dataset,
-        formatting_func=format_record,
+        processing_class=tokenizer,
         peft_config=LoraConfig(
             r=16,
             lora_alpha=32,
@@ -234,18 +272,7 @@ def main() -> None:
             task_type="CAUSAL_LM",
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         ),
-        args=SFTConfig(
-            output_dir=args.output_dir,
-            max_seq_length=args.max_seq_length,
-            num_train_epochs=args.epochs,
-            learning_rate=args.learning_rate,
-            per_device_train_batch_size=args.batch_size,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            logging_steps=5,
-            save_strategy="epoch",
-            packing=False,
-            report_to=[],
-        ),
+        args=SFTConfig(**sft_config_kwargs),
     )
     trainer.train()
     trainer.save_model(args.output_dir)

@@ -6,26 +6,39 @@ import type {
 } from "./types";
 
 export const DEFAULT_POSTPROCESSOR_MODEL =
-  "onnx-community/SmolLM2-135M-Instruct-ONNX-MHA";
+  "onnx-community/Qwen2.5-0.5B-Instruct";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 768;
+const BASE_MAX_NEW_TOKENS = 384;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
-const MAX_DYNAMIC_NEW_TOKENS = 6_144;
-const NEW_TOKENS_PER_SEGMENT = 48;
-const CHAPTER_OUTPUT_TOKEN_RESERVE = 384;
+const MAX_DYNAMIC_NEW_TOKENS = 3_072;
+const NEW_TOKENS_PER_SEGMENT = 16;
+const CHAPTER_OUTPUT_TOKEN_RESERVE = 256;
+const MAX_REPAIR_OUTPUT_CHARS = 1_000;
+const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
+You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
+' }}{% endif %}{{'<|im_start|>' + message['role'] + '
+' + message['content'] + '<|im_end|>' + '
+'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant
+' }}{% endif %}`;
+
+type SubtitlePostProcessorMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
 
 type TextGenerationPipelineOptions = {
-  device: "wasm";
-  dtype: "q4" | "q8";
+  device: "webgpu" | "wasm";
+  dtype: "q4" | "q4f16" | "q8";
 };
 
 type TextGenerationPipeline = (
-  prompt: string,
+  prompt: string | SubtitlePostProcessorMessage[],
   options: {
     max_new_tokens: number;
     do_sample: boolean;
     return_full_text: boolean;
+    chat_template?: string;
   },
 ) => Promise<unknown>;
 
@@ -34,6 +47,19 @@ type PipelineFactory = (
   model: string,
   options: TextGenerationPipelineOptions,
 ) => Promise<TextGenerationPipeline>;
+
+type TransformersEnvironment = {
+  useBrowserCache?: boolean;
+  useCustomCache?: boolean;
+  customCache?: QuietBrowserCache | null;
+  cacheKey?: string;
+};
+
+type QuietBrowserCache = {
+  __codeTapeQuietCache: true;
+  match(cacheKey: string): Promise<Response | undefined>;
+  put(cacheKey: string, response: Response): Promise<void>;
+};
 
 export type HuggingFaceSubtitlePostProcessorOptions = {
   model?: string;
@@ -45,8 +71,10 @@ export function createHuggingFaceSubtitlePostProcessor(
 ): SubtitlePostProcessor {
   const model = options.model ?? DEFAULT_POSTPROCESSOR_MODEL;
   const pipelineOptions: TextGenerationPipelineOptions[] = [
-    { device: "wasm", dtype: "q4" },
+    { device: "webgpu", dtype: "q4f16" },
+    { device: "webgpu", dtype: "q4" },
     { device: "wasm", dtype: "q8" },
+    { device: "wasm", dtype: "q4" },
   ];
   let pipelinePromise: Promise<TextGenerationPipeline> | null = null;
   const getPipeline = () => {
@@ -72,13 +100,34 @@ export function createHuggingFaceSubtitlePostProcessor(
       const maxNewTokens = estimateMaxNewTokens(input.track);
       const pipeline = await getPipeline();
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const output = await pipeline(buildSubtitlePostProcessorPrompt(input), {
+      const output = await pipeline(buildSubtitlePostProcessorMessages(input), {
         max_new_tokens: maxNewTokens,
         do_sample: false,
         return_full_text: false,
+        ...buildChatTemplateOption(model),
       });
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      return extractSubtitleCorrectionResult(readGeneratedText(output));
+      const generatedText = readGeneratedText(output);
+      try {
+        return constrainCorrectionToTrack(
+          extractSubtitleCorrectionResult(generatedText),
+          input.track,
+        );
+      } catch (error) {
+        if (!isRecoverableJsonOutputError(error)) throw error;
+      }
+      if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+      const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
+        max_new_tokens: maxNewTokens,
+        do_sample: false,
+        return_full_text: false,
+        ...buildChatTemplateOption(model),
+      });
+      if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+      return constrainCorrectionToTrack(
+        extractSubtitleCorrectionResult(readGeneratedText(retryOutput)),
+        input.track,
+      );
     },
   };
 }
@@ -99,12 +148,27 @@ async function loadPipelineWithFallback({
         : await loadDefaultPipeline("text-generation", model, options);
     } catch (error) {
       const hasNextOption = index < pipelineOptions.length - 1;
-      if (!hasNextOption || !isQuantizedWeightCompatibilityError(error)) {
+      if (!hasNextOption || !isRecoverableModelLoadError(error, options)) {
         throw error;
       }
     }
   }
   throw new Error("本地字幕 LLM 模型加载失败");
+}
+
+function isRecoverableModelLoadError(
+  error: unknown,
+  options: TextGenerationPipelineOptions,
+): boolean {
+  return (
+    options.device === "webgpu" ||
+    isQuantizedWeightCompatibilityError(error) ||
+    isMissingModelArtifactError(error)
+  );
+}
+
+function buildChatTemplateOption(model: string): { chat_template?: string } {
+  return model.includes("code-tape-subtitle-postprocessor") ? { chat_template: SMOLLM_CHAT_TEMPLATE } : {};
 }
 
 function isQuantizedWeightCompatibilityError(error: unknown): boolean {
@@ -113,6 +177,16 @@ function isQuantizedWeightCompatibilityError(error: unknown): boolean {
     message.includes("TransposeDQWeightsForMatMulNBits") ||
     message.includes("MatMulNBits") ||
     message.includes("Missing required scale")
+  );
+}
+
+function isMissingModelArtifactError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Could not locate file") ||
+    message.includes("Could not load model") ||
+    message.includes("404") ||
+    message.includes("Not Found")
   );
 }
 
@@ -158,16 +232,89 @@ export function buildSubtitlePostProcessorPrompt({
     "任务：修正 ASR 字幕里的前端领域术语、变量名、函数名、组件名和中英混合文本，并基于字幕内容生成章节跳转点。",
     "规则：",
     "- 只输出 JSON，不要输出解释、Markdown 或额外文本。",
-    "- 中文内容输出简体中文；英文原句、英文短句和英文自然语言保持英文，不要翻译成中文。",
-    "- 英文术语、变量名、函数名、组件名保持英文原样。",
+    "- 修正前端术语、变量名、函数名、组件名和明显的 ASR 误识别。",
+    "- segments 只返回需要修改的 segments；不需要修改的字幕段请省略，应用会保留原文。",
     "- segments 只能引用输入中已有的 id，不能改 startMs/endMs。",
     "- chapters 必须按时间递增、互不重叠，标题要短，适合回放导航。",
+    "- chapters 必须位于输入字幕时间轴内，不能在最后一个字幕 endMs 之后创建章节。",
     "- 无法可靠生成章节时也必须输出 chapters: []。",
     "输出 JSON 结构：",
     '{"segments":[{"id":"subtitle-1","text":"修正后的文本"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
     "输入：",
     JSON.stringify(payload),
   ].join("\n");
+}
+
+export function buildSubtitlePostProcessorMessages(
+  input: {
+    track: SubtitleTrack;
+    context?: SubtitlePostProcessorContext;
+  },
+  options: { previousOutput?: string } = {},
+): SubtitlePostProcessorMessage[] {
+  const payload = buildSubtitlePostProcessorPayload(input);
+  const messages: SubtitlePostProcessorMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You are the code-tape subtitle post-processing model.",
+        "Only output one JSON object. Do not output Markdown, explanations, prefixes, suffixes, or code fences. 只输出 JSON。",
+        "Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.",
+        "For speed, output only changed subtitle segments in segments. Omit unchanged segments; the app keeps their original text.",
+        "Generate short playback chapter jump points from subtitle content and timestamps.",
+        "Chapters must stay inside the input subtitle timeline. Do not create chapters at or after the final segment endMs.",
+        'Output shape: {"segments":[{"id":"subtitle-1","text":"corrected text"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
+        "The response must start with { and end with }.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: JSON.stringify(payload),
+    },
+  ];
+  if (options.previousOutput !== undefined) {
+    messages.push(
+      {
+        role: "assistant",
+        content: budgetPromptText(options.previousOutput, MAX_REPAIR_OUTPUT_CHARS),
+      },
+      {
+        role: "user",
+        content: [
+          "Previous output did not contain a parseable JSON object.",
+          "Output exactly one JSON object with segments and chapters arrays.",
+          "No explanations, Markdown, code fences, or text outside JSON.",
+        ].join("\n"),
+      },
+    );
+  }
+  return messages;
+}
+
+function buildSubtitlePostProcessorPayload({
+  track,
+  context,
+}: {
+  track: SubtitleTrack;
+  context?: SubtitlePostProcessorContext;
+}) {
+  return {
+    context: {
+      fileName: context?.fileName ?? null,
+      code: budgetPromptText(context?.code ?? "", MAX_PROMPT_CODE_CHARS),
+      runtimeOutput: budgetPromptText(
+        context?.runtimeOutput ?? "",
+        MAX_PROMPT_RUNTIME_OUTPUT_CHARS,
+      ),
+      glossary: context?.glossary ?? [],
+    },
+    segments: track.segments.map((segment) => ({
+      id: segment.id,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text,
+    })),
+  };
 }
 
 function budgetPromptText(text: string, maxChars: number): string {
@@ -185,6 +332,11 @@ function budgetPromptText(text: string, maxChars: number): string {
   tailChars = Math.floor(availableChars / 2);
 
   return `${text.slice(0, headChars)}${marker}${text.slice(text.length - tailChars)}`;
+}
+
+function isRecoverableJsonOutputError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.startsWith("LLM 输出");
 }
 
 export function extractSubtitleCorrectionResult(text: string): SubtitleCorrectionResult {
@@ -209,36 +361,132 @@ export function extractSubtitleCorrectionResult(text: string): SubtitleCorrectio
   };
 }
 
+function constrainCorrectionToTrack(
+  correction: SubtitleCorrectionResult,
+  track: SubtitleTrack,
+): SubtitleCorrectionResult {
+  const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
+  const chapters = (correction.chapters ?? [])
+    .filter((chapter) => chapter.startMs < subtitleEndMs)
+    .filter((chapter) => !chapter.title.includes("\uFFFD"))
+    .map((chapter) => ({
+      ...chapter,
+      ...(typeof chapter.endMs === "number"
+        ? { endMs: Math.min(chapter.endMs, subtitleEndMs) }
+        : {}),
+    }))
+    .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
+  return { ...correction, chapters };
+}
+
 async function loadDefaultPipeline(
   task: "text-generation",
   model: string,
   options: TextGenerationPipelineOptions,
 ): Promise<TextGenerationPipeline> {
   const module = await import("@huggingface/transformers");
+  configureQuietBrowserCache(module.env as TransformersEnvironment | undefined);
   const pipe = await module.pipeline(task, model, options);
   return pipe as unknown as TextGenerationPipeline;
 }
 
+function configureQuietBrowserCache(env: TransformersEnvironment | undefined): void {
+  if (!env?.useBrowserCache || typeof globalThis.caches === "undefined") return;
+  if (env.useCustomCache && env.customCache) return;
+
+  const cacheKey = env.cacheKey ?? "transformers-cache";
+  env.useCustomCache = true;
+  env.customCache = {
+    __codeTapeQuietCache: true,
+    async match(resourceKey) {
+      try {
+        const cache = await globalThis.caches.open(cacheKey);
+        return (await cache.match(resourceKey)) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async put(resourceKey, response) {
+      try {
+        const cache = await globalThis.caches.open(cacheKey);
+        await cache.put(resourceKey, response.clone());
+      } catch {
+        // Cache API writes can fail for large model files or browser storage issues.
+        // Model loading has already succeeded, so keep inference available and avoid noisy warnings.
+      }
+    },
+  };
+}
+
 function readGeneratedText(output: unknown): string {
-  if (typeof output === "string") return output;
-  if (Array.isArray(output) && output.length > 0) {
-    return readGeneratedText(output[0]);
-  }
-  if (isPlainObject(output) && typeof output.generated_text === "string") {
-    return output.generated_text;
-  }
+  const text = readGeneratedTextCandidate(output);
+  if (text !== null) return text;
   throw new Error("LLM 输出缺少 generated_text");
+}
+
+function readGeneratedTextCandidate(output: unknown): string | null {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) {
+    const assistantContent = readAssistantMessageContent(output);
+    if (assistantContent !== null) return assistantContent;
+    return output.length > 0 ? readGeneratedTextCandidate(output[0]) : null;
+  }
+  if (isPlainObject(output)) {
+    return readGeneratedTextCandidate(output.generated_text);
+  }
+  return null;
+}
+
+function readAssistantMessageContent(messages: unknown[]): string | null {
+  const assistantMessage = [...messages]
+    .reverse()
+    .find(
+      (message): message is { role: string; content: string } =>
+        isPlainObject(message) &&
+        message.role === "assistant" &&
+        typeof message.content === "string",
+    );
+  return assistantMessage?.content ?? null;
 }
 
 function extractJsonObjectText(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/u)?.[1]?.trim();
-  if (fenced) return fenced;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
+  const source = fenced ?? text;
+  const start = source.indexOf("{");
+  if (start === -1) {
     throw new Error("LLM 输出中未找到 JSON 对象");
   }
-  return text.slice(start, end + 1);
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  throw new Error("LLM 输出中未找到完整 JSON 对象");
 }
 
 function normalizeSegment(value: unknown, index: number): SubtitleCorrectionResult["segments"][number] {

@@ -46,17 +46,18 @@ describe("applySubtitleCorrection", () => {
     ]);
   });
 
-  it("keeps the original subtitles when the LLM output omits a segment", () => {
-    const track = makeTrack();
-    const result = applySubtitleCorrection(track, {
+  it("keeps omitted subtitle segments unchanged so the local LLM can return sparse corrections", () => {
+    const result = applySubtitleCorrection(makeTrack(), {
       segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
     });
 
-    expect(result.track).toEqual(track);
-    expect(result.chapters).toEqual([]);
-    expect(result.warnings).toEqual([
-      { code: "invalid-correction", message: "correction must include every subtitle segment exactly once" },
+    expect(result.warnings).toEqual([]);
+    expect(result.track.segments).toEqual([
+      { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "useState hook" },
+      { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
     ]);
+    expect(result.chapters).toEqual([{ id: "chapter-1", title: "状态设计", startMs: 0, endMs: 3_000 }]);
   });
 
   it("derives missing chapter end times from the next chapter or recording end", () => {

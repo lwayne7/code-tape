@@ -44,13 +44,9 @@ export function validateSubtitleTeacherResult(value, example) {
     if (!isPlainObject(segment)) throw new Error(`teacher result segments[${index}] must be an object`);
     if (!isNonEmptyString(segment.id)) throw new Error(`teacher result segments[${index}].id is required`);
     if (!isNonEmptyString(segment.text)) throw new Error(`teacher result segments[${index}].text is required`);
-    if (!inputIds.has(segment.id) || seenIds.has(segment.id)) {
-      throw new Error('teacher result must include every input segment exactly once');
-    }
+    if (!inputIds.has(segment.id)) throw new Error(`teacher result references unknown segment: ${segment.id}`);
+    if (seenIds.has(segment.id)) throw new Error(`teacher result repeats segment: ${segment.id}`);
     seenIds.add(segment.id);
-  }
-  if (seenIds.size !== inputIds.size) {
-    throw new Error('teacher result must include every input segment exactly once');
   }
 
   validateTeacherChapters(value.chapters, {
@@ -68,9 +64,8 @@ export function buildDistillationMessages(example) {
       content: [
         'You are the code-tape subtitle post-processing teacher model.',
         'Only output JSON. Do not output Markdown or explanations. 只输出 JSON。',
-        'Correct frontend domain terms, package names, variable names, component names, and mixed Chinese/English ASR text.',
-        'Chinese content must be Simplified Chinese. 中文内容必须输出简体中文。',
-        'Preserve natural English sentences and code identifiers in English.',
+        'Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.',
+        'For speed, output only changed subtitle segments in segments. Omit unchanged segments.',
         'Generate short playback chapter jump points from subtitle content and timestamps.',
         'Output shape: {"segments":[{"id":"subtitle-1","text":"corrected text"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
       ].join('\n'),
@@ -78,7 +73,6 @@ export function buildDistillationMessages(example) {
     {
       role: 'user',
       content: JSON.stringify({
-        language: normalizedExample.language ?? 'unknown',
         context: normalizedExample.context ?? {},
         segments: normalizedExample.segments,
       }),

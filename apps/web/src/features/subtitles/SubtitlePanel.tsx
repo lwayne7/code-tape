@@ -2,6 +2,7 @@ import { Captions, Loader2, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { SubtitleChapterList } from "./SubtitleChapterList";
 import { applySubtitleCorrection } from "./subtitleCorrection";
+import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
 import { createHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessor";
 import { createSubtitleStore } from "./subtitleStore";
 import { createHuggingFaceSubtitleTranscriber } from "./subtitleTranscriber";
@@ -52,7 +53,9 @@ export function SubtitlePanel({
   const postProcessor = useMemo(
     () =>
       injectedPostProcessor === undefined
-        ? createHuggingFaceSubtitlePostProcessor()
+        ? createHuggingFaceSubtitlePostProcessor({
+            model: resolveSubtitlePostProcessorModel(),
+          })
         : injectedPostProcessor,
     [injectedPostProcessor],
   );
@@ -132,11 +135,14 @@ export function SubtitlePanel({
   }, [hasAudio, mediaBlob, recordingId, transcriber]);
 
   useEffect(() => {
-    if (!recordingId || !mediaBlob || !hasAudio || !postProcessor?.warmUp) return;
+    if (!recordingId || !hasAudio || !postProcessor?.warmUp) {
+      postProcessorWarmUpRef.current = null;
+      return;
+    }
     if (postProcessorWarmUpRef.current === recordingId) return;
     postProcessorWarmUpRef.current = recordingId;
     void postProcessor.warmUp().catch(() => undefined);
-  }, [hasAudio, mediaBlob, postProcessor, recordingId]);
+  }, [hasAudio, postProcessor, recordingId]);
 
   const canGenerate = Boolean(
     recordingId &&
