@@ -247,6 +247,35 @@ test("GET /api/recordings/:recordingId requires owner token", async () => {
   });
 });
 
+test("GET /api/recordings/:recordingId returns unified error for malformed path encoding", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-detail-malformed-path",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/%E0%A4%A", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, {
+    error: {
+      code: "bad-request",
+      message: "recordingId path segment is malformed",
+      requestId: "req-detail-malformed-path",
+    },
+  });
+});
+
 for (const input of [
   { name: "empty", body: undefined },
   { name: "malformed JSON", body: '{"idempotencyKey":' },

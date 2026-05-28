@@ -63,9 +63,13 @@ export function createCloudApiHandler(deps: {
           requestId,
         );
       }
+      const recordingId = safeDecodePathSegment(recordingDetailMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
       const result = await deps.service.getRecording({
         ownerId,
-        recordingId: decodeURIComponent(recordingDetailMatch[1]!),
+        recordingId: recordingId.value,
       });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
       return jsonResponse(result.value, 200, requestId);
@@ -256,6 +260,17 @@ function isPositiveSafeInteger(value: unknown): value is number {
 function readOwnerToken(request: Request): string | null {
   const token = request.headers.get("x-owner-token")?.trim();
   return token ? token : null;
+}
+
+function safeDecodePathSegment(segment: string): CloudResult<string> {
+  try {
+    return { ok: true, value: decodeURIComponent(segment) };
+  } catch {
+    return {
+      ok: false,
+      error: { code: "bad-request", message: "recordingId path segment is malformed" },
+    };
+  }
 }
 
 function jsonResponse(body: unknown, status: number, requestId: string): Response {
