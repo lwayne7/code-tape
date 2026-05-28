@@ -1,0 +1,138 @@
+import type { SubtitleSegment, SubtitleTranscriber } from "./types";
+
+export const DEFAULT_TRANSCRIPTION_MODEL = "onnx-community/whisper-tiny";
+
+type RawAsrChunk = {
+  text?: unknown;
+  timestamp?: unknown;
+};
+
+type RawAsrResult = {
+  text?: unknown;
+  chunks?: unknown;
+  language?: unknown;
+};
+
+type AsrPipeline = (
+  input: string,
+  options: {
+    chunk_length_s: number;
+    stride_length_s: number;
+    return_timestamps: true;
+  },
+) => Promise<RawAsrResult>;
+
+type PipelineFactory = (
+  task: "automatic-speech-recognition",
+  model: string,
+) => Promise<AsrPipeline>;
+
+export type HuggingFaceSubtitleTranscriberOptions = {
+  model?: string;
+  pipelineFactory?: PipelineFactory;
+};
+
+export function normalizeTranscriptionResult(
+  result: RawAsrResult,
+  durationMs: number,
+): SubtitleSegment[] {
+  const chunks = Array.isArray(result.chunks) ? result.chunks : [];
+  const segments = chunks
+    .map((chunk, index) => segmentFromChunk(chunk, index, durationMs))
+    .filter((segment): segment is SubtitleSegment => Boolean(segment));
+
+  if (segments.length > 0) return reindexSegments(segments);
+
+  const text = typeof result.text === "string" ? result.text.trim() : "";
+  if (!text) return [];
+  return [{ id: "subtitle-1", startMs: 0, endMs: Math.max(0, durationMs), text }];
+}
+
+export function createHuggingFaceSubtitleTranscriber(
+  options: HuggingFaceSubtitleTranscriberOptions = {},
+): SubtitleTranscriber {
+  const model = options.model ?? DEFAULT_TRANSCRIPTION_MODEL;
+  let pipelinePromise: Promise<AsrPipeline> | null = null;
+  const getPipeline = () => {
+    if (!pipelinePromise) {
+      pipelinePromise = options.pipelineFactory
+        ? options.pipelineFactory("automatic-speech-recognition", model)
+        : loadDefaultPipeline("automatic-speech-recognition", model);
+    }
+    return pipelinePromise;
+  };
+
+  return {
+    async transcribe({ mediaBlob, durationMs, signal }) {
+      if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+      const pipeline = await getPipeline();
+      if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+      const url = URL.createObjectURL(mediaBlob);
+      try {
+        const result = await pipeline(url, {
+          chunk_length_s: 30,
+          stride_length_s: 5,
+          return_timestamps: true,
+        });
+        return {
+          model,
+          source: "huggingface-local",
+          language: typeof result.language === "string" ? result.language : undefined,
+          segments: normalizeTranscriptionResult(result, durationMs),
+        };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    },
+  };
+}
+
+async function loadDefaultPipeline(
+  task: "automatic-speech-recognition",
+  model: string,
+): Promise<AsrPipeline> {
+  const module = await import("@huggingface/transformers");
+  const pipe = await module.pipeline(task, model);
+  return pipe as unknown as AsrPipeline;
+}
+
+function segmentFromChunk(
+  value: unknown,
+  index: number,
+  durationMs: number,
+): SubtitleSegment | null {
+  if (!isPlainObject(value)) return null;
+  const chunk = value as RawAsrChunk;
+  const text = typeof chunk.text === "string" ? chunk.text.trim() : "";
+  if (!text) return null;
+  const [startSec, endSec] = readTimestamp(chunk.timestamp);
+  const startMs = clampMs(secondsToMs(startSec), durationMs);
+  const endMs = clampMs(secondsToMs(endSec), durationMs);
+  if (endMs <= startMs) return null;
+  return { id: `subtitle-${index + 1}`, startMs, endMs, text };
+}
+
+function reindexSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
+  return segments.map((segment, index) => ({ ...segment, id: `subtitle-${index + 1}` }));
+}
+
+function readTimestamp(value: unknown): [number, number] {
+  if (!Array.isArray(value)) return [0, 0];
+  const [start, end] = value;
+  return [
+    typeof start === "number" && Number.isFinite(start) ? start : 0,
+    typeof end === "number" && Number.isFinite(end) ? end : 0,
+  ];
+}
+
+function secondsToMs(value: number): number {
+  return Math.round(value * 1000);
+}
+
+function clampMs(value: number, durationMs: number): number {
+  return Math.max(0, Math.min(Math.max(0, durationMs), value));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

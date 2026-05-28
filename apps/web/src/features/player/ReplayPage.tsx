@@ -9,7 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Camera, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
+import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
 import { createTimelineClock } from "./timelineClock";
 import { ReplayControls } from "./ReplayControls";
@@ -18,6 +18,7 @@ import { CodeEditor } from "@/features/editor/CodeEditor";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createRecordingStore } from "@/features/library/recordingStore";
+import { SubtitlePanel } from "@/features/subtitles";
 import { Toggle } from "@/shared/ui";
 import type {
   PackageWarning,
@@ -75,12 +76,14 @@ type ReplayDisplayOptions = {
   shortcuts: boolean;
   camera: boolean;
   runtime: boolean;
+  subtitles: boolean;
 };
 const DEFAULT_DISPLAY_OPTIONS: ReplayDisplayOptions = {
   pointer: true,
   shortcuts: true,
   camera: true,
   runtime: true,
+  subtitles: true,
 };
 
 function isEventOnlyMediaDegraded(
@@ -300,6 +303,16 @@ export function ReplayPage() {
           </div>
         ) : null}
       </div>
+      {displayOptions.subtitles ? (
+        <SubtitlePanel
+          recordingId={pkg?.meta.id ?? null}
+          mediaBlob={mediaBlob}
+          hasAudio={Boolean(pkg?.media?.hasAudio)}
+          durationMs={pkg?.meta.durationMs ?? 0}
+          currentTimeMs={schedulerState.timelineTimeMs}
+          onSeek={(target) => scheduler.seek(target)}
+        />
+      ) : null}
       <ReplayControls
         state={schedulerState}
         durationMs={pkg?.meta.durationMs ?? 0}
@@ -459,6 +472,12 @@ function ReplayDisplayToolbar({
         onPressedChange={(pressed) => onChange("runtime", pressed)}
         label="显示运行面板"
         icon={<TerminalSquare size={17} />}
+      />
+      <Toggle
+        pressed={options.subtitles}
+        onPressedChange={(pressed) => onChange("subtitles", pressed)}
+        label="显示字幕"
+        icon={<Captions size={17} />}
       />
     </div>
   );

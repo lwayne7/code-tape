@@ -499,6 +499,19 @@ test('technical plan owns P1 cloud contract without standalone cloud plan', () =
   }
 });
 
+test('technical plan owns P1 plus AI subtitle architecture and HF token boundary', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+
+  assert.match(technicalPlan, /## 十一、P1\+ AI 字幕与 Hugging Face 模型方案/u);
+  assert.match(technicalPlan, /字幕、纠错结果和章节属于可重建的派生资产/u);
+  assert.match(technicalPlan, /不把字幕写入 `RecordingPackageV1` 主 schema/u);
+  assert.match(technicalPlan, /`@huggingface\/transformers`/u);
+  assert.match(technicalPlan, /`onnx-community\/whisper-tiny`/u);
+  assert.match(technicalPlan, /不得把 token 打包进浏览器 bundle/u);
+  assert.match(technicalPlan, /通过用户本机 `HF_TOKEN` 或 `huggingface-cli login` 推送到 Hugging Face Hub/u);
+  assert.match(technicalPlan, /JSON 解析失败[\s\S]*保留原始 ASR 字幕/u);
+});
+
 test('repository text does not reference the standalone cloud plan path', () => {
   const trackedFiles = execFileSync('git', ['ls-files'], {
     encoding: 'utf8',
