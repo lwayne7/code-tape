@@ -9,6 +9,11 @@ export const DEFAULT_POSTPROCESSOR_MODEL =
   "onnx-community/SmolLM2-135M-Instruct-ONNX-MHA";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
+const BASE_MAX_NEW_TOKENS = 768;
+const MAX_POSTPROCESSOR_SEGMENTS = 120;
+const MAX_DYNAMIC_NEW_TOKENS = 6_144;
+const NEW_TOKENS_PER_SEGMENT = 48;
+const CHAPTER_OUTPUT_TOKEN_RESERVE = 384;
 
 type TextGenerationPipelineOptions = {
   device: "wasm";
@@ -60,10 +65,11 @@ export function createHuggingFaceSubtitlePostProcessor(
     },
     async process(input) {
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+      const maxNewTokens = estimateMaxNewTokens(input.track);
       const pipeline = await getPipeline();
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
       const output = await pipeline(buildSubtitlePostProcessorPrompt(input), {
-        max_new_tokens: 768,
+        max_new_tokens: maxNewTokens,
         do_sample: false,
         return_full_text: false,
       });
@@ -71,6 +77,19 @@ export function createHuggingFaceSubtitlePostProcessor(
       return extractSubtitleCorrectionResult(readGeneratedText(output));
     },
   };
+}
+
+function estimateMaxNewTokens(track: SubtitleTrack): number {
+  const segmentCount = track.segments.length;
+  if (segmentCount > MAX_POSTPROCESSOR_SEGMENTS) {
+    throw new Error(
+      `字幕段过多（${segmentCount} 段），浏览器本地 LLM 单次最多支持 ${MAX_POSTPROCESSOR_SEGMENTS} 段；请先拆分录制或缩短片段后再运行 AI 纠错。`,
+    );
+  }
+  return Math.min(
+    MAX_DYNAMIC_NEW_TOKENS,
+    Math.max(BASE_MAX_NEW_TOKENS, segmentCount * NEW_TOKENS_PER_SEGMENT + CHAPTER_OUTPUT_TOKEN_RESERVE),
+  );
 }
 
 export function buildSubtitlePostProcessorPrompt({

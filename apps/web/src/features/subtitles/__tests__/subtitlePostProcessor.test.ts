@@ -20,6 +20,18 @@ function makeTrack(): SubtitleTrack {
   };
 }
 
+function makeTrackWithSegments(segmentCount: number): SubtitleTrack {
+  return {
+    ...makeTrack(),
+    segments: Array.from({ length: segmentCount }, (_, index) => ({
+      id: `subtitle-${index + 1}`,
+      startMs: index * 1_000,
+      endMs: (index + 1) * 1_000,
+      text: `segment ${index + 1}`,
+    })),
+  };
+}
+
 function readPromptPayload(prompt: string): {
   code: string;
   runtimeOutput: string;
@@ -69,6 +81,45 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       ],
       chapters: [{ title: "问题分析", startMs: 0, endMs: 1_000 }],
     });
+  });
+
+  it("uses a larger output budget for 100 subtitle segments", async () => {
+    const track = makeTrackWithSegments(100);
+    const pipeline = vi.fn(
+      async (
+        _prompt: string,
+        _options: { max_new_tokens: number; do_sample: boolean; return_full_text: boolean },
+      ) => [
+        {
+          generated_text: JSON.stringify({
+            segments: track.segments.map((segment) => ({ id: segment.id, text: segment.text })),
+            chapters: [],
+          }),
+        },
+      ],
+    );
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    const result = await postProcessor.process({ track });
+
+    expect(pipeline).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ max_new_tokens: expect.any(Number) }),
+    );
+    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThan(768);
+    expect(result.segments).toHaveLength(100);
+  });
+
+  it("rejects oversized subtitle tracks before loading the local LLM", async () => {
+    const pipelineFactory = vi.fn();
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({ pipelineFactory });
+
+    await expect(postProcessor.process({ track: makeTrackWithSegments(121) })).rejects.toThrow(
+      /字幕段过多/,
+    );
+    expect(pipelineFactory).not.toHaveBeenCalled();
   });
 });
 
