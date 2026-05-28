@@ -319,8 +319,10 @@ test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', (
   assert.equal(metrics.records, 1);
   assert.equal(metrics.invalidRecords, 0);
   assert.equal(metrics.jsonValidRate, 1);
+  assert.equal(metrics.sparseSegmentReferenceRate, 1);
   assert.equal(metrics.chapterSignalRate, 1);
   assert.equal(metrics.glossaryPreservationRate, 1);
+  assert.equal(Object.hasOwn(metrics, 'segmentCoverageRate'), false);
   assert.equal(Object.hasOwn(metrics, 'simplifiedChineseRate'), false);
 });
 
@@ -335,6 +337,33 @@ test('imports subtitle corpus evaluator without running the CLI entrypoint', asy
   } finally {
     process.exitCode = previousExitCode;
   }
+});
+
+test('subtitle corpus evaluation applies sparse corrections before scoring glossary preservation', async () => {
+  const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+  const record = buildTrainingRecord({
+    example: {
+      ...seedExample,
+      context: {
+        ...seedExample.context,
+        glossary: ['React', 'useState', 'setCount'],
+      },
+      segments: [
+        { id: 'subtitle-1', startMs: 0, endMs: 1200, text: 'React useState 已经正确' },
+        { id: 'subtitle-2', startMs: 1200, endMs: 2600, text: '然后 set count 触发 render' },
+      ],
+    },
+    teacherResult: {
+      segments: [{ id: 'subtitle-2', text: '然后 setCount 触发 render' }],
+      chapters: [{ title: '状态设计', startMs: 0, endMs: 2600 }],
+    },
+    teacherModel: 'gpt-5.5',
+  });
+
+  const metrics = evaluateRecords([record]);
+
+  assert.equal(metrics.sparseSegmentReferenceRate, 1);
+  assert.equal(metrics.glossaryPreservationRate, 1);
 });
 
 test('subtitle corpus evaluation does not treat language style as a blocking metric', () => {

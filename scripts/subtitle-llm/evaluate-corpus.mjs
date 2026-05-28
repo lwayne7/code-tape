@@ -27,12 +27,12 @@ export function evaluateRecords(records) {
     records: records.length,
     invalidRecords: 0,
     jsonValidRate: 0,
-    segmentCoverageRate: 0,
+    sparseSegmentReferenceRate: 0,
     chapterSignalRate: 0,
     glossaryPreservationRate: 0,
   };
   let jsonValid = 0;
-  let segmentCoverage = 0;
+  let sparseSegmentReferences = 0;
   let chapterSignal = 0;
   let glossaryPreserved = 0;
   let glossaryTotal = 0;
@@ -41,10 +41,10 @@ export function evaluateRecords(records) {
     try {
       validateSubtitleTrainingRecord(record);
       jsonValid += 1;
-      segmentCoverage += 1;
+      sparseSegmentReferences += 1;
       const userPayload = parseJsonObject(record.messages[1].content, 'user training content');
       const assistantPayload = parseJsonObject(record.messages[2].content, 'assistant training content');
-      const assistantText = assistantPayload.segments.map((segment) => segment.text).join('\n');
+      const finalSubtitleText = buildFinalSubtitleText(userPayload.segments, assistantPayload.segments);
       if (assistantPayload.chapters.length > 0) chapterSignal += 1;
 
       const glossary = Array.isArray(userPayload.context?.glossary)
@@ -53,12 +53,12 @@ export function evaluateRecords(records) {
       const normalizedSourceSegments = normalizeTermText(
         userPayload.segments.map((segment) => segment.text).join('\n'),
       );
-      const normalizedAssistantText = normalizeTermText(assistantText);
+      const normalizedFinalSubtitleText = normalizeTermText(finalSubtitleText);
       for (const term of glossary) {
         const normalizedTerm = normalizeTermText(term);
         if (!normalizedSourceSegments.includes(normalizedTerm)) continue;
         glossaryTotal += 1;
-        if (assistantText.includes(term) || normalizedAssistantText.includes(normalizedTerm)) {
+        if (finalSubtitleText.includes(term) || normalizedFinalSubtitleText.includes(normalizedTerm)) {
           glossaryPreserved += 1;
         }
       }
@@ -68,10 +68,17 @@ export function evaluateRecords(records) {
   }
 
   metrics.jsonValidRate = ratio(jsonValid, records.length);
-  metrics.segmentCoverageRate = ratio(segmentCoverage, records.length);
+  metrics.sparseSegmentReferenceRate = ratio(sparseSegmentReferences, records.length);
   metrics.chapterSignalRate = ratio(chapterSignal, records.length);
   metrics.glossaryPreservationRate = glossaryTotal === 0 ? 1 : ratio(glossaryPreserved, glossaryTotal);
   return metrics;
+}
+
+function buildFinalSubtitleText(inputSegments, correctionSegments) {
+  const correctionsById = new Map(correctionSegments.map((segment) => [segment.id, segment.text]));
+  return inputSegments
+    .map((segment) => correctionsById.get(segment.id) ?? segment.text)
+    .join('\n');
 }
 
 function parseJsonl(text, label) {
