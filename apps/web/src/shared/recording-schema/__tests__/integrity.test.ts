@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { sha256Blob, verifyRecordingPackageIntegrity } from "../integrity";
-import { RECORDING_SCHEMA_VERSION, type RecordingPackageV1 } from "../types";
+import {
+  RECORDING_SCHEMA_VERSION,
+  sha256Blob,
+  verifyRecordingPackageIntegrity,
+  type RecordingPackageV1,
+} from "@/shared/recording-schema";
 import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
 
 async function makePackage(): Promise<RecordingPackageV1> {

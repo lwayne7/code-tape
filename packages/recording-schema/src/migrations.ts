@@ -1,10 +1,10 @@
-import { validateRecordingPackageV1 } from "./validators";
+import { validateRecordingPackageV1 } from "./validators.js";
 import {
   RECORDING_SCHEMA_VERSION,
   type MigrateResult,
   type MigrationRegistryEntry,
   type RecordingPackageV1,
-} from "./types";
+} from "./types.js";
 
 /**
  * Migration registry. Add new entries as schema bumps land.

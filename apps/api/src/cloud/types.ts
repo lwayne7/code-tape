@@ -1,0 +1,138 @@
+import type { RecordingLanguage, RecordingSchemaVersion } from "@code-tape/recording-schema";
+
+export const RECORDING_ASSET_KINDS = [
+  "manifest",
+  "meta",
+  "events",
+  "snapshots",
+  "indexes",
+  "media",
+  "thumbnail",
+] as const;
+
+export type RecordingAssetKind = (typeof RECORDING_ASSET_KINDS)[number];
+
+export type RecordingStatus =
+  | "uploading"
+  | "processing"
+  | "ready"
+  | "failed"
+  | "soft_deleted"
+  | "purging"
+  | "deleted";
+
+export type UploadSessionStatus = "open" | "completed" | "expired" | "failed";
+
+export type CloudApiErrorCode =
+  | "bad-request"
+  | "unauthorized"
+  | "forbidden"
+  | "not-found"
+  | "upload-session-expired"
+  | "upload-session-conflict"
+  | "unsupported-schema"
+  | "invalid-manifest"
+  | "invalid-event"
+  | "checksum-mismatch"
+  | "quota-exceeded"
+  | "media-type-not-supported"
+  | "rate-limited";
+
+export type CloudApiError = {
+  code: CloudApiErrorCode;
+  message: string;
+  requestId?: string;
+  details?: unknown;
+};
+
+export type CloudResult<T> = { ok: true; value: T } | { ok: false; error: CloudApiError };
+
+export type CreateUploadSessionRequest = {
+  idempotencyKey: string;
+  localPackageId: string;
+  title: string;
+  schemaVersion: RecordingSchemaVersion;
+  durationMs: number;
+  initialLanguage: RecordingLanguage;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  assets: Array<{
+    kind: RecordingAssetKind;
+    sha256: string;
+    sizeBytes: number;
+    mimeType: string;
+  }>;
+};
+
+export type UploadTarget = {
+  kind: RecordingAssetKind;
+  method: "PUT";
+  url: string;
+  headers: Record<string, string>;
+  maxSizeBytes: number;
+};
+
+export type CreateUploadSessionResponse = {
+  sessionId: string;
+  recordingId: string;
+  expiresAt: string;
+  uploadTargets: UploadTarget[];
+};
+
+export type CompleteUploadSessionRequest = {
+  uploadedAssets: Array<{
+    kind: RecordingAssetKind;
+    sha256: string;
+    sizeBytes: number;
+  }>;
+};
+
+export type CompleteUploadSessionResponse = {
+  recordingId: string;
+  status: "processing" | "ready" | "failed";
+};
+
+export type CloudRecordingRecord = {
+  id: string;
+  ownerId: string;
+  localPackageId: string;
+  title: string;
+  schemaVersion: RecordingSchemaVersion;
+  status: RecordingStatus;
+  visibility: "private" | "unlisted";
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  durationMs: number;
+  initialLanguage: RecordingLanguage;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  totalSizeBytes: number;
+  eventCount: number | null;
+  snapshotCount: number | null;
+  failureCode: CloudApiErrorCode | null;
+  failureMessage: string | null;
+};
+
+export type CloudRecordingAssetRecord = {
+  id: string;
+  recordingId: string;
+  kind: RecordingAssetKind;
+  objectKey: string;
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+  uploadedAt: string | null;
+  validatedAt: string | null;
+};
+
+export type UploadSessionRecord = {
+  id: string;
+  recordingId: string;
+  ownerId: string;
+  status: UploadSessionStatus;
+  expiresAt: string;
+  idempotencyKey: string;
+  createdAt: string;
+  completedAt: string | null;
+};

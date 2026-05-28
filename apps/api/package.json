@@ -1,0 +1,18 @@
+{
+  "name": "@code-tape/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "prebuild": "npm run build -w @code-tape/recording-schema",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node scripts/run-dist-tests.mjs"
+  },
+  "dependencies": {
+    "@code-tape/recording-schema": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "typescript": "^5.9.3"
+  }
+}

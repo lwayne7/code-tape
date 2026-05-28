@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertEventSeqInvariants,
+  isRecordingPackageV1,
+  migrateRecordingPackage,
   RECORDING_SCHEMA_VERSION,
+  validateRecordingPackageV1,
   type EventBus,
   type OpenStreamRequest,
   type RecordingEvent,
   type RecordingPackageV1,
-} from "../types";
-import {
-  assertEventSeqInvariants,
-  isRecordingPackageV1,
-  validateRecordingPackageV1,
-} from "../validators";
-import { migrateRecordingPackage } from "../migrations";
+} from "@/shared/recording-schema";
 
 function makePackage(): RecordingPackageV1 {
   return {
