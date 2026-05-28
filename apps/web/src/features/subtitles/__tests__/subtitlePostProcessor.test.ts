@@ -105,7 +105,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
 
     expect(pipelineFactory).toHaveBeenCalledWith(
       "text-generation",
-      "onnx-community/Qwen2.5-0.5B-Instruct",
+      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "webgpu", dtype: "q4f16" },
     );
     expect(pipeline.mock.calls[0]?.[0]).toEqual([
@@ -243,25 +243,25 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(pipelineFactory).toHaveBeenNthCalledWith(
       1,
       "text-generation",
-      "onnx-community/Qwen2.5-0.5B-Instruct",
+      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "webgpu", dtype: "q4f16" },
     );
     expect(pipelineFactory).toHaveBeenNthCalledWith(
       2,
       "text-generation",
-      "onnx-community/Qwen2.5-0.5B-Instruct",
+      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "webgpu", dtype: "q4" },
     );
     expect(pipelineFactory).toHaveBeenNthCalledWith(
       3,
       "text-generation",
-      "onnx-community/Qwen2.5-0.5B-Instruct",
+      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "wasm", dtype: "q8" },
     );
     expect(result.chapters).toEqual([{ title: "状态设计", startMs: 0, endMs: 3_000 }]);
   });
 
-  it("uses the public Qwen browser model as the default", async () => {
+  it("uses the fine-tuned browser model as the default", async () => {
     const pipeline = vi.fn(async (_prompt: string, _options: unknown) => [
       {
         generated_text:
@@ -281,7 +281,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(pipelineFactory).toHaveBeenNthCalledWith(
       1,
       "text-generation",
-      "onnx-community/Qwen2.5-0.5B-Instruct",
+      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "webgpu", dtype: "q4f16" },
     );
     expect(pipelineFactory).toHaveBeenCalledTimes(1);

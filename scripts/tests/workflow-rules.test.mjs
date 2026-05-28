@@ -545,7 +545,7 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /prompt 只描述目标和输出格式/u);
   assert.match(technicalPlan, /优先保证本地小模型稳定输出可解析 JSON/u);
   assert.match(technicalPlan, /有音频媒体时可以预热本地 LLM/u);
-  assert.match(technicalPlan, /默认模型：`onnx-community\/Qwen2\.5-0\.5B-Instruct`/u);
+  assert.match(technicalPlan, /默认模型：`ceilf6\/code-tape-subtitle-postprocessor-onnx`/u);
   assert.match(technicalPlan, /优先尝试 WebGPU `q4f16`/u);
   assert.match(technicalPlan, /回退 WASM `q8` \/ `q4`/u);
   assert.match(technicalPlan, /`segments` 是稀疏变更集/u);

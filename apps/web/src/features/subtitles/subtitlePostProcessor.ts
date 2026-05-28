@@ -6,7 +6,7 @@ import type {
 } from "./types";
 
 export const DEFAULT_POSTPROCESSOR_MODEL =
-  "onnx-community/Qwen2.5-0.5B-Instruct";
+  "ceilf6/code-tape-subtitle-postprocessor-onnx";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
 const BASE_MAX_NEW_TOKENS = 384;

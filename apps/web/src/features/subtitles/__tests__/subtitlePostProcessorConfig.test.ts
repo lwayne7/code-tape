@@ -11,7 +11,7 @@ describe("resolveSubtitlePostProcessorModel", () => {
     ).toBe("onnx-community/Qwen2.5-0.5B-Instruct");
   });
 
-  it("falls back to the best-fit public browser-local model when no override is configured", () => {
+  it("falls back to the fine-tuned browser-local model when no override is configured", () => {
     expect(resolveSubtitlePostProcessorModel({})).toBe(DEFAULT_POSTPROCESSOR_MODEL);
     expect(resolveSubtitlePostProcessorModel({ VITE_SUBTITLE_POSTPROCESSOR_MODEL: " " })).toBe(
       DEFAULT_POSTPROCESSOR_MODEL,

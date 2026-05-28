@@ -1,6 +1,6 @@
 # AI 字幕后处理模型微调运行手册
 
-本手册记录可选的 P1+ AI 字幕微调实验链路。当前产品默认不依赖项目专属微调模型，而是直接使用公开模型 `onnx-community/Qwen2.5-0.5B-Instruct` 做浏览器本地 ASR 后处理：输入原始字幕、前端代码上下文、运行输出和术语表，输出严格 JSON，用于字幕纠错和章节跳转点生成。
+本手册记录 P1+ AI 字幕微调链路。当前产品默认使用公开微调模型 `ceilf6/code-tape-subtitle-postprocessor-onnx` 做浏览器本地 ASR 后处理：输入原始字幕、前端代码上下文、运行输出和术语表，输出严格 JSON，用于字幕纠错和章节跳转点生成。
 
 ## 安全边界
 
@@ -45,7 +45,7 @@ npm run subtitle:distill
 
 ## 训练平台建议
 
-如后续确实要做项目专属 LoRA，推荐先用 Colab GPU 做训练，本地机器做 seed 校验、蒸馏脚本调试、小样本 smoke test 和模型合并验证。实验 base model 可以继续使用 `HuggingFaceTB/SmolLM2-135M-Instruct`，但它不再是浏览器默认模型；Colab Secrets 可以分别保存 `TEACHER_API_KEY` 和 `HF_TOKEN`，不会进入 notebook 输出。若后续样本量扩大，再迁移到 Hugging Face AutoTrain、团队 GPU 机器或 CI 外部训练任务。
+如后续继续做项目专属 LoRA，推荐先用 Colab GPU 做训练，本地机器做 seed 校验、蒸馏脚本调试、小样本 smoke test 和模型合并验证。实验 base model 可以继续使用 `HuggingFaceTB/SmolLM2-135M-Instruct`，浏览器默认使用导出的公开 ONNX 仓库；Colab Secrets 可以分别保存 `TEACHER_API_KEY` 和 `HF_TOKEN`，不会进入 notebook 输出。若后续样本量扩大，再迁移到 Hugging Face AutoTrain、团队 GPU 机器或 CI 外部训练任务。
 
 创建 Python 环境并安装训练依赖：
 
@@ -75,7 +75,7 @@ npm run subtitle:evaluate
 
 ## 发布到浏览器本地推理
 
-当前浏览器端默认使用公开 ONNX 仓库 `onnx-community/Qwen2.5-0.5B-Instruct`。可选微调模型只有在评估明显优于默认模型后，才需要执行模型合并、ONNX 导出和量化，并另行发布公开仓库：
+当前浏览器端默认使用公开微调 ONNX 仓库：
 
 - `ceilf6/code-tape-subtitle-postprocessor-onnx`
 
