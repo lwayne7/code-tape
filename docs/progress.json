@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-27T08:13:48Z",
+  "updatedAt": "2026-05-28T01:32:49Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 98,
       "completedIssues": [
         11,
         10,
@@ -418,6 +418,20 @@
       "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-27T08:13:48Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "98": {
+      "number": 98,
+      "title": "[P1+] 本地 AI 字幕生成与回放交互",
+      "score": 8,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-28T01:32:49Z",
       "closedAt": null,
       "mergedPr": null
     }
