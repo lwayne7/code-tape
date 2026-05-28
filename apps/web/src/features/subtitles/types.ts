@@ -33,6 +33,25 @@ export type SubtitleCorrectionResult = {
   }>;
 };
 
+export type SubtitlePostProcessorContext = {
+  language?: string;
+  fileName?: string;
+  code?: string;
+  runtimeOutput?: string;
+  glossary?: string[];
+};
+
+export type SubtitlePostProcessorInput = {
+  track: SubtitleTrack;
+  context?: SubtitlePostProcessorContext;
+  signal?: AbortSignal;
+};
+
+export type SubtitlePostProcessor = {
+  warmUp?(): Promise<void>;
+  process(input: SubtitlePostProcessorInput): Promise<SubtitleCorrectionResult>;
+};
+
 export type SubtitleCorrectionWarning = {
   code: "invalid-correction" | "invalid-chapter";
   message: string;
@@ -54,5 +73,8 @@ export type SubtitleTranscriber = {
 export type SubtitleStore = {
   load(recordingId: string): Promise<SubtitleTrack | null>;
   save(track: SubtitleTrack): Promise<void>;
+  loadChapters(recordingId: string): Promise<SubtitleChapter[]>;
+  saveChapters(recordingId: string, chapters: SubtitleChapter[]): Promise<void>;
+  saveWithChapters(track: SubtitleTrack, chapters: SubtitleChapter[]): Promise<void>;
   remove(recordingId: string): Promise<void>;
 };

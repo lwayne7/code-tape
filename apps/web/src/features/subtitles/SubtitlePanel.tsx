@@ -1,8 +1,21 @@
 import { Captions, Loader2, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { SubtitleChapterList } from "./SubtitleChapterList";
+import { applySubtitleCorrection } from "./subtitleCorrection";
+import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
+import { createHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessor";
 import { createSubtitleStore } from "./subtitleStore";
 import { createHuggingFaceSubtitleTranscriber } from "./subtitleTranscriber";
-import type { SubtitleSegment, SubtitleStore, SubtitleTrack, SubtitleTranscriber } from "./types";
+import type {
+  SubtitleChapter,
+  SubtitleCorrectionWarning,
+  SubtitlePostProcessor,
+  SubtitlePostProcessorContext,
+  SubtitleSegment,
+  SubtitleStore,
+  SubtitleTrack,
+  SubtitleTranscriber,
+} from "./types";
 import { cn } from "@/shared/ui/utils/cn";
 
 export type SubtitlePanelProps = {
@@ -14,9 +27,11 @@ export type SubtitlePanelProps = {
   onSeek(timeMs: number): void;
   store?: SubtitleStore;
   transcriber?: SubtitleTranscriber;
+  postProcessor?: SubtitlePostProcessor | null;
+  postProcessorContext?: SubtitlePostProcessorContext;
 };
 
-type GenerationStatus = "idle" | "loading" | "generating" | "ready" | "error";
+type GenerationStatus = "idle" | "loading" | "generating" | "post-processing" | "ready" | "error";
 
 export function SubtitlePanel({
   recordingId,
@@ -27,13 +42,26 @@ export function SubtitlePanel({
   onSeek,
   store: injectedStore,
   transcriber: injectedTranscriber,
+  postProcessor: injectedPostProcessor,
+  postProcessorContext,
 }: SubtitlePanelProps) {
   const store = useMemo(() => injectedStore ?? createSubtitleStore(), [injectedStore]);
   const transcriber = useMemo(
     () => injectedTranscriber ?? createHuggingFaceSubtitleTranscriber(),
     [injectedTranscriber],
   );
+  const postProcessor = useMemo(
+    () =>
+      injectedPostProcessor === undefined
+        ? createHuggingFaceSubtitlePostProcessor({
+            model: resolveSubtitlePostProcessorModel(),
+          })
+        : injectedPostProcessor,
+    [injectedPostProcessor],
+  );
   const [track, setTrack] = useState<SubtitleTrack | null>(null);
+  const [chapters, setChapters] = useState<SubtitleChapter[]>([]);
+  const [warnings, setWarnings] = useState<SubtitleCorrectionWarning[]>([]);
   const [status, setStatus] = useState<GenerationStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const activeSegment = findActiveSegment(track?.segments ?? [], currentTimeMs);
@@ -41,6 +69,7 @@ export function SubtitlePanel({
   const requestVersionRef = useRef(0);
   const generationAbortRef = useRef<AbortController | null>(null);
   const warmUpRequestRef = useRef<{ recordingId: string; mediaBlob: Blob } | null>(null);
+  const postProcessorWarmUpRef = useRef<string | null>(null);
 
   useEffect(() => {
     const requestVersion = requestVersionRef.current + 1;
@@ -49,20 +78,32 @@ export function SubtitlePanel({
     generationAbortRef.current = null;
     if (!recordingId) {
       setTrack(null);
+      setChapters([]);
+      setWarnings([]);
       setStatus("idle");
       setError(null);
       return;
     }
     let cancelled = false;
     setTrack(null);
+    setChapters([]);
+    setWarnings([]);
     setStatus("loading");
     setError(null);
     store
       .load(recordingId)
-      .then((savedTrack) => {
-        if (cancelled || requestVersionRef.current !== requestVersion) return;
+      .then((savedTrack): Promise<SubtitleChapter[] | null> => {
+        if (cancelled || requestVersionRef.current !== requestVersion) return Promise.resolve(null);
         setTrack(savedTrack);
         setStatus(savedTrack ? "ready" : "idle");
+        if (!savedTrack) return Promise.resolve([]);
+        return Promise.resolve()
+          .then(() => store.loadChapters(recordingId))
+          .catch(() => []);
+      })
+      .then((savedChapters) => {
+        if (!savedChapters || cancelled || requestVersionRef.current !== requestVersion) return;
+        setChapters(savedChapters);
       })
       .catch((err) => {
         if (cancelled || requestVersionRef.current !== requestVersion) return;
@@ -93,8 +134,32 @@ export function SubtitlePanel({
     void transcriber.warmUp().catch(() => undefined);
   }, [hasAudio, mediaBlob, recordingId, transcriber]);
 
+  useEffect(() => {
+    if (!recordingId || !hasAudio || !postProcessor?.warmUp) {
+      postProcessorWarmUpRef.current = null;
+      return;
+    }
+    if (postProcessorWarmUpRef.current === recordingId) return;
+    postProcessorWarmUpRef.current = recordingId;
+    void postProcessor.warmUp().catch(() => undefined);
+  }, [hasAudio, postProcessor, recordingId]);
+
   const canGenerate = Boolean(
-    recordingId && mediaBlob && hasAudio && status !== "loading" && status !== "generating",
+    recordingId &&
+      mediaBlob &&
+      hasAudio &&
+      status !== "loading" &&
+      status !== "generating" &&
+      status !== "post-processing",
+  );
+  const canPostProcess = Boolean(
+    recordingId &&
+      track &&
+      track.segments.length > 0 &&
+      postProcessor &&
+      status !== "loading" &&
+      status !== "generating" &&
+      status !== "post-processing",
   );
   const generateSubtitles = async () => {
     if (!recordingId || !mediaBlob || !hasAudio) return;
@@ -105,6 +170,7 @@ export function SubtitlePanel({
     generationAbortRef.current = abortController;
     setStatus("generating");
     setError(null);
+    setWarnings([]);
     try {
       const draft = await transcriber.transcribe({
         mediaBlob,
@@ -117,9 +183,51 @@ export function SubtitlePanel({
         generatedAt: new Date().toISOString(),
         ...draft,
       };
-      await store.save(nextTrack);
+      await store.saveWithChapters(nextTrack, []);
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(nextTrack);
+      setChapters([]);
+      setStatus("ready");
+    } catch (err) {
+      if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
+      setError(formatSubtitleError(err));
+      setStatus("error");
+    } finally {
+      if (generationAbortRef.current === abortController) {
+        generationAbortRef.current = null;
+      }
+    }
+  };
+
+  const postProcessSubtitles = async () => {
+    if (!recordingId || !track || !postProcessor) return;
+    const requestVersion = requestVersionRef.current + 1;
+    requestVersionRef.current = requestVersion;
+    generationAbortRef.current?.abort();
+    const abortController = new AbortController();
+    generationAbortRef.current = abortController;
+    setStatus("post-processing");
+    setError(null);
+    setWarnings([]);
+    try {
+      const correction = await postProcessor.process({
+        track,
+        context: postProcessorContext,
+        signal: abortController.signal,
+      });
+      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
+      const result = applySubtitleCorrection(track, correction, { durationMs });
+      const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
+      if (hasInvalidCorrection) {
+        setWarnings(result.warnings);
+        setStatus("ready");
+        return;
+      }
+      await store.saveWithChapters(result.track, result.chapters);
+      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
+      setTrack(result.track);
+      setChapters(result.chapters);
+      setWarnings(result.warnings);
       setStatus("ready");
     } catch (err) {
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
@@ -137,7 +245,7 @@ export function SubtitlePanel({
       aria-label="字幕"
       className="shrink-0 border-t border-border bg-background px-3 py-2"
     >
-      <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
+      <div className="mb-2 flex min-h-9 flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
           <Captions aria-hidden size={17} className="shrink-0 text-primary" />
           <span>字幕</span>
@@ -145,66 +253,102 @@ export function SubtitlePanel({
             <span className="truncate text-xs font-normal text-muted">{track.model}</span>
           ) : null}
         </div>
-        <button
-          type="button"
-          aria-label="生成字幕"
-          disabled={!canGenerate}
-          onClick={generateSubtitles}
-          className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium",
-            "text-foreground transition-[background-color,color] duration-150 ease-out-soft",
-            "hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-          )}
-        >
-          {status === "generating" ? (
-            <Loader2 aria-hidden size={14} className="animate-spin" />
-          ) : (
-            <WandSparkles aria-hidden size={14} />
-          )}
-          <span>生成字幕</span>
-        </button>
+        <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+          {track && postProcessor ? (
+            <button
+              type="button"
+              aria-label="纠错并生成章节"
+              disabled={!canPostProcess}
+              onClick={postProcessSubtitles}
+              className={buttonClassName}
+            >
+              {status === "post-processing" ? (
+                <Loader2 aria-hidden size={14} className="animate-spin" />
+              ) : (
+                <WandSparkles aria-hidden size={14} />
+              )}
+              <span>纠错并生成章节</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="生成字幕"
+            disabled={!canGenerate}
+            onClick={generateSubtitles}
+            className={buttonClassName}
+          >
+            {status === "generating" ? (
+              <Loader2 aria-hidden size={14} className="animate-spin" />
+            ) : (
+              <WandSparkles aria-hidden size={14} />
+            )}
+            <span>生成字幕</span>
+          </button>
+        </div>
       </div>
       {status === "error" && error ? (
         <p role="alert" className="mb-2 text-xs text-danger">
           {error}
         </p>
       ) : null}
+      {warnings.length > 0 ? (
+        <p role="alert" className="mb-2 text-xs text-warning">
+          {warnings[0]?.message}
+        </p>
+      ) : null}
       {!hasAudio ? (
         <p className="text-xs text-muted">无音频轨道</p>
       ) : track && track.segments.length > 0 ? (
-        <div className="flex max-h-32 min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
-          {track.segments.map((segment) => {
-            const isActive = activeSegment?.id === segment.id;
-            return (
-              <button
-                key={segment.id}
-                ref={isActive ? activeSegmentRef : undefined}
-                type="button"
-                aria-current={isActive ? "true" : undefined}
-                aria-label={segment.text}
-                onClick={() => onSeek(segment.startMs)}
-                className={cn(
-                  "grid grid-cols-[4.5rem_1fr] gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5",
-                  "transition-[background-color,color] duration-150 ease-out-soft",
-                  "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                  isActive ? "bg-surface-raised text-foreground" : "text-muted",
-                )}
-              >
-                <span className="font-mono tabular-nums">{formatSubtitleTime(segment.startMs)}</span>
-                <span className="text-foreground">{segment.text}</span>
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <SubtitleChapterList
+            chapters={chapters}
+            currentTimeMs={currentTimeMs}
+            onSeek={onSeek}
+          />
+          <div className="flex max-h-32 min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
+            {track.segments.map((segment) => {
+              const isActive = activeSegment?.id === segment.id;
+              return (
+                <button
+                  key={segment.id}
+                  ref={isActive ? activeSegmentRef : undefined}
+                  type="button"
+                  aria-current={isActive ? "true" : undefined}
+                  aria-label={segment.text}
+                  onClick={() => onSeek(segment.startMs)}
+                  className={cn(
+                    "grid grid-cols-[4.5rem_1fr] gap-2 rounded-md px-2 py-1.5 text-left text-xs leading-5",
+                    "transition-[background-color,color] duration-150 ease-out-soft",
+                    "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                    isActive ? "bg-surface-raised text-foreground" : "text-muted",
+                  )}
+                >
+                  <span className="font-mono tabular-nums">{formatSubtitleTime(segment.startMs)}</span>
+                  <span className="text-foreground">{segment.text}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
       ) : (
         <p className="text-xs text-muted">
-          {status === "generating" ? "正在生成字幕..." : "暂无字幕"}
+          {status === "generating"
+            ? "正在生成字幕..."
+            : status === "post-processing"
+              ? "正在纠错并生成章节..."
+              : "暂无字幕"}
         </p>
       )}
     </section>
   );
 }
+
+const buttonClassName = cn(
+  "inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium",
+  "text-foreground transition-[background-color,color] duration-150 ease-out-soft",
+  "hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+);
 
 function isCurrentGeneration(
   requestVersionRef: MutableRefObject<number>,

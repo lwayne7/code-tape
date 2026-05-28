@@ -13,6 +13,7 @@
 
 > [竞品分析](docs/竞品分析)
 -> [技术方案](docs/技术方案.md)
+-> [AI模型](https://huggingface.co/collections/ceilf6/code-tape)
 
 [各位同学当前进度](docs/progress.md)
 
@@ -23,13 +24,15 @@
         - 使用 [progress-reporter](skills/progress-reporter) 技能、通过飞书智能体 [FrontAgent](https://github.com/ceilf6/FrontAgent) 定时在群内通知进度
     - 使用 [repo-guard](https://github.com/ceilf6/repo-guard) 对 issues 和 PR 进行质量检测、并通过工程提示词要求开发代理审批守卫评论、做出反应
         - 其中 CR 技能来自 [ceilf6-skills](https://github.com/ceilf6/ceilf6-skills/tree/main/code-reviewer)
+        - > 生成-评估分离：Anthropic 证明模型会存在自评估的系统性缺陷
 - Git hooks
     - `pre-commit` 运行 `npm run quality:precommit`，提交前覆盖仓库测试、Web lint、Web 单测和构建
     - `pre-push` 运行 `npm run quality:local`，推送前刷新 GitNexus 索引并执行完整本地质量闸门
 - 知识库
     - 通过 GitNexus 观测代码的级联反应，进行 CICD 把控
     - ~~使用 OpenViking 为 Agent 提供仓库的渐进式上下文~~
-        - 由于需要挂载服务，背离了本项目当前快速交付的需要，暂时清除
+        - 需要挂载服务，背离了本项目当前快速交付的需要，清除
+        - 工具不是越多越好，得精心筛选适配项目的
 - SDD
     - 通过 PRD 和技术方案等基建知识为大模型活动确定规范
 - TDD

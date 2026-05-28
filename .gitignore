@@ -16,6 +16,10 @@ coverage
 playwright-report
 test-results
 
+ml/subtitle-postprocessor/data/generated
+ml/subtitle-postprocessor/output
+ml/subtitle-postprocessor/onnx
+
 *.log
 *.local
 *.tsbuildinfo

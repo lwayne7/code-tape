@@ -293,6 +293,39 @@ describe("ReplayPage", () => {
     );
     expect(replayPageMock.subtitlePanelProps?.mediaBlob).toBeInstanceOf(Blob);
 
+    act(() => {
+      replayPageMock.onTick?.({
+        editor: {
+          code: "const [count, setCount] = useState(0);",
+          language: "typescript",
+          cursor: null,
+          selection: null,
+          scrollTop: 0,
+          scrollLeft: 0,
+          fontSize: 14,
+          theme: "dark",
+        },
+        pointer: null,
+        media: { microphoneEnabled: true, cameraEnabled: true, cameraPosition: { x: 0, y: 0 } },
+        runtime: {
+          status: "error",
+          stdout: ["render start"],
+          stderr: ["ReferenceError: count"],
+          previewHtml: null,
+          errorMessage: "boom",
+        },
+      });
+    });
+
+    expect(replayPageMock.subtitlePanelProps?.postProcessorContext).toEqual(
+      expect.objectContaining({
+        language: "typescript",
+        code: "const [count, setCount] = useState(0);",
+        runtimeOutput: "render start\nReferenceError: count\nboom",
+        glossary: expect.arrayContaining(["React", "TypeScript", "code-tape"]),
+      }),
+    );
+
     await act(async () => {
       replayPageMock.subtitlePanelProps?.onSeek(2_400);
     });

@@ -2,6 +2,8 @@ import type { AutomaticSpeechRecognitionPipeline } from "@huggingface/transforme
 import type { SubtitleSegment, SubtitleTranscriber } from "./types";
 
 export const DEFAULT_TRANSCRIPTION_MODEL = "onnx-community/whisper-tiny";
+const DEFAULT_TRANSCRIPTION_LANGUAGE = "zh";
+const WHISPER_TRANSCRIPTION_LANGUAGE = "chinese";
 
 type RawAsrChunk = {
   text?: unknown;
@@ -19,11 +21,11 @@ type AsrPipeline = (
   options: NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>,
 ) => Promise<RawAsrResult>;
 
-const CHINESE_TRANSCRIPTION_OPTIONS = {
+const TRANSCRIPTION_OPTIONS = {
   chunk_length_s: 30,
   stride_length_s: 5,
   return_timestamps: true,
-  language: "chinese",
+  language: WHISPER_TRANSCRIPTION_LANGUAGE,
   task: "transcribe",
 } satisfies NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>;
 
@@ -88,11 +90,11 @@ export function createHuggingFaceSubtitleTranscriber(
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       const url = URL.createObjectURL(mediaBlob);
       try {
-        const result = await pipeline(url, CHINESE_TRANSCRIPTION_OPTIONS);
+        const result = await pipeline(url, TRANSCRIPTION_OPTIONS);
         return {
           model,
           source: "huggingface-local",
-          language: typeof result.language === "string" ? result.language : undefined,
+          language: readTranscriptionLanguage(result),
           segments: normalizeTranscriptionResult(result, durationMs),
         };
       } finally {
@@ -132,6 +134,12 @@ function segmentFromChunk(
 
 function reindexSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
   return segments.map((segment, index) => ({ ...segment, id: `subtitle-${index + 1}` }));
+}
+
+function readTranscriptionLanguage(result: RawAsrResult): string {
+  return typeof result.language === "string" && result.language.trim()
+    ? result.language.trim()
+    : DEFAULT_TRANSCRIPTION_LANGUAGE;
 }
 
 function readTimestamp(value: unknown): [number, number | null] {
