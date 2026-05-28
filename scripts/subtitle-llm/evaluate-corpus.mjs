@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { parseJsonObject, validateSubtitleTrainingRecord } from './schema.mjs';
 
@@ -92,7 +94,9 @@ function ratio(value, total) {
   return total === 0 ? 0 : Number((value / total).toFixed(4));
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

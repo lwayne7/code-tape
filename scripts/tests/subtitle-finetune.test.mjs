@@ -324,6 +324,19 @@ test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', (
   assert.equal(Object.hasOwn(metrics, 'simplifiedChineseRate'), false);
 });
 
+test('imports subtitle corpus evaluator without running the CLI entrypoint', async () => {
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+
+    assert.equal(typeof evaluateRecords, 'function');
+    assert.equal(process.exitCode, undefined);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});
+
 test('subtitle corpus evaluation does not treat language style as a blocking metric', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-language-neutral-eval-'));
   const fixturePath = join(tempDir, 'train.jsonl');
