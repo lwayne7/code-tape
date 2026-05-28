@@ -177,8 +177,7 @@ export function SubtitlePanel({
         generatedAt: new Date().toISOString(),
         ...draft,
       };
-      await store.save(nextTrack);
-      await store.saveChapters(recordingId, []);
+      await store.saveWithChapters(nextTrack, []);
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(nextTrack);
       setChapters([]);
@@ -212,8 +211,7 @@ export function SubtitlePanel({
       });
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       const result = applySubtitleCorrection(track, correction);
-      await store.save(result.track);
-      await store.saveChapters(recordingId, result.chapters);
+      await store.saveWithChapters(result.track, result.chapters);
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(result.track);
       setChapters(result.chapters);

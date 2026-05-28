@@ -75,5 +75,6 @@ export type SubtitleStore = {
   save(track: SubtitleTrack): Promise<void>;
   loadChapters(recordingId: string): Promise<SubtitleChapter[]>;
   saveChapters(recordingId: string, chapters: SubtitleChapter[]): Promise<void>;
+  saveWithChapters(track: SubtitleTrack, chapters: SubtitleChapter[]): Promise<void>;
   remove(recordingId: string): Promise<void>;
 };

@@ -40,4 +40,31 @@ describe("createSubtitleStore", () => {
     await expect(store.loadChapters("recording-1")).resolves.toEqual(chapters);
     await expect(store.loadChapters("missing")).resolves.toEqual([]);
   });
+
+  it("saves processed subtitles and chapters atomically", async () => {
+    const store = createSubtitleStore({ databaseName: uniqueDbName() });
+    const originalTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_200, text: "use state hook" }],
+    };
+    const processedTrack: SubtitleTrack = {
+      ...originalTrack,
+      generatedAt: "2026-05-28T00:01:00.000Z",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_200, text: "useState hook" }],
+    };
+
+    await store.save(originalTrack);
+
+    await expect(
+      store.saveWithChapters(processedTrack, [
+        { id: "chapter-1", title: () => "bad", startMs: 0 } as unknown as SubtitleChapter,
+      ]),
+    ).rejects.toThrow();
+
+    await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
+    await expect(store.loadChapters("recording-1")).resolves.toEqual([]);
+  });
 });

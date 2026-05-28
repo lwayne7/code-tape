@@ -11,7 +11,7 @@ import type {
 } from "../types";
 
 function createMemorySubtitleStore(): SubtitleStore {
-  const tracks = new Map();
+  const tracks = new Map<string, SubtitleTrack>();
   const chaptersByRecordingId = new Map<string, SubtitleChapter[]>();
   return {
     async load(recordingId) {
@@ -25,6 +25,10 @@ function createMemorySubtitleStore(): SubtitleStore {
     },
     async saveChapters(recordingId, chapters) {
       chaptersByRecordingId.set(recordingId, chapters);
+    },
+    async saveWithChapters(track, chapters) {
+      tracks.set(track.recordingId, track);
+      chaptersByRecordingId.set(track.recordingId, chapters);
     },
     async remove(recordingId) {
       tracks.delete(recordingId);
@@ -197,6 +201,60 @@ describe("SubtitlePanel", () => {
     expect(screen.getByText("use state hook")).toBeInTheDocument();
   });
 
+  it("does not persist corrected subtitles when processed subtitle and chapter save fails", async () => {
+    const originalTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" }],
+    };
+    const store = createMemorySubtitleStore();
+    const writeError = new Error("atomic write failed");
+    store.saveWithChapters = vi.fn(async () => {
+      throw writeError;
+    });
+    store.saveChapters = vi.fn(async () => {
+      throw writeError;
+    });
+    await store.save(originalTrack);
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => ({
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [{ title: "问题分析", startMs: 0, endMs: 1_000 }],
+      })),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("atomic write failed"));
+    expect(screen.getByText("use state hook")).toBeInTheDocument();
+    await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
+    expect(store.saveWithChapters).toHaveBeenCalled();
+  });
+
   it("surfaces generation failure without blocking replay controls", async () => {
     const transcriber: SubtitleTranscriber = {
       transcribe: vi.fn(async () => {
@@ -233,6 +291,7 @@ describe("SubtitlePanel", () => {
       save: vi.fn(),
       loadChapters: vi.fn(async () => []),
       saveChapters: vi.fn(),
+      saveWithChapters: vi.fn(),
       remove: vi.fn(),
     };
 
@@ -281,6 +340,7 @@ describe("SubtitlePanel", () => {
         throw new Error("chapter store unavailable");
       }),
       saveChapters: vi.fn(),
+      saveWithChapters: vi.fn(),
       remove: vi.fn(),
     };
 
@@ -314,6 +374,7 @@ describe("SubtitlePanel", () => {
       save: vi.fn(async () => undefined),
       loadChapters: vi.fn(async () => []),
       saveChapters: vi.fn(),
+      saveWithChapters: vi.fn(),
       remove: vi.fn(),
     };
     const transcriber: SubtitleTranscriber = {

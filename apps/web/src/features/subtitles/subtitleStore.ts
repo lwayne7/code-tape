@@ -68,6 +68,19 @@ export function createSubtitleStore(options: SubtitleStoreOptions = {}): Subtitl
       await awaitTransaction(tx);
     },
 
+    async saveWithChapters(track: SubtitleTrack, chapters: SubtitleChapter[]): Promise<void> {
+      const db = await getDb();
+      const tx = db.transaction([STORE_SUBTITLES, STORE_CHAPTERS], "readwrite");
+      try {
+        tx.objectStore(STORE_SUBTITLES).put(track);
+        tx.objectStore(STORE_CHAPTERS).put({ recordingId: track.recordingId, chapters });
+      } catch (error) {
+        tx.abort();
+        throw error;
+      }
+      await awaitTransaction(tx);
+    },
+
     async remove(recordingId: string): Promise<void> {
       const db = await getDb();
       const tx = db.transaction([STORE_SUBTITLES, STORE_CHAPTERS], "readwrite");
