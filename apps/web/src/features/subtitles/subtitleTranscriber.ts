@@ -22,9 +22,15 @@ type AsrPipeline = (
   },
 ) => Promise<RawAsrResult>;
 
+type AsrPipelineOptions = {
+  device: "wasm";
+  dtype: "fp32";
+};
+
 type PipelineFactory = (
   task: "automatic-speech-recognition",
   model: string,
+  options: AsrPipelineOptions,
 ) => Promise<AsrPipeline>;
 
 export type HuggingFaceSubtitleTranscriberOptions = {
@@ -52,12 +58,13 @@ export function createHuggingFaceSubtitleTranscriber(
   options: HuggingFaceSubtitleTranscriberOptions = {},
 ): SubtitleTranscriber {
   const model = options.model ?? DEFAULT_TRANSCRIPTION_MODEL;
+  const pipelineOptions: AsrPipelineOptions = { device: "wasm", dtype: "fp32" };
   let pipelinePromise: Promise<AsrPipeline> | null = null;
   const getPipeline = () => {
     if (!pipelinePromise) {
       pipelinePromise = (options.pipelineFactory
-        ? options.pipelineFactory("automatic-speech-recognition", model)
-        : loadDefaultPipeline("automatic-speech-recognition", model)
+        ? options.pipelineFactory("automatic-speech-recognition", model, pipelineOptions)
+        : loadDefaultPipeline("automatic-speech-recognition", model, pipelineOptions)
       ).catch((error: unknown) => {
         pipelinePromise = null;
         throw error;
@@ -94,9 +101,10 @@ export function createHuggingFaceSubtitleTranscriber(
 async function loadDefaultPipeline(
   task: "automatic-speech-recognition",
   model: string,
+  options: AsrPipelineOptions,
 ): Promise<AsrPipeline> {
   const module = await import("@huggingface/transformers");
-  const pipe = await module.pipeline(task, model);
+  const pipe = await module.pipeline(task, model, options);
   return pipe as unknown as AsrPipeline;
 }
 

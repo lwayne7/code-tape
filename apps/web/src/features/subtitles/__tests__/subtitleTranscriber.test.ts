@@ -108,4 +108,29 @@ describe("normalizeTranscriptionResult", () => {
     });
     expect(pipelineFactory).toHaveBeenCalledTimes(2);
   });
+
+  it("loads the browser ASR pipeline with stable fp32 WASM weights", async () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:subtitle-source"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pipeline = vi.fn(async () => ({ chunks: [] }));
+    const pipelineFactory = vi.fn(async () => pipeline);
+    const transcriber = createHuggingFaceSubtitleTranscriber({ pipelineFactory });
+
+    await transcriber.transcribe({
+      mediaBlob: new Blob(["audio"], { type: "audio/webm" }),
+      durationMs: 1_000,
+    });
+
+    expect(pipelineFactory).toHaveBeenCalledWith(
+      "automatic-speech-recognition",
+      "onnx-community/whisper-tiny",
+      { device: "wasm", dtype: "fp32" },
+    );
+  });
 });
