@@ -532,6 +532,8 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /不把字幕写入 `RecordingPackageV1` 主 schema/u);
   assert.match(technicalPlan, /`@huggingface\/transformers`/u);
   assert.match(technicalPlan, /`onnx-community\/whisper-tiny`/u);
+  assert.match(technicalPlan, /不强制单一 `language`/u);
+  assert.match(technicalPlan, /中文讲解、英文短句和中英混合片段/u);
   assert.match(technicalPlan, /有音频的回放页可以提前 warm-up 本地 ASR 模型/u);
   assert.match(technicalPlan, /warm-up 只下载\/初始化模型，不提前转写音频/u);
   assert.match(technicalPlan, /实际音频转写仍只在用户点击后发生/u);
@@ -544,6 +546,7 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /不替代 Whisper\/ASR/u);
   assert.match(technicalPlan, /默认输出简体中文/u);
   assert.match(technicalPlan, /允许同一字幕轨自然混合中英文本/u);
+  assert.match(technicalPlan, /有音频媒体时可以预热本地 LLM/u);
   assert.match(technicalPlan, /前端领域术语、组件名、变量名、函数名/u);
   assert.match(technicalPlan, /章节跳转点/u);
   assert.match(technicalPlan, /点击章节调用现有播放器 `seek\(startMs\)`/u);

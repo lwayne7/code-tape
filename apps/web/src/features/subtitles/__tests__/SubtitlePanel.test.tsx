@@ -509,6 +509,39 @@ describe("SubtitlePanel", () => {
     await waitFor(() => expect(warmUp).toHaveBeenCalledTimes(1));
   });
 
+  it("warms up the local LLM when audio is available before subtitles are generated", async () => {
+    const transcriberWarmUp = vi.fn(async () => undefined);
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+    const process = vi.fn(async () => ({ segments: [], chapters: [] }));
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          warmUp: transcriberWarmUp,
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+    expect(process).not.toHaveBeenCalled();
+  });
+
   it("does not repeat warm-up for the same recording media when transcriber identity changes", async () => {
     const mediaBlob = new Blob(["webm"], { type: "video/webm" });
     const firstWarmUp = vi.fn(async () => undefined);

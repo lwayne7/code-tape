@@ -134,7 +134,7 @@ describe("normalizeTranscriptionResult", () => {
     );
   });
 
-  it("transcribes Chinese speech instead of translating it to English", async () => {
+  it("transcribes without forcing a single ASR language so mixed Chinese and English survives", async () => {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       value: vi.fn(() => "blob:subtitle-source"),
@@ -155,7 +155,11 @@ describe("normalizeTranscriptionResult", () => {
 
     expect(pipeline).toHaveBeenCalledWith(
       "blob:subtitle-source",
-      expect.objectContaining({ language: "chinese", task: "transcribe" }),
+      expect.not.objectContaining({ language: expect.any(String) }),
+    );
+    expect(pipeline).toHaveBeenCalledWith(
+      "blob:subtitle-source",
+      expect.objectContaining({ task: "transcribe" }),
     );
   });
 

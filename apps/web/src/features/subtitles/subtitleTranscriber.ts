@@ -19,11 +19,10 @@ type AsrPipeline = (
   options: NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>,
 ) => Promise<RawAsrResult>;
 
-const CHINESE_TRANSCRIPTION_OPTIONS = {
+const TRANSCRIPTION_OPTIONS = {
   chunk_length_s: 30,
   stride_length_s: 5,
   return_timestamps: true,
-  language: "chinese",
   task: "transcribe",
 } satisfies NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>;
 
@@ -88,7 +87,7 @@ export function createHuggingFaceSubtitleTranscriber(
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       const url = URL.createObjectURL(mediaBlob);
       try {
-        const result = await pipeline(url, CHINESE_TRANSCRIPTION_OPTIONS);
+        const result = await pipeline(url, TRANSCRIPTION_OPTIONS);
         return {
           model,
           source: "huggingface-local",

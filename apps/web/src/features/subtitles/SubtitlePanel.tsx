@@ -132,11 +132,11 @@ export function SubtitlePanel({
   }, [hasAudio, mediaBlob, recordingId, transcriber]);
 
   useEffect(() => {
-    if (!recordingId || !track || !postProcessor?.warmUp) return;
+    if (!recordingId || !mediaBlob || !hasAudio || !postProcessor?.warmUp) return;
     if (postProcessorWarmUpRef.current === recordingId) return;
     postProcessorWarmUpRef.current = recordingId;
     void postProcessor.warmUp().catch(() => undefined);
-  }, [postProcessor, recordingId, track]);
+  }, [hasAudio, mediaBlob, postProcessor, recordingId]);
 
   const canGenerate = Boolean(
     recordingId &&
