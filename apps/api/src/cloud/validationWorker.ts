@@ -138,12 +138,14 @@ export async function processNextRecordingValidationJob(deps: {
 
   const completedAt = now().toISOString();
   await Promise.all(
-    assets.map((asset) =>
-      deps.metadata.updateAsset({
-        ...asset,
-        validatedAt: completedAt,
-      }),
-    ),
+    assets
+      .filter((asset) => fetchedObjects.has(asset.objectKey))
+      .map((asset) =>
+        deps.metadata.updateAsset({
+          ...asset,
+          validatedAt: completedAt,
+        }),
+      ),
   );
 
   const hasMedia = !!mediaBlob;

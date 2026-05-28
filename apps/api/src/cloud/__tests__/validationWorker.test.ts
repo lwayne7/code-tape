@@ -599,6 +599,14 @@ test("validation worker allows missing optional media asset even if it was decla
   assert.equal(job.recording.status, "ready");
   assert.equal(job.recording.hasAudio, false);
   assert.equal(job.recording.hasCamera, false);
+
+  const assets = await metadata.listAssets(created.value.recordingId);
+  const mediaAsset = assets.find((asset) => asset.kind === "media");
+  const manifestAsset = assets.find((asset) => asset.kind === "manifest");
+  assert.ok(mediaAsset);
+  assert.ok(manifestAsset);
+  assert.equal(mediaAsset.validatedAt, null);
+  assert.notEqual(manifestAsset.validatedAt, null);
 });
 
 test("validation worker allows missing optional thumbnail and indexes assets even if they were declared in upload session", async () => {
@@ -654,6 +662,17 @@ test("validation worker allows missing optional thumbnail and indexes assets eve
   assert.equal(job.ok, true);
   if (!job.ok) return;
   assert.equal(job.recording.status, "ready");
+
+  const assets = await metadata.listAssets(created.value.recordingId);
+  const thumbnailAsset = assets.find((asset) => asset.kind === "thumbnail");
+  const indexesAsset = assets.find((asset) => asset.kind === "indexes");
+  const eventsAsset = assets.find((asset) => asset.kind === "events");
+  assert.ok(thumbnailAsset);
+  assert.ok(indexesAsset);
+  assert.ok(eventsAsset);
+  assert.equal(thumbnailAsset.validatedAt, null);
+  assert.equal(indexesAsset.validatedAt, null);
+  assert.notEqual(eventsAsset.validatedAt, null);
 });
 
 test("validation worker excludes missing optional assets from total asset size budget", async () => {
