@@ -211,6 +211,12 @@ export function SubtitlePanel({
       });
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       const result = applySubtitleCorrection(track, correction, { durationMs });
+      const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
+      if (hasInvalidCorrection) {
+        setWarnings(result.warnings);
+        setStatus("ready");
+        return;
+      }
       await store.saveWithChapters(result.track, result.chapters);
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(result.track);

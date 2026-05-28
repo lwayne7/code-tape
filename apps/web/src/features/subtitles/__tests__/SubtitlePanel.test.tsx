@@ -255,6 +255,63 @@ describe("SubtitlePanel", () => {
     expect(store.saveWithChapters).toHaveBeenCalled();
   });
 
+  it("keeps existing chapters when the local LLM returns an invalid correction", async () => {
+    const originalTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [
+        { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+        { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
+      ],
+    };
+    const existingChapters: SubtitleChapter[] = [
+      { id: "chapter-1", title: "已有章节", startMs: 0, endMs: 3_000 },
+    ];
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(originalTrack, existingChapters);
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => ({
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [],
+      })),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={500}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "correction must include every subtitle segment exactly once",
+      ),
+    );
+    expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
+    await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
+    await expect(store.loadChapters("recording-1")).resolves.toEqual(existingChapters);
+  });
+
   it("surfaces generation failure without blocking replay controls", async () => {
     const transcriber: SubtitleTranscriber = {
       transcribe: vi.fn(async () => {
