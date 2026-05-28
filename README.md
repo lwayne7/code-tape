@@ -13,6 +13,7 @@
 
 > [竞品分析](docs/竞品分析)
 -> [技术方案](docs/技术方案.md)
+-> [AI模型](https://huggingface.co/collections/ceilf6/code-tape)
 
 [各位同学当前进度](docs/progress.md)
 
