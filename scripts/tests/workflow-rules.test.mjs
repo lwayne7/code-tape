@@ -281,6 +281,31 @@ test('findValidReviewer ignores repo guard and merge confirmation when claiming 
   );
 });
 
+test('findValidReviewer ignores non-signal inline review comments when claiming reviewer', () => {
+  const comments = [
+    { user: { login: 'alice', type: 'User' }, body: 'CR认领', created_at: '2026-05-22T10:05:00.000Z' },
+    { user: { login: 'alice', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:30:00.000Z' },
+  ];
+  const reviewComments = [
+    {
+      user: { login: 'maintainer', type: 'User' },
+      body: '这里需要补一个边界测试。',
+      created_at: '2026-05-22T10:01:00.000Z',
+    },
+  ];
+
+  assert.equal(
+    findValidReviewer({
+      reviews: [],
+      reviewComments,
+      comments,
+      prAuthor: 'carol',
+      latestCommitAt: '2026-05-22T11:00:00.000Z',
+    }),
+    'alice',
+  );
+});
+
 test('findValidReviewer accepts CR pass from the claimed reviewer in an inline review comment', () => {
   const comments = [
     { user: { login: 'alice', type: 'User' }, body: 'CR认领', created_at: '2026-05-22T10:05:00.000Z' },

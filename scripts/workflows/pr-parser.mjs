@@ -63,7 +63,7 @@ export function findClaimedReviewer({ comments = [], reviews = [], reviewComment
   const claimEvents = [
     ...comments.filter((comment) => isEligibleClaimComment(comment, prAuthor)),
     ...reviews.filter((review) => isEligibleReviewClaim(review, prAuthor)),
-    ...reviewComments.filter((comment) => isEligibleClaimComment(comment, prAuthor)),
+    ...reviewComments.filter((comment) => isEligibleReviewClaim(comment, prAuthor)),
   ].sort((a, b) => eventTime(a) - eventTime(b));
 
   return commentLogin(claimEvents[0]) ?? null;
