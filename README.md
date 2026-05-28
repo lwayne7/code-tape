@@ -23,6 +23,7 @@
         - 使用 [progress-reporter](skills/progress-reporter) 技能、通过飞书智能体 [FrontAgent](https://github.com/ceilf6/FrontAgent) 定时在群内通知进度
     - 使用 [repo-guard](https://github.com/ceilf6/repo-guard) 对 issues 和 PR 进行质量检测、并通过工程提示词要求开发代理审批守卫评论、做出反应
         - 其中 CR 技能来自 [ceilf6-skills](https://github.com/ceilf6/ceilf6-skills/tree/main/code-reviewer)
+        - > 生成-评估分离：Anthropic 证明模型会存在自评估的系统性缺陷
 - Git hooks
     - `pre-commit` 运行 `npm run quality:precommit`，提交前覆盖仓库测试、Web lint、Web 单测和构建
     - `pre-push` 运行 `npm run quality:local`，推送前刷新 GitNexus 索引并执行完整本地质量闸门
