@@ -12,12 +12,17 @@ export function validateSubtitleDistillationExample(value) {
     throw new Error('distillation example segments are required');
   }
   const seenSegmentIds = new Set();
+  let previousEndMs = -Infinity;
   value.segments.forEach((segment, index) => {
     validateInputSegment(segment, index);
+    if (segment.startMs < previousEndMs) {
+      throw new Error('segments must be ordered and non-overlapping');
+    }
     if (seenSegmentIds.has(segment.id)) {
       throw new Error(`duplicate segment id: ${segment.id}`);
     }
     seenSegmentIds.add(segment.id);
+    previousEndMs = segment.endMs;
   });
   if (value.context !== undefined && !isPlainObject(value.context)) {
     throw new Error('distillation example context must be an object');
@@ -47,7 +52,10 @@ export function validateSubtitleTeacherResult(value, example) {
     throw new Error('teacher result must include every input segment exactly once');
   }
 
-  validateTeacherChapters(value.chapters);
+  validateTeacherChapters(value.chapters, {
+    startMs: normalizedExample.segments[0].startMs,
+    endMs: normalizedExample.segments[normalizedExample.segments.length - 1].endMs,
+  });
   return value;
 }
 
@@ -172,10 +180,16 @@ function validateTeacherChapter(chapter, index) {
   }
 }
 
-function validateTeacherChapters(chapters) {
+function validateTeacherChapters(chapters, timeline) {
   let previousEndMs = -Infinity;
   chapters.forEach((chapter, index) => {
     validateTeacherChapter(chapter, index);
+    if (chapter.startMs < timeline.startMs || chapter.startMs > timeline.endMs) {
+      throw new Error('chapters must stay within the source subtitle timeline');
+    }
+    if (chapter.endMs !== undefined && chapter.endMs > timeline.endMs) {
+      throw new Error('chapters must stay within the source subtitle timeline');
+    }
     if (chapter.startMs < previousEndMs) {
       throw new Error('chapters must be ordered and non-overlapping');
     }

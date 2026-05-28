@@ -62,6 +62,24 @@ test('rejects duplicate input subtitle segment ids before distillation', () => {
   );
 });
 
+test('rejects overlapping or unsorted input subtitle segments before distillation', () => {
+  assert.throws(
+    () =>
+      validateSubtitleDistillationExample({
+        ...seedExample,
+        segments: [
+          seedExample.segments[0],
+          {
+            ...seedExample.segments[1],
+            startMs: 1000,
+            endMs: 2000,
+          },
+        ],
+      }),
+    /segments must be ordered and non-overlapping/,
+  );
+});
+
 test('rejects malformed assistant training JSON contracts', () => {
   const record = buildTrainingRecord({
     example: seedExample,
@@ -83,6 +101,20 @@ test('rejects malformed assistant training JSON contracts', () => {
         ],
       }),
     /teacher result segments are required/,
+  );
+});
+
+test('rejects generated chapters outside the source subtitle timeline', () => {
+  assert.throws(
+    () =>
+      validateSubtitleTeacherResult(
+        {
+          segments: teacherResult.segments,
+          chapters: [{ title: '越界章节', startMs: 2600, endMs: 3200 }],
+        },
+        seedExample,
+      ),
+    /chapters must stay within the source subtitle timeline/,
   );
 });
 
@@ -209,4 +241,22 @@ test('LoRA training script rejects remote code trust with hub publishing', () =>
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Do not combine --trust-remote-code with --hub-model-id/);
+});
+
+test('LoRA training script validates JSONL messages before loading ML dependencies', () => {
+  const result = spawnSync(
+    'python3',
+    [
+      'ml/subtitle-postprocessor/train_lora.py',
+      '--train-jsonl',
+      'scripts/tests/fixtures/malformed-subtitle-train.jsonl',
+    ],
+    {
+      cwd: new URL('../..', import.meta.url),
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must contain a messages list/);
 });

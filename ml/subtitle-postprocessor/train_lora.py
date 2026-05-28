@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 
 
@@ -26,12 +27,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def validate_train_jsonl(path: str) -> None:
+    record_count = 0
+    with open(path, "r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            stripped_line = line.strip()
+            if not stripped_line:
+                continue
+            try:
+                record = json.loads(stripped_line)
+            except json.JSONDecodeError as error:
+                raise SystemExit(f"{path}:{line_number} is not valid JSON: {error}") from error
+            if not isinstance(record, dict):
+                raise SystemExit(f"{path}:{line_number} must be a JSON object")
+            messages = record.get("messages")
+            if not isinstance(messages, list) or not messages:
+                raise SystemExit(f"{path}:{line_number} must contain a messages list")
+            for message_index, message in enumerate(messages):
+                if not isinstance(message, dict):
+                    raise SystemExit(f"{path}:{line_number} messages[{message_index}] must be an object")
+                if not isinstance(message.get("role"), str) or not isinstance(message.get("content"), str):
+                    raise SystemExit(f"{path}:{line_number} messages[{message_index}] must contain role and content strings")
+            record_count += 1
+    if record_count == 0:
+        raise SystemExit(f"{path} must contain at least one training record")
+
+
 def main() -> None:
     args = build_parser().parse_args()
     if args.hub_model_id and not os.environ.get("HF_TOKEN"):
         raise SystemExit("HF_TOKEN is required when --hub-model-id is set")
     if args.trust_remote_code and args.hub_model_id:
         raise SystemExit("Do not combine --trust-remote-code with --hub-model-id; publish from a separate trusted process.")
+    validate_train_jsonl(args.train_jsonl)
 
     from datasets import load_dataset
     from peft import LoraConfig
