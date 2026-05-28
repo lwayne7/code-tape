@@ -11,9 +11,14 @@ export type ApplySubtitleCorrectionResult = {
   warnings: SubtitleCorrectionWarning[];
 };
 
+export type ApplySubtitleCorrectionOptions = {
+  durationMs?: number;
+};
+
 export function applySubtitleCorrection(
   track: SubtitleTrack,
   correction: SubtitleCorrectionResult,
+  options: ApplySubtitleCorrectionOptions = {},
 ): ApplySubtitleCorrectionResult {
   const segmentIds = new Set(track.segments.map((segment) => segment.id));
   const correctedTextById = new Map<string, string>();
@@ -44,7 +49,7 @@ export function applySubtitleCorrection(
     })),
   };
 
-  const chapters = normalizeChapters(track, correction.chapters ?? []);
+  const chapters = normalizeChapters(track, correction.chapters ?? [], options);
   if ("warning" in chapters) {
     return invalid(correctedTrack, "invalid-chapter", chapters.warning);
   }
@@ -59,8 +64,14 @@ export function applySubtitleCorrection(
 function normalizeChapters(
   track: SubtitleTrack,
   chapters: NonNullable<SubtitleCorrectionResult["chapters"]>,
+  options: ApplySubtitleCorrectionOptions,
 ): SubtitleChapter[] | { warning: string } {
-  const durationMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
+  const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
+  const recordingEndMs =
+    typeof options.durationMs === "number" && Number.isFinite(options.durationMs)
+      ? Math.round(options.durationMs)
+      : 0;
+  const durationMs = Math.max(subtitleEndMs, recordingEndMs);
   const candidates: Array<{
     title: string;
     startMs: number;

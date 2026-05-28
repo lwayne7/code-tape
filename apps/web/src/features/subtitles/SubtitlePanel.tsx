@@ -210,7 +210,7 @@ export function SubtitlePanel({
         signal: abortController.signal,
       });
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
-      const result = applySubtitleCorrection(track, correction);
+      const result = applySubtitleCorrection(track, correction, { durationMs });
       await store.saveWithChapters(result.track, result.chapters);
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(result.track);
