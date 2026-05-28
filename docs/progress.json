@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-28T06:31:26Z",
+  "updatedAt": "2026-05-28T07:49:02Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 110,
       "completedIssues": [
         11,
         10,
@@ -512,6 +512,20 @@
       "status": "closed",
       "closedAt": "2026-05-28T06:31:26Z",
       "mergedPr": 106
+    },
+    "110": {
+      "number": 110,
+      "title": "[P1+] AI 字幕 LLM 纠错与章节生成补齐",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-28T07:49:02Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
