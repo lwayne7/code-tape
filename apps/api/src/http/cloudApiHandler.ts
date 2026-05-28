@@ -41,6 +41,36 @@ export function createCloudApiHandler(deps: {
   return async (request: Request): Promise<Response> => {
     const requestId = createRequestId();
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/api/recordings") {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const result = await deps.service.listRecordings({ ownerId });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value.recordings, 200, requestId);
+    }
+
+    const recordingDetailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
+    if (request.method === "GET" && recordingDetailMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const result = await deps.service.getRecording({
+        ownerId,
+        recordingId: decodeURIComponent(recordingDetailMatch[1]!),
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/recordings/upload-sessions") {
       const ownerId = readOwnerToken(request);
       if (!ownerId) {

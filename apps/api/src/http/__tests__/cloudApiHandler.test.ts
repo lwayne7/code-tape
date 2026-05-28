@@ -6,6 +6,8 @@ import { createCloudRecordingService } from "../../cloud/cloudRecordingService.j
 import { createMemoryMetadataRepository } from "../../cloud/memoryMetadataRepository.js";
 import { createMemoryObjectStorage } from "../../cloud/memoryObjectStorage.js";
 import { createCloudApiHandler } from "../cloudApiHandler.js";
+import type { MetadataRepository } from "../../cloud/metadataRepository.js";
+import type { CloudRecordingRecord, RecordingStatus } from "../../cloud/types.js";
 
 test("POST /api/recordings/upload-sessions returns upload targets with request id", async () => {
   const handler = createCloudApiHandler({
@@ -63,6 +65,184 @@ test("cloud API returns the unified error shape when owner token is missing", as
       code: "unauthorized",
       message: "missing owner token",
       requestId: "req-test-2",
+    },
+  });
+});
+
+test("GET /api/recordings returns ready recordings for the current owner sorted by createdAt desc", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready-old", ownerId: "owner-1", status: "ready", createdAt: "2026-05-27T00:00:00.000Z" });
+  await seedRecording(metadata, { id: "rec-ready-new", ownerId: "owner-1", status: "ready", createdAt: "2026-05-28T00:00:00.000Z", hasAudio: true });
+  await seedRecording(metadata, { id: "rec-uploading", ownerId: "owner-1", status: "uploading", createdAt: "2026-05-29T00:00:00.000Z" });
+  await seedRecording(metadata, { id: "rec-processing", ownerId: "owner-1", status: "processing" });
+  await seedRecording(metadata, { id: "rec-failed", ownerId: "owner-1", status: "failed" });
+  await seedRecording(metadata, { id: "rec-soft-deleted", ownerId: "owner-1", status: "soft_deleted" });
+  await seedRecording(metadata, { id: "rec-purging", ownerId: "owner-1", status: "purging" });
+  await seedRecording(metadata, { id: "rec-deleted", ownerId: "owner-1", status: "deleted" });
+  await seedRecording(metadata, { id: "rec-other-owner", ownerId: "owner-2", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-list",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as Array<Record<string, unknown>>;
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.map((item) => item.id), ["rec-ready-new", "rec-ready-old"]);
+  assert.deepEqual(Object.keys(body[0]!).sort(), [
+    "createdAt",
+    "durationMs",
+    "hasAudio",
+    "hasCamera",
+    "id",
+    "initialLanguage",
+    "status",
+    "title",
+    "updatedAt",
+  ]);
+  assert.equal(body[0]!.status, "ready");
+  assert.equal(body[0]!.hasAudio, true);
+});
+
+test("GET /api/recordings returns an empty list for owners with no ready recordings", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-processing", ownerId: "owner-1", status: "processing" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-empty-list",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), []);
+});
+
+test("GET /api/recordings requires owner token", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-list-owner-token",
+  });
+
+  const response = await handler(new Request("http://localhost/api/recordings", { method: "GET" }));
+  const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(body, {
+    error: {
+      code: "unauthorized",
+      message: "missing owner token",
+      requestId: "req-list-owner-token",
+    },
+  });
+});
+
+for (const status of ["uploading", "processing", "ready", "failed"] as const) {
+  test(`GET /api/recordings/:recordingId returns ${status} detail for the current owner`, async () => {
+    const metadata = createMemoryMetadataRepository();
+    await seedRecording(metadata, {
+      id: `rec-${status}`,
+      ownerId: "owner-1",
+      status,
+      failureCode: status === "failed" ? "invalid-manifest" : null,
+      failureMessage: status === "failed" ? "manifest was invalid" : null,
+    });
+    const handler = createCloudApiHandler({
+      service: createCloudRecordingService({
+        metadata,
+        objectStorage: createMemoryObjectStorage(),
+      }),
+      createRequestId: () => `req-detail-${status}`,
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/api/recordings/rec-${status}`, {
+        method: "GET",
+        headers: { "x-owner-token": "owner-1" },
+      }),
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+
+    assert.equal(response.status, 200);
+    assert.equal(body.id, `rec-${status}`);
+    assert.equal(body.status, status);
+    assert.equal(body.localPackageId, `local-rec-${status}`);
+    if (status === "failed") {
+      assert.equal(body.failureCode, "invalid-manifest");
+      assert.equal(body.failureMessage, "manifest was invalid");
+    }
+  });
+}
+
+test("GET /api/recordings/:recordingId returns 404 for other owners and hidden statuses", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-owner-2", ownerId: "owner-2", status: "ready" });
+  await seedRecording(metadata, { id: "rec-soft-deleted", ownerId: "owner-1", status: "soft_deleted" });
+  await seedRecording(metadata, { id: "rec-purging", ownerId: "owner-1", status: "purging" });
+  await seedRecording(metadata, { id: "rec-deleted", ownerId: "owner-1", status: "deleted" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-detail-not-found",
+  });
+
+  for (const id of ["rec-owner-2", "rec-soft-deleted", "rec-purging", "rec-deleted", "rec-missing"]) {
+    const response = await handler(
+      new Request(`http://localhost/api/recordings/${id}`, {
+        method: "GET",
+        headers: { "x-owner-token": "owner-1" },
+      }),
+    );
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    assert.equal(response.status, 404);
+    assert.deepEqual(body.error, {
+      code: "not-found",
+      message: "recording not found",
+      requestId: "req-detail-not-found",
+    });
+  }
+});
+
+test("GET /api/recordings/:recordingId requires owner token", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-detail-owner-token",
+  });
+
+  const response = await handler(new Request("http://localhost/api/recordings/rec-1", { method: "GET" }));
+  const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(body, {
+    error: {
+      code: "unauthorized",
+      message: "missing owner token",
+      requestId: "req-detail-owner-token",
     },
   });
 });
@@ -865,6 +1045,56 @@ async function makeCompleteBody(pkg: RecordingPackageV1): Promise<string> {
       sha256,
       sizeBytes,
     })),
+  });
+}
+
+async function seedRecording(
+  metadata: MetadataRepository,
+  input: {
+    id: string;
+    ownerId: string;
+    status: RecordingStatus;
+    createdAt?: string;
+    hasAudio?: boolean;
+    hasCamera?: boolean;
+    failureCode?: CloudRecordingRecord["failureCode"];
+    failureMessage?: string | null;
+  },
+): Promise<void> {
+  const createdAt = input.createdAt ?? "2026-05-27T00:00:00.000Z";
+  await metadata.createUpload({
+    recording: {
+      id: input.id,
+      ownerId: input.ownerId,
+      localPackageId: `local-${input.id}`,
+      title: `Recording ${input.id}`,
+      schemaVersion: RECORDING_SCHEMA_VERSION,
+      status: input.status,
+      visibility: "private",
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: input.status === "ready" ? createdAt : null,
+      durationMs: 12_345,
+      initialLanguage: "javascript",
+      hasAudio: input.hasAudio ?? false,
+      hasCamera: input.hasCamera ?? false,
+      totalSizeBytes: 1024,
+      eventCount: 7,
+      snapshotCount: 2,
+      failureCode: input.failureCode ?? null,
+      failureMessage: input.failureMessage ?? null,
+    },
+    assets: [],
+    session: {
+      id: `session-${input.id}`,
+      recordingId: input.id,
+      ownerId: input.ownerId,
+      status: "completed",
+      expiresAt: "2026-05-28T00:00:00.000Z",
+      idempotencyKey: `idem-${input.id}`,
+      createdAt,
+      completedAt: createdAt,
+    },
   });
 }
 

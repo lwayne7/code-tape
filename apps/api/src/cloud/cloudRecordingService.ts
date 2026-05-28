@@ -4,6 +4,8 @@ import type { ObjectStorage } from "./objectStorage.js";
 import { RECORDING_ASSET_KINDS } from "./types.js";
 import type {
   CloudApiError,
+  CloudRecordingDetail,
+  CloudRecordingListItem,
   CloudRecordingAssetRecord,
   CloudRecordingRecord,
   CloudResult,
@@ -38,6 +40,13 @@ export type CloudRecordingService = {
     sessionId: string;
     input: CompleteUploadSessionRequest;
   }): Promise<CloudResult<CompleteUploadSessionResponse>>;
+  listRecordings(input: {
+    ownerId: string;
+  }): Promise<CloudResult<{ recordings: CloudRecordingListItem[] }>>;
+  getRecording(input: {
+    ownerId: string;
+    recordingId: string;
+  }): Promise<CloudResult<CloudRecordingDetail>>;
 };
 
 export function createCloudRecordingService(deps: {
@@ -174,7 +183,59 @@ export function createCloudRecordingService(deps: {
       });
       return { ok: true, value: { recordingId: session.recordingId, status: "processing" } };
     },
+    async listRecordings({ ownerId }) {
+      const recordings = await deps.metadata.listRecordingsByOwner({
+        ownerId,
+        statuses: ["ready"],
+      });
+      return {
+        ok: true,
+        value: {
+          recordings: recordings.map(toListItem),
+        },
+      };
+    },
+    async getRecording({ ownerId, recordingId }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isDetailVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+      return { ok: true, value: toDetail(recording) };
+    },
   };
+}
+
+function toListItem(recording: CloudRecordingRecord): CloudRecordingListItem {
+  return {
+    id: recording.id,
+    title: recording.title,
+    durationMs: recording.durationMs,
+    createdAt: recording.createdAt,
+    updatedAt: recording.updatedAt,
+    initialLanguage: recording.initialLanguage,
+    hasAudio: recording.hasAudio,
+    hasCamera: recording.hasCamera,
+    status: recording.status,
+  };
+}
+
+function toDetail(recording: CloudRecordingRecord): CloudRecordingDetail {
+  return {
+    ...toListItem(recording),
+    localPackageId: recording.localPackageId,
+    schemaVersion: recording.schemaVersion,
+    visibility: recording.visibility,
+    completedAt: recording.completedAt,
+    totalSizeBytes: recording.totalSizeBytes,
+    eventCount: recording.eventCount,
+    snapshotCount: recording.snapshotCount,
+    failureCode: recording.failureCode,
+    failureMessage: recording.failureMessage,
+  };
+}
+
+function isDetailVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
+  return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
 }
 
 async function resolveExistingUploadSession(input: {
