@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayControlsProps } from "../ReplayControls";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
+import type { SubtitlePanelProps } from "@/features/subtitles";
 import type {
   RecordingEvent,
   MediaClockAdapter,
@@ -95,6 +96,7 @@ const replayPageMock = vi.hoisted(() => {
     controlsProps: null as ReplayControlsProps | null,
     codeEditorProps: null as CodeEditorProps | null,
     previewPaneProps: null as PreviewPaneProps | null,
+    subtitlePanelProps: null as SubtitlePanelProps | null,
     onTick: null as ((state: ReplayStableState, events?: RecordingEvent[], timelineTimeMs?: number) => void) | null,
     reset() {
       scheduler.load.mockClear();
@@ -118,6 +120,7 @@ const replayPageMock = vi.hoisted(() => {
       this.controlsProps = null;
       this.codeEditorProps = null;
       this.previewPaneProps = null;
+      this.subtitlePanelProps = null;
       this.onTick = null;
     },
   };
@@ -142,6 +145,13 @@ vi.mock("@/features/runtime-preview/PreviewPane", () => ({
   PreviewPane: (props: PreviewPaneProps) => {
     replayPageMock.previewPaneProps = props;
     return <div aria-label="Mock preview pane" />;
+  },
+}));
+
+vi.mock("@/features/subtitles", () => ({
+  SubtitlePanel: (props: SubtitlePanelProps) => {
+    replayPageMock.subtitlePanelProps = props;
+    return <div aria-label="Mock subtitle panel" />;
   },
 }));
 
@@ -264,6 +274,30 @@ describe("ReplayPage", () => {
     expect(document.body).toHaveTextContent("hello");
     expect(document.body).toHaveTextContent("warn");
     expect(document.body).toHaveTextContent("boom");
+  });
+
+  it("wires replay subtitles to media, current timeline time, and scheduler seek", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    expect(screen.getByLabelText("Mock subtitle panel")).toBeInTheDocument();
+    expect(replayPageMock.subtitlePanelProps).toEqual(
+      expect.objectContaining({
+        recordingId: "recording-1",
+        hasAudio: true,
+        durationMs: 120_000,
+        currentTimeMs: 0,
+      }),
+    );
+    expect(replayPageMock.subtitlePanelProps?.mediaBlob).toBeInstanceOf(Blob);
+
+    await act(async () => {
+      replayPageMock.subtitlePanelProps?.onSeek(2_400);
+    });
+
+    expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(2_400);
   });
 
   it("renders transient pointer and shortcut overlays from scheduler ticks", async () => {
@@ -436,11 +470,13 @@ describe("ReplayPage", () => {
     const shortcutToggle = screen.getByRole("button", { name: "显示快捷键" });
     const cameraToggle = screen.getByRole("button", { name: "显示摄像头" });
     const runtimeToggle = screen.getByRole("button", { name: "显示运行面板" });
+    const subtitleToggle = screen.getByRole("button", { name: "显示字幕" });
 
     expect(pointerToggle).toHaveAttribute("aria-pressed", "true");
     expect(shortcutToggle).toHaveAttribute("aria-pressed", "true");
     expect(cameraToggle).toHaveAttribute("aria-pressed", "true");
     expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
+    expect(subtitleToggle).toHaveAttribute("aria-pressed", "true");
 
     act(() => {
       replayPageMock.onTick?.(
@@ -492,17 +528,21 @@ describe("ReplayPage", () => {
     expect(screen.getByLabelText("回放鼠标位置")).toBeInTheDocument();
     expect(screen.getByText("Cmd+S")).toBeInTheDocument();
     expect(screen.getByLabelText("Mock preview pane")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mock subtitle panel")).toBeInTheDocument();
 
     fireEvent.click(pointerToggle);
     fireEvent.click(shortcutToggle);
     fireEvent.click(runtimeToggle);
+    fireEvent.click(subtitleToggle);
 
     expect(screen.queryByLabelText("回放鼠标位置")).not.toBeInTheDocument();
     expect(screen.queryByText("Cmd+S")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mock preview pane")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mock subtitle panel")).not.toBeInTheDocument();
     expect(pointerToggle).toHaveAttribute("aria-pressed", "false");
     expect(shortcutToggle).toHaveAttribute("aria-pressed", "false");
     expect(runtimeToggle).toHaveAttribute("aria-pressed", "false");
+    expect(subtitleToggle).toHaveAttribute("aria-pressed", "false");
   });
 
   it("renders recorded camera media when the package has a camera track", async () => {
