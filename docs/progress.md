@@ -2,34 +2,36 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-28T01:54:23Z
+更新时间：2026-05-28T09:03:34Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| MINTPIPERAS | #94 [P1] Upload Session complete HTTP API | 2026-05-28 01:42:23Z |
 | yangchloeeeee | #95 [P1] 云端录制状态与列表 API | 2026-05-28 01:38:08Z |
 | Suxian2001 | #96 [P1] 本地开发对象存储 HTTP 适配层 | 2026-05-28 01:54:23Z |
 | lwayne7 | #97 [P1] 云端录制包预算校验与缺媒体降级 | 2026-05-28 01:38:32Z |
-| ceilf6 | #98 [P1+] 本地 AI 字幕生成与回放交互 | 2026-05-28 01:32:49Z |
 
 ## 积分总览
 
 | GitHub 用户 | 开发分 | CR 分 | 扣分 | 总分 |
 | --- | --- | --- | --- | --- |
 | cecilyw | 2.25 | 0.00 | 0.00 | 2.25 |
-| ceilf6 | 21.00 | 3.25 | 0.00 | 24.25 |
+| ceilf6 | 29.25 | 3.25 | 0.00 | 32.50 |
 | JunMang01 | 3.00 | 0.00 | 0.00 | 3.00 |
 | lwayne7 | 0.00 | 0.00 | 0.00 | 0.00 |
-| MINTPIPERAS | 6.25 | 2.75 | 0.00 | 9.00 |
-| Suxian2001 | 4.00 | 4.50 | 0.00 | 8.50 |
-| yangchloeeeee | 9.25 | 3.75 | 0.00 | 13.00 |
+| MINTPIPERAS | 7.75 | 4.25 | 0.00 | 12.00 |
+| Suxian2001 | 4.00 | 5.50 | 0.00 | 9.50 |
+| yangchloeeeee | 9.25 | 4.50 | 0.00 | 13.75 |
 
 ## 最近流水
 
 | 时间 | 类型 | Issue | PR | 变更 |
 | --- | --- | --- | --- | --- |
+| 2026-05-28 09:03:34Z | feature_merge | #110 | #109 | ceilf6 +1.50, Suxian2001 +0.50 |
+| 2026-05-28 06:31:26Z | feature_merge | #107 | #106 | ceilf6 +2.25, yangchloeeeee +0.75 |
+| 2026-05-28 05:00:36Z | feature_merge | #94 | #100 | MINTPIPERAS +1.50, Suxian2001 +0.50 |
+| 2026-05-28 04:54:53Z | feature_merge | #98 | #102 | ceilf6 +4.50, MINTPIPERAS +1.50 |
 | 2026-05-27 03:18:49Z | feature_merge | #78 | #83 | ceilf6 +3.75, MINTPIPERAS +1.25 |
 | 2026-05-27 02:02:21Z | feature_merge | #79 | #82 | Suxian2001 +2.25, MINTPIPERAS +0.75 |
 | 2026-05-27 01:57:17Z | feature_merge | #77 | #81 | yangchloeeeee +2.25, ceilf6 +0.75 |
@@ -46,7 +48,3 @@
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | MINTPIPERAS +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | Suxian2001 +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |
 | 2026-05-23 14:25:58Z | manual_development_bonus | #54 | - | yangchloeeeee +1.00 (Discussions #27 #28 #31 #20 #25 建言献策贡献奖励) |
-| 2026-05-23 12:56:43Z | feature_merge | #40 | #53 | ceilf6 +3.00, yangchloeeeee +1.00 |
-| 2026-05-22 14:28:52Z | feature_merge | #6 | #19 | JunMang01 +0.75, MINTPIPERAS +0.25 |
-| 2026-05-22 10:53:42Z | feature_merge | #7 | #18 | yangchloeeeee +0.75, ceilf6 +0.25 |
-| 2026-05-22 09:42:30Z | feature_merge | #5 | #17 | Suxian2001 +0.75, ceilf6 +0.25 |

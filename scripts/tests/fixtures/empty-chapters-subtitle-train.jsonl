@@ -1,0 +1,1 @@
+{"messages":[{"role":"system","content":"sys"},{"role":"user","content":"{\"segments\":[{\"id\":\"subtitle-1\",\"startMs\":0,\"endMs\":1200,\"text\":\"原始字幕\"}]}"},{"role":"assistant","content":"{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"修正字幕\"}],\"chapters\":[]}"}]}

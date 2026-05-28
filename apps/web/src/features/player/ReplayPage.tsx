@@ -9,7 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Camera, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
+import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
 import { createTimelineClock } from "./timelineClock";
 import { ReplayControls } from "./ReplayControls";
@@ -18,6 +18,7 @@ import { CodeEditor } from "@/features/editor/CodeEditor";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createRecordingStore } from "@/features/library/recordingStore";
+import { SubtitlePanel } from "@/features/subtitles";
 import { Toggle } from "@/shared/ui";
 import type {
   PackageWarning,
@@ -75,12 +76,14 @@ type ReplayDisplayOptions = {
   shortcuts: boolean;
   camera: boolean;
   runtime: boolean;
+  subtitles: boolean;
 };
 const DEFAULT_DISPLAY_OPTIONS: ReplayDisplayOptions = {
   pointer: true,
   shortcuts: true,
   camera: true,
   runtime: true,
+  subtitles: true,
 };
 
 function isEventOnlyMediaDegraded(
@@ -242,7 +245,7 @@ export function ReplayPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {eventOnlyNotice ? (
         <div
           role="status"
@@ -257,13 +260,14 @@ export function ReplayPage() {
       ) : null}
       <ReplayDisplayToolbar options={displayOptions} onChange={setDisplayOption} />
       <div
+        aria-label="回放工作区"
         className={
           displayOptions.runtime
-            ? "grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]"
-            : "grid flex-1 grid-cols-1"
+            ? "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]"
+            : "grid min-h-0 flex-1 grid-cols-1"
         }
       >
-        <div className="relative border-r border-border">
+        <div className="relative min-h-0 border-r border-border">
           <CodeEditor
             language={stableState.editor.language}
             initialValue={stableState.editor.code}
@@ -300,6 +304,22 @@ export function ReplayPage() {
           </div>
         ) : null}
       </div>
+      {displayOptions.subtitles ? (
+        <SubtitlePanel
+          recordingId={pkg?.meta.id ?? null}
+          mediaBlob={mediaBlob}
+          hasAudio={Boolean(pkg?.media?.hasAudio)}
+          durationMs={pkg?.meta.durationMs ?? 0}
+          currentTimeMs={schedulerState.timelineTimeMs}
+          onSeek={(target) => scheduler.seek(target)}
+          postProcessorContext={{
+            language: stableState.editor.language,
+            code: stableState.editor.code,
+            runtimeOutput: replayRuntimeOutputText(stableState.runtime),
+            glossary: DEFAULT_SUBTITLE_GLOSSARY,
+          }}
+        />
+      ) : null}
       <ReplayControls
         state={schedulerState}
         durationMs={pkg?.meta.durationMs ?? 0}
@@ -323,6 +343,26 @@ export function ReplayPage() {
       />
     </div>
   );
+}
+
+const DEFAULT_SUBTITLE_GLOSSARY = [
+  "React",
+  "Vue",
+  "TypeScript",
+  "JavaScript",
+  "CSS",
+  "Vite",
+  "Monaco",
+  "WebRTC",
+  "IndexedDB",
+  "code-tape",
+  "RecordingPackageV1",
+];
+
+function replayRuntimeOutputText(runtime: ReplayStableState["runtime"]): string {
+  return [...runtime.stdout, ...runtime.stderr, runtime.errorMessage]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 }
 
 function overlayStateFromEvents(
@@ -459,6 +499,12 @@ function ReplayDisplayToolbar({
         onPressedChange={(pressed) => onChange("runtime", pressed)}
         label="显示运行面板"
         icon={<TerminalSquare size={17} />}
+      />
+      <Toggle
+        pressed={options.subtitles}
+        onPressedChange={(pressed) => onChange("subtitles", pressed)}
+        label="显示字幕"
+        icon={<Captions size={17} />}
       />
     </div>
   );

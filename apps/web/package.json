@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@code-tape/recording-schema": "0.0.0",
+    "@huggingface/transformers": "^4.2.0",
     "@radix-ui/react-popover": "^1.1.2",
     "@radix-ui/react-slider": "^1.2.1",
     "@radix-ui/react-toggle": "^1.1.0",

@@ -17,6 +17,10 @@ playwright-report
 test-results
 scratch/
 
+ml/subtitle-postprocessor/data/generated
+ml/subtitle-postprocessor/output
+ml/subtitle-postprocessor/onnx
+
 *.log
 *.local
 *.tsbuildinfo

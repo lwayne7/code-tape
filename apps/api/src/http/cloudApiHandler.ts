@@ -4,6 +4,7 @@ import type {
   CloudApiError,
   CloudApiErrorCode,
   CloudResult,
+  CompleteUploadSessionRequest,
   CreateUploadSessionRequest,
   RecordingAssetKind,
 } from "../cloud/types.js";
@@ -27,6 +28,9 @@ const STATUS_BY_ERROR: Record<CloudApiErrorCode, number> = {
 };
 const RECORDING_ASSET_KIND_SET = new Set<string>(RECORDING_ASSET_KINDS);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
+// POST .../complete 请求体严格字段白名单：只允许这些 key
+const COMPLETE_TOP_KEYS = new Set(["uploadedAssets"]);
+const COMPLETE_ASSET_KEYS = new Set(["kind", "sha256", "sizeBytes"]);
 
 export function createCloudApiHandler(deps: {
   service: CloudRecordingService;
@@ -52,6 +56,28 @@ export function createCloudApiHandler(deps: {
       const result = await deps.service.createUploadSession({ ownerId, input: input.value });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
       return jsonResponse(result.value, 201, requestId);
+    }
+
+    // POST /api/recordings/upload-sessions/:sessionId/complete — 上传完成确认
+    const completeMatch = url.pathname.match(
+      /^\/api\/recordings\/upload-sessions\/([^/]+)\/complete$/,
+    );
+    if (request.method === "POST" && completeMatch) {
+      const sessionId = completeMatch[1]!;
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const parsed = await readJsonObject(request);
+      if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
+      const input = parseCompleteUploadSessionRequest(parsed.value);
+      if (!input.ok) return jsonError({ ...input.error, requestId }, requestId);
+      const result = await deps.service.completeUpload({ ownerId, sessionId, input: input.value });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
     }
 
     return jsonError({ code: "not-found", message: "route not found", requestId }, requestId);
@@ -132,6 +158,52 @@ function parseCreateUploadSessionRequest(
       hasCamera: value.hasCamera,
       assets,
     },
+  };
+}
+
+// POST /api/recordings/upload-sessions/:sessionId/complete 请求体校验
+// 严格遵循契约：只接收 uploadedAssets: [{ kind, sha256, sizeBytes }]
+function parseCompleteUploadSessionRequest(
+  value: Record<string, unknown>,
+): CloudResult<CompleteUploadSessionRequest> {
+  // 顶层 key 白名单校验：拒绝任何契约外字段
+  for (const key of Object.keys(value)) {
+    if (!COMPLETE_TOP_KEYS.has(key)) {
+      return { ok: false, error: badRequestError() };
+    }
+  }
+  if (!Array.isArray(value.uploadedAssets)) {
+    return { ok: false, error: badRequestError() };
+  }
+
+  const uploadedAssets: CompleteUploadSessionRequest["uploadedAssets"] = [];
+  for (const asset of value.uploadedAssets) {
+    if (
+      !isJsonObject(asset) ||
+      !isString(asset.kind) ||
+      !isRecordingAssetKind(asset.kind) ||
+      !isString(asset.sha256) ||
+      !SHA256_HEX_PATTERN.test(asset.sha256) ||
+      !isPositiveSafeInteger(asset.sizeBytes)
+    ) {
+      return { ok: false, error: badRequestError() };
+    }
+    // asset 内字段白名单校验：拒绝 kind / sha256 / sizeBytes 之外的字段
+    for (const key of Object.keys(asset)) {
+      if (!COMPLETE_ASSET_KEYS.has(key)) {
+        return { ok: false, error: badRequestError() };
+      }
+    }
+    uploadedAssets.push({
+      kind: asset.kind,
+      sha256: asset.sha256,
+      sizeBytes: asset.sizeBytes,
+    });
+  }
+
+  return {
+    ok: true,
+    value: { uploadedAssets },
   };
 }
 

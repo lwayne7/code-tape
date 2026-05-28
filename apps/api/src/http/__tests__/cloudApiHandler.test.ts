@@ -388,6 +388,486 @@ test("cloud API does not return upload targets after an upload session is comple
   });
 });
 
+// === POST /api/recordings/upload-sessions/:sessionId/complete 端点测试 ===
+
+test("POST .../complete 首次调用返回 recordingId 与 processing 状态", async () => {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const handler = createCloudApiHandler({
+    service,
+    createRequestId: () => "req-complete-success",
+  });
+  const pkg = await makePackage();
+
+  // 先创建上传会话
+  const createResp = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify(await makeCreateSessionRequest(pkg)),
+    }),
+  );
+  const createBody = (await createResp.json()) as { sessionId: string; recordingId: string };
+  assert.equal(createResp.status, 201);
+
+  // 调用 complete 端点
+  const response = await handler(
+    new Request(
+      `http://localhost/api/recordings/upload-sessions/${createBody.sessionId}/complete`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: await makeCompleteBody(pkg),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    recordingId: string;
+    status: string;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-request-id"), "req-complete-success");
+  assert.equal(body.recordingId, createBody.recordingId);
+  assert.equal(body.status, "processing");
+});
+
+test("POST .../complete 重复调用保持幂等，不退回状态", async () => {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const handler = createCloudApiHandler({
+    service,
+    createRequestId: () => "req-complete-idempotent",
+  });
+  const pkg = await makePackage();
+
+  // 创建会话 + 首次 complete
+  const createResp = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify(await makeCreateSessionRequest(pkg)),
+    }),
+  );
+  const createBody = (await createResp.json()) as { sessionId: string; recordingId: string };
+  const completeUrl = `http://localhost/api/recordings/upload-sessions/${createBody.sessionId}/complete`;
+  const completeBody = await makeCompleteBody(pkg);
+
+  const first = await handler(
+    new Request(completeUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: completeBody,
+    }),
+  );
+  const firstJson = (await first.json()) as { recordingId: string; status: string };
+
+  const second = await handler(
+    new Request(completeUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: completeBody,
+    }),
+  );
+  const secondJson = (await second.json()) as { recordingId: string; status: string };
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(secondJson.recordingId, firstJson.recordingId);
+  // 幂等：第二次返回当前 recording 状态（processing），不会回退
+  assert.equal(secondJson.status, "processing");
+});
+
+test("POST .../complete 缺少 owner token 返回统一的 401 错误结构", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-complete-no-owner",
+  });
+
+  const response = await handler(
+    new Request(
+      "http://localhost/api/recordings/upload-sessions/fake-session-id/complete",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uploadedAssets: [] }),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(body, {
+    error: {
+      code: "unauthorized",
+      message: "missing owner token",
+      requestId: "req-complete-no-owner",
+    },
+  });
+});
+
+// 非法请求体 → 400 测试矩阵
+for (const input of [
+  { name: "空 body", id: "empty", body: undefined },
+  { name: "畸形 JSON", id: "malformed", body: '{"uploadedAssets":' },
+  { name: "非对象 JSON", id: "non-object", body: JSON.stringify(["not", "an", "object"]) },
+  {
+    name: "缺失 uploadedAssets",
+    id: "missing-assets",
+    body: JSON.stringify({}),
+  },
+  {
+    name: "uploadedAssets 非数组",
+    id: "non-array-assets",
+    body: JSON.stringify({ uploadedAssets: "not-an-array" }),
+  },
+  {
+    name: "asset 字段类型错误",
+    id: "bad-fields",
+    body: JSON.stringify({
+      uploadedAssets: [{ kind: "manifest", sha256: 123, sizeBytes: "bad" }],
+    }),
+  },
+  {
+    name: "顶层额外字段",
+    id: "top-extra-key",
+    body: JSON.stringify({
+      uploadedAssets: [
+        { kind: "manifest", sha256: "f".repeat(64), sizeBytes: 100 },
+      ],
+      extraField: "should-be-rejected",
+    }),
+  },
+  {
+    name: "asset 内额外字段",
+    id: "asset-extra-key",
+    body: JSON.stringify({
+      uploadedAssets: [
+        {
+          kind: "manifest",
+          sha256: "f".repeat(64),
+          sizeBytes: 100,
+          mimeType: "should-be-rejected",
+        },
+      ],
+    }),
+  },
+] as const) {
+  test(`POST .../complete 对 ${input.name} 返回统一的 400 错误结构`, async () => {
+    const handler = createCloudApiHandler({
+      service: createCloudRecordingService({
+        metadata: createMemoryMetadataRepository(),
+        objectStorage: createMemoryObjectStorage(),
+      }),
+      createRequestId: () => `req-complete-${input.id}`,
+    });
+
+    const response = await handler(
+      new Request(
+        "http://localhost/api/recordings/upload-sessions/fake-session-id/complete",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-owner-token": "owner-1",
+          },
+          body: input.body,
+        },
+      ),
+    );
+    const body = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(body, {
+      error: {
+        code: "bad-request",
+        message: "request body must be a valid JSON object",
+        requestId: `req-complete-${input.id}`,
+      },
+    });
+  });
+}
+
+test("POST .../complete owner 不匹配返回 403 forbidden", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-complete-forbidden",
+  });
+  const pkg = await makePackage();
+
+  // 以 owner-1 创建会话
+  const createResp = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify(await makeCreateSessionRequest(pkg)),
+    }),
+  );
+  const createBody = (await createResp.json()) as { sessionId: string };
+
+  // 以 owner-2 尝试 complete
+  const response = await handler(
+    new Request(
+      `http://localhost/api/recordings/upload-sessions/${createBody.sessionId}/complete`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-2",
+        },
+        body: await makeCompleteBody(pkg),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(body, {
+    error: {
+      code: "forbidden",
+      message: "upload session owner mismatch",
+      requestId: "req-complete-forbidden",
+    },
+  });
+});
+
+test("POST .../complete session 不存在返回 404 not-found", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-complete-not-found",
+  });
+
+  const response = await handler(
+    new Request(
+      "http://localhost/api/recordings/upload-sessions/nonexistent-session/complete",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: JSON.stringify({ uploadedAssets: [] }),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(body, {
+    error: {
+      code: "not-found",
+      message: "upload session not found",
+      requestId: "req-complete-not-found",
+    },
+  });
+});
+
+test("POST .../complete session 过期返回 410 upload-session-expired", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const t1 = Date.parse("2026-05-27T00:00:00.000Z");
+
+  // 在时间点 t1 创建会话（TTL = 30 分钟）
+  const createService = createCloudRecordingService({
+    metadata,
+    objectStorage,
+    now: () => new Date(t1),
+  });
+  const createHandler = createCloudApiHandler({
+    service: createService,
+    createRequestId: () => "req-expired-create",
+  });
+  const pkg = await makePackage();
+  const createResp = await createHandler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify(await makeCreateSessionRequest(pkg)),
+    }),
+  );
+  const createBody = (await createResp.json()) as { sessionId: string };
+  assert.equal(createResp.status, 201);
+
+  // 时间推进 31 分钟，会话已过期
+  const t2 = Date.parse("2026-05-27T00:31:00.000Z");
+  const expiredService = createCloudRecordingService({
+    metadata,
+    objectStorage,
+    now: () => new Date(t2),
+  });
+  const expiredHandler = createCloudApiHandler({
+    service: expiredService,
+    createRequestId: () => "req-complete-expired",
+  });
+
+  const response = await expiredHandler(
+    new Request(
+      `http://localhost/api/recordings/upload-sessions/${createBody.sessionId}/complete`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: await makeCompleteBody(pkg),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 410);
+  assert.deepEqual(body, {
+    error: {
+      code: "upload-session-expired",
+      message: "upload session expired",
+      requestId: "req-complete-expired",
+    },
+  });
+});
+
+test("POST .../complete session 非 open 且非 completed 返回 409 conflict", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-complete-conflict",
+  });
+  const pkg = await makePackage();
+  const createReq = await makeCreateSessionRequest(pkg);
+  const sessionId = "sess-conflict-1";
+  const recordingId = "rec-conflict-1";
+
+  // 直接向元数据仓库插入一条 status = "failed" 的 session（非 open 且非 completed）
+  await metadata.createUpload({
+    recording: {
+      id: recordingId,
+      ownerId: "owner-1",
+      localPackageId: createReq.localPackageId,
+      title: createReq.title,
+      schemaVersion: createReq.schemaVersion,
+      status: "uploading",
+      visibility: "private",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: null,
+      durationMs: createReq.durationMs,
+      initialLanguage: createReq.initialLanguage,
+      hasAudio: createReq.hasAudio,
+      hasCamera: createReq.hasCamera,
+      totalSizeBytes: 0,
+      eventCount: null,
+      snapshotCount: null,
+      failureCode: null,
+      failureMessage: null,
+    },
+    assets: createReq.assets.map((asset, i) => ({
+      id: `asset-conflict-${i}`,
+      recordingId,
+      kind: asset.kind,
+      objectKey: `key-conflict-${i}`,
+      sha256: asset.sha256,
+      sizeBytes: asset.sizeBytes,
+      mimeType: asset.mimeType,
+      uploadedAt: null,
+      validatedAt: null,
+    })),
+    session: {
+      id: sessionId,
+      recordingId,
+      ownerId: "owner-1",
+      status: "failed", // 非 open 且非 completed → 触发 409
+      expiresAt: "2026-05-28T00:00:00.000Z", // 远未过期
+      idempotencyKey: "idem-conflict-1",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      completedAt: null,
+    },
+  });
+
+  const response = await handler(
+    new Request(
+      `http://localhost/api/recordings/upload-sessions/${sessionId}/complete`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: await makeCompleteBody(pkg),
+      },
+    ),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(body, {
+    error: {
+      code: "upload-session-conflict",
+      message: "upload session is not open",
+      requestId: "req-complete-conflict",
+    },
+  });
+});
+
+async function makeCompleteBody(pkg: RecordingPackageV1): Promise<string> {
+  const req = await makeCreateSessionRequest(pkg);
+  return JSON.stringify({
+    uploadedAssets: req.assets.map(({ kind, sha256, sizeBytes }) => ({
+      kind,
+      sha256,
+      sizeBytes,
+    })),
+  });
+}
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];
