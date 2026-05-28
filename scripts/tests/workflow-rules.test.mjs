@@ -535,6 +535,7 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /有音频的回放页可以提前 warm-up 本地 ASR 模型/u);
   assert.match(technicalPlan, /warm-up 只下载\/初始化模型，不提前转写音频/u);
   assert.match(technicalPlan, /实际音频转写仍只在用户点击后发生/u);
+  assert.match(technicalPlan, /同一录制媒体只触发一次 warm-up/u);
   assert.match(technicalPlan, /不得把 token 打包进浏览器 bundle/u);
   assert.match(technicalPlan, /通过用户本机 `HF_TOKEN` 或 `huggingface-cli login` 推送到 Hugging Face Hub/u);
   assert.match(technicalPlan, /JSON 解析失败[\s\S]*保留原始 ASR 字幕/u);

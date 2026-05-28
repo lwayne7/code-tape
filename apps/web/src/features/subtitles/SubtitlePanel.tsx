@@ -40,6 +40,7 @@ export function SubtitlePanel({
   const activeSegmentRef = useRef<HTMLButtonElement | null>(null);
   const requestVersionRef = useRef(0);
   const generationAbortRef = useRef<AbortController | null>(null);
+  const warmUpRequestRef = useRef<{ recordingId: string; mediaBlob: Blob } | null>(null);
 
   useEffect(() => {
     const requestVersion = requestVersionRef.current + 1;
@@ -80,8 +81,16 @@ export function SubtitlePanel({
   }, [activeSegment?.id]);
 
   useEffect(() => {
-    if (!recordingId || !mediaBlob || !hasAudio) return;
-    void transcriber.warmUp?.().catch(() => undefined);
+    if (!recordingId || !mediaBlob || !hasAudio || !transcriber.warmUp) {
+      warmUpRequestRef.current = null;
+      return;
+    }
+    const lastWarmUpRequest = warmUpRequestRef.current;
+    if (lastWarmUpRequest?.recordingId === recordingId && lastWarmUpRequest.mediaBlob === mediaBlob) {
+      return;
+    }
+    warmUpRequestRef.current = { recordingId, mediaBlob };
+    void transcriber.warmUp().catch(() => undefined);
   }, [hasAudio, mediaBlob, recordingId, transcriber]);
 
   const canGenerate = Boolean(

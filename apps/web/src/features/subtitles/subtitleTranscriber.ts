@@ -1,3 +1,4 @@
+import type { AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 import type { SubtitleSegment, SubtitleTranscriber } from "./types";
 
 export const DEFAULT_TRANSCRIPTION_MODEL = "onnx-community/whisper-tiny";
@@ -15,14 +16,16 @@ type RawAsrResult = {
 
 type AsrPipeline = (
   input: string,
-  options: {
-    chunk_length_s: number;
-    stride_length_s: number;
-    return_timestamps: true;
-    language: "chinese";
-    task: "transcribe";
-  },
+  options: NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>,
 ) => Promise<RawAsrResult>;
+
+const CHINESE_TRANSCRIPTION_OPTIONS = {
+  chunk_length_s: 30,
+  stride_length_s: 5,
+  return_timestamps: true,
+  language: "chinese",
+  task: "transcribe",
+} satisfies NonNullable<Parameters<AutomaticSpeechRecognitionPipeline>[1]>;
 
 type AsrPipelineOptions = {
   device: "wasm";
@@ -85,13 +88,7 @@ export function createHuggingFaceSubtitleTranscriber(
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       const url = URL.createObjectURL(mediaBlob);
       try {
-        const result = await pipeline(url, {
-          chunk_length_s: 30,
-          stride_length_s: 5,
-          return_timestamps: true,
-          language: "chinese",
-          task: "transcribe",
-        });
+        const result = await pipeline(url, CHINESE_TRANSCRIPTION_OPTIONS);
         return {
           model,
           source: "huggingface-local",
