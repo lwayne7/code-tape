@@ -133,4 +133,39 @@ describe("normalizeTranscriptionResult", () => {
       { device: "wasm", dtype: "fp32" },
     );
   });
+
+  it("transcribes Chinese speech instead of translating it to English", async () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:subtitle-source"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const pipeline = vi.fn(async () => ({ chunks: [] }));
+    const transcriber = createHuggingFaceSubtitleTranscriber({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await transcriber.transcribe({
+      mediaBlob: new Blob(["audio"], { type: "audio/webm" }),
+      durationMs: 1_000,
+    });
+
+    expect(pipeline).toHaveBeenCalledWith(
+      "blob:subtitle-source",
+      expect.objectContaining({ language: "chinese", task: "transcribe" }),
+    );
+  });
+
+  it("warms up the ASR model before the first transcription", async () => {
+    const pipeline = vi.fn(async () => ({ chunks: [] }));
+    const pipelineFactory = vi.fn(async () => pipeline);
+    const transcriber = createHuggingFaceSubtitleTranscriber({ pipelineFactory });
+
+    await transcriber.warmUp?.();
+
+    expect(pipelineFactory).toHaveBeenCalledTimes(1);
+  });
 });

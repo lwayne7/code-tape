@@ -19,6 +19,8 @@ type AsrPipeline = (
     chunk_length_s: number;
     stride_length_s: number;
     return_timestamps: true;
+    language: "chinese";
+    task: "transcribe";
   },
 ) => Promise<RawAsrResult>;
 
@@ -74,6 +76,9 @@ export function createHuggingFaceSubtitleTranscriber(
   };
 
   return {
+    async warmUp() {
+      await getPipeline();
+    },
     async transcribe({ mediaBlob, durationMs, signal }) {
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       const pipeline = await getPipeline();
@@ -84,6 +89,8 @@ export function createHuggingFaceSubtitleTranscriber(
           chunk_length_s: 30,
           stride_length_s: 5,
           return_timestamps: true,
+          language: "chinese",
+          task: "transcribe",
         });
         return {
           model,

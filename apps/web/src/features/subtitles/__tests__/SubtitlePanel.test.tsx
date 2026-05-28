@@ -209,4 +209,30 @@ describe("SubtitlePanel", () => {
     expect(store.save).not.toHaveBeenCalled();
     expect(screen.queryByText("Old recording text.")).not.toBeInTheDocument();
   });
+
+  it("warms up the transcriber when audio is available", async () => {
+    const warmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          warmUp,
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(warmUp).toHaveBeenCalledTimes(1));
+  });
 });
