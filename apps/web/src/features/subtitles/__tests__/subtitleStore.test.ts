@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
 import { createSubtitleStore } from "../subtitleStore";
-import type { SubtitleTrack } from "../types";
+import type { SubtitleChapter, SubtitleTrack } from "../types";
 
 let dbCounter = 0;
 function uniqueDbName() {
@@ -26,5 +26,18 @@ describe("createSubtitleStore", () => {
 
     await expect(store.load("recording-1")).resolves.toEqual(track);
     await expect(store.load("missing")).resolves.toBeNull();
+  });
+
+  it("round-trips generated chapters separately from the subtitle track", async () => {
+    const store = createSubtitleStore({ databaseName: uniqueDbName() });
+    const chapters: SubtitleChapter[] = [
+      { id: "chapter-1", title: "问题分析", startMs: 0, endMs: 1_200 },
+      { id: "chapter-2", title: "代码实现", startMs: 1_200 },
+    ];
+
+    await store.saveChapters("recording-1", chapters);
+
+    await expect(store.loadChapters("recording-1")).resolves.toEqual(chapters);
+    await expect(store.loadChapters("missing")).resolves.toEqual([]);
   });
 });
