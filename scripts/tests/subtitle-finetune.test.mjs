@@ -45,6 +45,20 @@ test('rejects distillation samples that omit chapters', () => {
   );
 });
 
+test('rejects distillation samples without chapter training signal', () => {
+  assert.throws(
+    () =>
+      validateSubtitleTeacherResult(
+        {
+          segments: teacherResult.segments,
+          chapters: [],
+        },
+        seedExample,
+      ),
+    /chapters must contain at least one chapter/,
+  );
+});
+
 test('rejects duplicate input subtitle segment ids before distillation', () => {
   assert.throws(
     () =>
@@ -141,7 +155,7 @@ test('rejects unknown or missing subtitle segment ids in teacher output', () => 
       validateSubtitleTeacherResult(
         {
           segments: [{ id: 'subtitle-404', text: 'bad segment' }],
-          chapters: [],
+          chapters: teacherResult.chapters,
         },
         seedExample,
       ),
@@ -244,19 +258,69 @@ test('LoRA training script rejects remote code trust with hub publishing', () =>
 });
 
 test('LoRA training script validates JSONL messages before loading ML dependencies', () => {
-  const result = spawnSync(
+  const result = runTrainingValidation('scripts/tests/fixtures/malformed-subtitle-train.jsonl');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must contain a messages list/);
+});
+
+test('LoRA training script rejects records without strict subtitle SFT turns', () => {
+  const result = runTrainingValidation('scripts/tests/fixtures/bad-role-subtitle-train.jsonl');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /messages\[0\]\.role must be system/);
+});
+
+test('LoRA training script rejects assistant content that is not JSON', () => {
+  const result = runTrainingValidation('scripts/tests/fixtures/non-json-assistant-subtitle-train.jsonl');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /assistant content is not valid JSON/);
+});
+
+test('LoRA training script rejects subtitle records without required chapters', () => {
+  const result = runTrainingValidation('scripts/tests/fixtures/missing-chapters-subtitle-train.jsonl');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /assistant JSON must contain segments and chapters arrays/);
+});
+
+test('LoRA training script rejects subtitle records with empty chapters', () => {
+  const result = runTrainingValidation('scripts/tests/fixtures/empty-chapters-subtitle-train.jsonl');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /chapters must contain at least one chapter/);
+});
+
+test('LoRA training JSONL validator accepts a complete subtitle SFT contract', () => {
+  const python = [
+    'import importlib.util',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'module.validate_train_jsonl("scripts/tests/fixtures/valid-subtitle-train.jsonl")',
+    'print("ok")',
+  ].join('; ');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'ok');
+});
+
+function runTrainingValidation(fixturePath) {
+  return spawnSync(
     'python3',
     [
       'ml/subtitle-postprocessor/train_lora.py',
       '--train-jsonl',
-      'scripts/tests/fixtures/malformed-subtitle-train.jsonl',
+      fixturePath,
     ],
     {
       cwd: new URL('../..', import.meta.url),
       encoding: 'utf8',
     },
   );
-
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /must contain a messages list/);
-});
+}

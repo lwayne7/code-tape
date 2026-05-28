@@ -15,7 +15,7 @@
 
 1. 准备 seed 样本：原始 ASR 字幕、代码上下文、运行输出、前端术语表。
 2. 调用 teacher 模型：让 `gpt-5.5` 按 code-tape 输出契约生成修正字幕和章节 JSON。
-3. 校验 teacher 输出：必须包含每个输入 segment，必须包含 `chapters` 数组，不能包含密钥形态文本。
+3. 校验 teacher 输出：必须包含每个输入 segment，必须包含非空 `chapters` 数组，不能包含密钥形态文本。
 4. 生成 SFT JSONL：保存为三轮 chat record，供 LoRA / SFT 训练 student 模型。
 5. 训练 student：使用小型 instruct 模型做 LoRA，评估 JSON 合法率、术语准确率、简体中文一致性、中英混合保真率和章节边界误差。
 6. 发布公开模型：将 adapter 或合并后的模型发布到 Hugging Face，再导出 Transformers.js 兼容 ONNX。
@@ -78,7 +78,7 @@ python3 ml/subtitle-postprocessor/train_lora.py \
 ## 验收标准
 
 - `npm run subtitle:dataset:validate` 通过。
-- 蒸馏输出中每条 record 的 assistant JSON 都包含 `segments` 和 `chapters`。
+- 蒸馏输出中每条 record 的 assistant JSON 都包含 `segments` 和非空 `chapters`。
 - 训练评估至少覆盖：
   - JSON 合法率。
   - 每个输入 segment exactly once。

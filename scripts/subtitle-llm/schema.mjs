@@ -36,6 +36,7 @@ export function validateSubtitleTeacherResult(value, example) {
   if (!isPlainObject(value)) throw new Error('teacher result must be an object');
   if (!Array.isArray(value.segments)) throw new Error('teacher result segments are required');
   if (!Array.isArray(value.chapters)) throw new Error('teacher result chapters are required');
+  if (value.chapters.length === 0) throw new Error('chapters must contain at least one chapter');
 
   const inputIds = new Set(normalizedExample.segments.map((segment) => segment.id));
   const seenIds = new Set();

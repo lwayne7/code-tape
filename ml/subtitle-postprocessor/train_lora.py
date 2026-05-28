@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 
 
@@ -40,17 +41,130 @@ def validate_train_jsonl(path: str) -> None:
                 raise SystemExit(f"{path}:{line_number} is not valid JSON: {error}") from error
             if not isinstance(record, dict):
                 raise SystemExit(f"{path}:{line_number} must be a JSON object")
-            messages = record.get("messages")
-            if not isinstance(messages, list) or not messages:
-                raise SystemExit(f"{path}:{line_number} must contain a messages list")
-            for message_index, message in enumerate(messages):
-                if not isinstance(message, dict):
-                    raise SystemExit(f"{path}:{line_number} messages[{message_index}] must be an object")
-                if not isinstance(message.get("role"), str) or not isinstance(message.get("content"), str):
-                    raise SystemExit(f"{path}:{line_number} messages[{message_index}] must contain role and content strings")
+            validate_training_record(record, path, line_number)
             record_count += 1
     if record_count == 0:
         raise SystemExit(f"{path} must contain at least one training record")
+
+
+def validate_training_record(record: dict, path: str, line_number: int) -> None:
+    messages = record.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise SystemExit(f"{path}:{line_number} must contain a messages list")
+    if len(messages) != 3:
+        raise SystemExit(f"{path}:{line_number} messages must contain exactly system, user, and assistant turns")
+
+    for message_index, expected_role in enumerate(("system", "user", "assistant")):
+        message = messages[message_index]
+        if not isinstance(message, dict):
+            raise SystemExit(f"{path}:{line_number} messages[{message_index}] must be an object")
+        if message.get("role") != expected_role:
+            raise SystemExit(f"{path}:{line_number} messages[{message_index}].role must be {expected_role}")
+        if not isinstance(message.get("content"), str) or not message["content"].strip():
+            raise SystemExit(f"{path}:{line_number} messages[{message_index}].content is required")
+
+    user_payload = parse_json_object(messages[1]["content"], path, line_number, "user content")
+    assistant_payload = parse_json_object(messages[2]["content"], path, line_number, "assistant content")
+    segments = validate_user_segments(user_payload, path, line_number)
+    validate_assistant_payload(assistant_payload, segments, path, line_number)
+
+
+def parse_json_object(text: str, path: str, line_number: int, label: str) -> dict:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"{path}:{line_number} {label} is not valid JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise SystemExit(f"{path}:{line_number} {label} must be a JSON object")
+    return value
+
+
+def validate_user_segments(payload: dict, path: str, line_number: int) -> list[dict]:
+    segments = payload.get("segments")
+    if not isinstance(segments, list) or not segments:
+        raise SystemExit(f"{path}:{line_number} user JSON must contain a non-empty segments array")
+    seen_ids = set()
+    previous_end_ms = -math.inf
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            raise SystemExit(f"{path}:{line_number} user segments[{index}] must be an object")
+        segment_id = segment.get("id")
+        start_ms = segment.get("startMs")
+        end_ms = segment.get("endMs")
+        if not is_non_empty_string(segment_id):
+            raise SystemExit(f"{path}:{line_number} user segments[{index}].id is required")
+        if not is_finite_number(start_ms) or not is_finite_number(end_ms):
+            raise SystemExit(f"{path}:{line_number} user segments[{index}] must contain numeric startMs and endMs")
+        if end_ms <= start_ms:
+            raise SystemExit(f"{path}:{line_number} user segments[{index}] endMs must be after startMs")
+        if start_ms < previous_end_ms:
+            raise SystemExit(f"{path}:{line_number} user segments must be ordered and non-overlapping")
+        if segment_id in seen_ids:
+            raise SystemExit(f"{path}:{line_number} duplicate user segment id: {segment_id}")
+        if not is_non_empty_string(segment.get("text")):
+            raise SystemExit(f"{path}:{line_number} user segments[{index}].text is required")
+        seen_ids.add(segment_id)
+        previous_end_ms = end_ms
+    return segments
+
+
+def validate_assistant_payload(payload: dict, input_segments: list[dict], path: str, line_number: int) -> None:
+    segments = payload.get("segments")
+    chapters = payload.get("chapters")
+    if not isinstance(segments, list) or not isinstance(chapters, list):
+        raise SystemExit(f"{path}:{line_number} assistant JSON must contain segments and chapters arrays")
+    if not chapters:
+        raise SystemExit(f"{path}:{line_number} chapters must contain at least one chapter")
+
+    input_ids = {segment["id"] for segment in input_segments}
+    seen_ids = set()
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            raise SystemExit(f"{path}:{line_number} assistant segments[{index}] must be an object")
+        segment_id = segment.get("id")
+        if not is_non_empty_string(segment_id) or not is_non_empty_string(segment.get("text")):
+            raise SystemExit(f"{path}:{line_number} assistant segments[{index}] must contain id and text strings")
+        if segment_id not in input_ids or segment_id in seen_ids:
+            raise SystemExit(f"{path}:{line_number} assistant must include every input segment exactly once")
+        seen_ids.add(segment_id)
+    if len(seen_ids) != len(input_ids):
+        raise SystemExit(f"{path}:{line_number} assistant must include every input segment exactly once")
+
+    validate_chapters(chapters, input_segments[0]["startMs"], input_segments[-1]["endMs"], path, line_number)
+
+
+def validate_chapters(chapters: list, timeline_start_ms: float, timeline_end_ms: float, path: str, line_number: int) -> None:
+    previous_end_ms = -math.inf
+    for index, chapter in enumerate(chapters):
+        if not isinstance(chapter, dict):
+            raise SystemExit(f"{path}:{line_number} chapters[{index}] must be an object")
+        start_ms = chapter.get("startMs")
+        end_ms = chapter.get("endMs")
+        if not is_non_empty_string(chapter.get("title")):
+            raise SystemExit(f"{path}:{line_number} chapters[{index}].title is required")
+        if not is_finite_number(start_ms):
+            raise SystemExit(f"{path}:{line_number} chapters[{index}].startMs is required")
+        if start_ms < 0:
+            raise SystemExit(f"{path}:{line_number} chapters[{index}].startMs must be non-negative")
+        if end_ms is not None and not is_finite_number(end_ms):
+            raise SystemExit(f"{path}:{line_number} chapters[{index}].endMs must be a number when present")
+        if end_ms is not None and end_ms <= start_ms:
+            raise SystemExit(f"{path}:{line_number} chapters[{index}].endMs must be after startMs")
+        if start_ms < timeline_start_ms or start_ms > timeline_end_ms:
+            raise SystemExit(f"{path}:{line_number} chapters must stay within the source subtitle timeline")
+        if end_ms is not None and end_ms > timeline_end_ms:
+            raise SystemExit(f"{path}:{line_number} chapters must stay within the source subtitle timeline")
+        if start_ms < previous_end_ms:
+            raise SystemExit(f"{path}:{line_number} chapters must be ordered and non-overlapping")
+        previous_end_ms = end_ms if end_ms is not None else start_ms
+
+
+def is_non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def is_finite_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def main() -> None:
