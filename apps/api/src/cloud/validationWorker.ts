@@ -120,13 +120,14 @@ export async function processNextRecordingValidationJob(deps: {
       `event count exceeds budget limit of 20000: ${pkgEvents.length}`,
     );
   }
-  if (mediaBlob && mediaBlob.size > MAX_MEDIA_SIZE_BYTES) {
+  const mediaAsset = assetsByKind.get("media");
+  if (mediaAsset && mediaAsset.sizeBytes > MAX_MEDIA_SIZE_BYTES) {
     return failRecording(
       deps.metadata,
       recording,
       now,
       "quota-exceeded",
-      `media size exceeds budget limit of 200MB: ${mediaBlob.size} bytes`,
+      `media size exceeds budget limit of 200MB: ${mediaAsset.sizeBytes} bytes`,
     );
   }
   const totalAssetSize = assets.reduce((sum, asset) => sum + asset.sizeBytes, 0);

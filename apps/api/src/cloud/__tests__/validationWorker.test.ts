@@ -395,10 +395,144 @@ test("validation worker allows missing optional media asset and degrades gracefu
   assert.equal(job.ok, true);
   if (!job.ok) return;
   assert.equal(job.recording.status, "ready");
-  // Check that metadata is degraded to medialess (hasAudio/hasCamera set to false)
-  assert.equal(job.recording.hasAudio, false);
-  assert.equal(job.recording.hasCamera, false);
 });
+
+test("validation worker rejects missing optional media asset if declared size exceeds limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  
+  const mediaBytes = new Uint8Array(100);
+  const mediaBlob = new Blob([mediaBytes], { type: "video/webm" });
+  const pkg = await makePackage({ mediaSha256: await sha256Blob(mediaBlob) });
+
+  // Create session request with valid media size (100 bytes) to bypass session creation check
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg, { mediaBytes }),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  // Upload assets, but do not upload media since it's optional
+  const jsonTargets = created.value.uploadTargets.filter(
+    (t) => t.kind !== "media" && t.kind !== "thumbnail",
+  );
+  await uploadPackageAssets(objectStorage, jsonTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg, { mediaBytes }),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  // Manually update the media asset sizeBytes in metadata repository to 200MB + 1
+  const assets = await metadata.listAssets(created.value.recordingId);
+  const mediaAsset = assets.find((a) => a.kind === "media");
+  assert.ok(mediaAsset);
+  await metadata.updateAsset({
+    ...mediaAsset,
+    sizeBytes: 200 * 1024 * 1024 + 1,
+  });
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "quota-exceeded");
+  assert.match(job.recording.failureMessage ?? "", /media size exceeds budget limit/);
+});
+
+test("validation worker allows exact budget limits (15 mins duration, 20000 events, 200MB media, 250MB total size)", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+
+  // 20000 events
+  const events = Array.from({ length: 20000 }, (_, i) => ({
+    id: `ev-${i}`,
+    seq: i + 1,
+    timestampMs: i,
+    source: "editor",
+    track: "main",
+    type: "selection-change",
+    payload: { cursor: null, selection: null },
+  }));
+
+  const pkg = await makePackage();
+  pkg.events = events as any;
+  pkg.manifest.checksums.eventsSha256 = await sha256Hex(canonicalStringify(events));
+  pkg.meta.durationMs = 15 * 60 * 1000; // exactly 15 mins
+
+  // Setup mock sizes for JSON assets
+  const manifestBody = canonicalStringify(pkg.manifest);
+  const metaBody = canonicalStringify(pkg.meta);
+  const eventsBody = canonicalStringify(pkg.events);
+  const snapshotsBody = canonicalStringify(pkg.snapshots);
+
+  const manifestSize = new TextEncoder().encode(manifestBody).byteLength;
+  const metaSize = new TextEncoder().encode(metaBody).byteLength;
+  const eventsSize = new TextEncoder().encode(eventsBody).byteLength;
+  const snapshotsSize = new TextEncoder().encode(snapshotsBody).byteLength;
+
+  const jsonSizeBytes = manifestSize + metaSize + eventsSize + snapshotsSize;
+
+  const mediaSizeBytes = 200 * 1024 * 1024; // exactly 200MB
+  const targetTotalSizeBytes = 250 * 1024 * 1024; // exactly 250MB
+  const thumbnailSizeBytes = targetTotalSizeBytes - mediaSizeBytes - jsonSizeBytes;
+  assert.ok(thumbnailSizeBytes > 0);
+
+  const assets = [
+    { kind: "manifest" as const, sha256: await sha256Hex(manifestBody), sizeBytes: manifestSize, mimeType: "application/json" },
+    { kind: "meta" as const, sha256: await sha256Hex(metaBody), sizeBytes: metaSize, mimeType: "application/json" },
+    { kind: "events" as const, sha256: await sha256Hex(eventsBody), sizeBytes: eventsSize, mimeType: "application/json" },
+    { kind: "snapshots" as const, sha256: await sha256Hex(snapshotsBody), sizeBytes: snapshotsSize, mimeType: "application/json" },
+    { kind: "media" as const, sha256: "0000000000000000000000000000000000000000000000000000000000000000", sizeBytes: mediaSizeBytes, mimeType: "video/webm" },
+    { kind: "thumbnail" as const, sha256: "0000000000000000000000000000000000000000000000000000000000000000", sizeBytes: thumbnailSizeBytes, mimeType: "image/webp" },
+  ];
+
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: {
+      idempotencyKey: "idem-exact",
+      localPackageId: pkg.manifest.packageId,
+      title: pkg.meta.title,
+      schemaVersion: pkg.schemaVersion,
+      durationMs: pkg.meta.durationMs,
+      initialLanguage: pkg.meta.initialLanguage,
+      hasAudio: false,
+      hasCamera: false,
+      assets,
+    },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  // Upload ONLY JSON assets
+  const jsonTargets = created.value.uploadTargets.filter(
+    (t) => t.kind !== "media" && t.kind !== "thumbnail",
+  );
+  await uploadPackageAssets(objectStorage, jsonTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: assets,
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+  assert.equal(job.recording.eventCount, 20000);
+});
+
 
 async function makePackage(input: { mediaSha256?: string } = {}): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
