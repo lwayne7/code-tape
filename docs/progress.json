@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-28T01:32:49Z",
+  "updatedAt": "2026-05-28T01:38:08Z",
   "students": {
     "ceilf6": {
       "activeIssue": 98,
@@ -72,7 +72,7 @@
       "totalScore": 8.5
     },
     "yangchloeeeee": {
-      "activeIssue": null,
+      "activeIssue": 95,
       "completedIssues": [
         4,
         7,
@@ -418,6 +418,20 @@
       "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-27T08:13:48Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "95": {
+      "number": 95,
+      "title": "[P1] 云端录制状态与列表 API",
+      "score": 2,
+      "stack": [
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "yangchloeeeee",
+      "claimedAt": "2026-05-28T01:38:08Z",
       "closedAt": null,
       "mergedPr": null
     },
