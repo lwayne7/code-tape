@@ -438,6 +438,296 @@ test('subtitle postprocessor evaluation CLI uses the current postprocessor runne
   assert.equal(metrics.failures.length, 0);
 });
 
+test('subtitle real model smoke runner reports timing and contract metrics with an injected postprocessor', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+  const calls = [];
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    model: 'ceilf6/test-subtitle-postprocessor',
+    device: 'wasm',
+    dtype: 'q8',
+    createPostProcessor: async ({ model, device, dtype }) => {
+      calls.push({ model, device, dtype });
+      return {
+        async warmUp() {},
+        async process() {
+          return {
+            segments: [
+              { id: 'subtitle-1', text: '这里用 useState 保存 count' },
+              { id: 'subtitle-2', text: '然后 setCount 会触发 render' },
+            ],
+            chapters: [
+              { title: '状态更新', startMs: 0, endMs: 3600 },
+              { title: '问题定位', startMs: 3600, endMs: 7200 },
+            ],
+          };
+        },
+        dispose() {},
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { model: 'ceilf6/test-subtitle-postprocessor', device: 'wasm', dtype: 'q8' },
+  ]);
+  assert.equal(metrics.ok, true);
+  assert.equal(metrics.smokeName, 'subtitle-postprocessor-real-model-smoke');
+  assert.equal(metrics.outputSource, 'real-model-postprocessor');
+  assert.equal(metrics.model, 'ceilf6/test-subtitle-postprocessor');
+  assert.equal(metrics.device, 'wasm');
+  assert.equal(metrics.dtype, 'q8');
+  assert.equal(metrics.sampleId, 'react-state-loop');
+  assert.ok(metrics.pipelineReadyDurationMs >= 0);
+  assert.ok(metrics.generationDurationMs >= 0);
+  assert.ok(metrics.totalDurationMs >= metrics.generationDurationMs);
+  assert.equal(metrics.jsonValid, true);
+  assert.equal(metrics.segmentReferenceValid, true);
+  assert.equal(metrics.chapterTimelineValid, true);
+  assert.equal(metrics.representativePassRate, 1);
+  assert.deepEqual(metrics.failures, []);
+});
+
+test('subtitle real model smoke runner preserves generation timing when processing fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error('LLM 输出中未找到 JSON 对象');
+      },
+      dispose() {},
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'invalid-json');
+  assert.ok(metrics.generationDurationMs > 0);
+  assert.ok(metrics.totalDurationMs >= metrics.generationDurationMs);
+});
+
+test('subtitle real model smoke runner preserves pipeline timing when loading fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      throw new Error('fetch failed');
+    },
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'model-load-error');
+  assert.ok(metrics.pipelineReadyDurationMs > 0);
+  assert.equal(metrics.generationDurationMs, 0);
+  assert.ok(metrics.totalDurationMs >= metrics.pipelineReadyDurationMs);
+});
+
+test('subtitle real model smoke runner fails when quality expectations miss', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        return {
+          segments: [
+            { id: 'subtitle-1', text: '这里用 use state 保存 count' },
+            { id: 'subtitle-2', text: '然后 set count 会触发 render' },
+          ],
+          chapters: [
+            { title: '状态更新', startMs: 0, endMs: 3600 },
+            { title: '问题定位', startMs: 3600, endMs: 7200 },
+          ],
+        };
+      },
+      dispose() {},
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'expectation-miss');
+  assert.ok(metrics.representativePassRate < 1);
+  assert.deepEqual(metrics.failures[0].issues, []);
+  assert.deepEqual(metrics.failures[0].missingTerms, ['useState', 'setCount']);
+});
+
+test('subtitle real model smoke runner keeps metrics when cleanup fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        return {
+          segments: [
+            { id: 'subtitle-1', text: '这里用 useState 保存 count' },
+            { id: 'subtitle-2', text: '然后 setCount 会触发 render' },
+          ],
+          chapters: [
+            { title: '状态更新', startMs: 0, endMs: 3600 },
+            { title: '问题定位', startMs: 3600, endMs: 7200 },
+          ],
+        };
+      },
+      dispose() {
+        throw new Error('vite server close failed');
+      },
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'cleanup-error');
+  assert.equal(metrics.cleanupErrorType, 'cleanup-error');
+  assert.equal(metrics.cleanupErrorMessage, 'vite server close failed');
+  assert.equal(metrics.jsonValid, true);
+  assert.equal(metrics.segmentReferenceValid, true);
+  assert.equal(metrics.chapterTimelineValid, true);
+  assert.equal(metrics.representativePassRate, 1);
+  assert.deepEqual(metrics.failures, []);
+});
+
+test('subtitle real model smoke runner classifies common failure modes', async () => {
+  const { classifyRealModelSmokeError, classifyRealModelSmokeIssues } = await import(
+    '../subtitle-llm/run-real-model-smoke.mjs'
+  );
+
+  assert.equal(
+    classifyRealModelSmokeError(new Error('当前浏览器无法加载本地字幕 LLM 模型（wasm/q8）')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('fetch failed')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('network timeout: ETIMEDOUT')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('LLM 输出中未找到 JSON 对象')),
+    'invalid-json',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: ['unknown-segment'] }]),
+    'invalid-segment-reference',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: ['invalid-chapter-timeline'] }]),
+    'invalid-chapter-timeline',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: [], missingTerms: ['useState'] }]),
+    'expectation-miss',
+  );
+});
+
+test('subtitle real model smoke default factory reports the web runtime config it actually loads', async () => {
+  const { createDefaultPostProcessor } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const created = [];
+  let disposed = 0;
+
+  const postProcessor = await createDefaultPostProcessor(
+    {
+      device: 'wasm',
+      dtype: 'q8',
+    },
+    {
+      loadWebModule: async () => ({
+        module: {
+          DEFAULT_POSTPROCESSOR_MODEL: 'ceilf6/web-default-subtitle-postprocessor',
+          DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: { device: 'wasm', dtype: 'q8' },
+          createHuggingFaceSubtitlePostProcessor(options) {
+            created.push(options);
+            return {
+              async warmUp() {},
+              async process() {
+                return { segments: [], chapters: [] };
+              },
+              dispose() {},
+            };
+          },
+        },
+        async dispose() {
+          disposed += 1;
+        },
+      }),
+    },
+  );
+
+  assert.deepEqual(created, [{ model: 'ceilf6/web-default-subtitle-postprocessor' }]);
+  assert.equal(postProcessor.model, 'ceilf6/web-default-subtitle-postprocessor');
+  assert.deepEqual(postProcessor.runtimeConfig, { device: 'wasm', dtype: 'q8' });
+  await postProcessor.dispose();
+  assert.equal(disposed, 1);
+});
+
+test('subtitle real model smoke default factory rejects mismatched reported runtime config', async () => {
+  const { createDefaultPostProcessor } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  let disposed = 0;
+
+  await assert.rejects(
+    createDefaultPostProcessor(
+      {
+        model: 'ceilf6/test-subtitle-postprocessor',
+        device: 'wasm',
+        dtype: 'q8',
+      },
+      {
+        loadWebModule: async () => ({
+          module: {
+            DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: { device: 'webgpu', dtype: 'q4' },
+            createHuggingFaceSubtitlePostProcessor() {
+              throw new Error('should not create a model when config mismatches');
+            },
+          },
+          async dispose() {
+            disposed += 1;
+          },
+        }),
+      },
+    ),
+    /runtime config mismatch/u,
+  );
+  assert.equal(disposed, 1);
+});
+
+test('subtitle real model smoke Vite loader disables HMR so metric output stays JSON-only', async () => {
+  const { buildDefaultWebModuleServerConfig } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+
+  const config = buildDefaultWebModuleServerConfig('/repo/apps/web');
+
+  assert.equal(config.server.middlewareMode, true);
+  assert.equal(config.server.hmr, false);
+  assert.equal(config.logLevel, 'error');
+});
+
 test('PR self-check asks for one correction and chapter generation evaluation result', () => {
   const template = readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
   const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
@@ -453,9 +743,17 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(template, /postProcessTimeoutBudgetMs/u);
   assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
   assert.equal(
+    packageJson.scripts['subtitle:postprocess:real-model-smoke'],
+    'node scripts/subtitle-llm/run-real-model-smoke.mjs',
+  );
+  assert.equal(
     packageJson.scripts['subtitle:postprocess:runtime-benchmark'],
     'node scripts/subtitle-llm/run-runtime-benchmark.mjs',
   );
+  assert.match(technicalPlan, /npm run subtitle:postprocess:real-model-smoke/u);
+  assert.match(technicalPlan, /pipelineReadyDurationMs/u);
+  assert.match(technicalPlan, /generationDurationMs/u);
+  assert.match(technicalPlan, /chapterTimelineValid/u);
   const runtimeBenchmarkRunner = readFileSync(
     'scripts/subtitle-llm/run-runtime-benchmark.mjs',
     'utf8',
