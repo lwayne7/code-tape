@@ -37,17 +37,6 @@ export async function processNextRecordingValidationJob(deps: {
   const assets = await deps.metadata.listAssets(recording.id);
   const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
 
-  // Early budget size checks (before loading/hashing any objects from object storage)
-  const mediaAsset = assetsByKind.get("media");
-  if (mediaAsset && mediaAsset.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
-    return failRecording(
-      deps.metadata,
-      recording,
-      now,
-      "quota-exceeded",
-      `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${mediaAsset.sizeBytes} bytes`,
-    );
-  }
   const fetchedObjects = new Map<string, StoredObject>();
   const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets, fetchedObjects);
   if (checksumFailure) {

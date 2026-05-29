@@ -402,7 +402,7 @@ test("validation worker allows missing optional media asset and degrades gracefu
   assert.equal(job.recording.hasCamera, false);
 });
 
-test("validation worker rejects missing optional media asset if declared size exceeds limit", async () => {
+test("validation worker allows missing optional media asset even if declared metadata size exceeds limit", async () => {
   const metadata = createMemoryMetadataRepository();
   const objectStorage = createMemoryObjectStorage();
   const service = createCloudRecordingService({ metadata, objectStorage });
@@ -414,7 +414,11 @@ test("validation worker rejects missing optional media asset if declared size ex
   // Create session request with valid media size (100 bytes) to bypass session creation check
   const created = await service.createUploadSession({
     ownerId: "owner-1",
-    input: await makeCreateSessionRequest(pkg, { mediaBytes }),
+    input: {
+      ...(await makeCreateSessionRequest(pkg, { mediaBytes })),
+      hasAudio: true,
+      hasCamera: true,
+    },
   });
   assert.equal(created.ok, true);
   if (!created.ok) return;
@@ -444,11 +448,19 @@ test("validation worker rejects missing optional media asset if declared size ex
   });
 
   const job = await processNextRecordingValidationJob({ metadata, objectStorage });
-  assert.equal(job.ok, false);
-  if (job.ok || !("recording" in job)) return;
-  assert.equal(job.recording.status, "failed");
-  assert.equal(job.recording.failureCode, "quota-exceeded");
-  assert.match(job.recording.failureMessage ?? "", /media size exceeds budget limit/);
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+  assert.equal(job.recording.hasAudio, false);
+  assert.equal(job.recording.hasCamera, false);
+
+  const updatedAssets = await metadata.listAssets(created.value.recordingId);
+  const updatedMediaAsset = updatedAssets.find((asset) => asset.kind === "media");
+  const manifestAsset = updatedAssets.find((asset) => asset.kind === "manifest");
+  assert.ok(updatedMediaAsset);
+  assert.ok(manifestAsset);
+  assert.equal(updatedMediaAsset.validatedAt, null);
+  assert.notEqual(manifestAsset.validatedAt, null);
 });
 
 test("validation worker allows exact budget limits (15 mins duration, 20000 events, 200MB media, 250MB total size)", async () => {
