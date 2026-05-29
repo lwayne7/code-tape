@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJsonObject, validateSubtitleTrainingRecord } from './schema.mjs';
+import { parseJsonObject, readPromptSegments, validateSubtitleTrainingRecord } from './schema.mjs';
 
 const QUALITY_GATE_RECORD_COUNT = 10;
 const MIN_SPARSE_OUTPUT_RATE = 0.85;
@@ -109,9 +109,9 @@ export function evaluateRecords(records) {
   metrics.fullSegmentOutputRate = ratio(fullSegmentOutputs, records.length);
   metrics.emptyCorrectionRate = ratio(emptyCorrections, records.length);
   metrics.longTrackRecordRate = ratio(longTrackRecords, records.length);
-  metrics.averageInputSegments = average(totalInputSegments, jsonValid);
-  metrics.averageOutputSegments = average(totalOutputSegments, jsonValid);
-  metrics.averageOutputSegmentRatio = average(totalOutputSegmentRatio, jsonValid);
+  metrics.averageInputSegments = ratio(totalInputSegments, jsonValid);
+  metrics.averageOutputSegments = ratio(totalOutputSegments, jsonValid);
+  metrics.averageOutputSegmentRatio = ratio(totalOutputSegmentRatio, jsonValid);
   return metrics;
 }
 
@@ -145,18 +145,6 @@ function assertQualityGate(metrics) {
   }
 }
 
-function readPromptSegments(payload) {
-  if (Array.isArray(payload.inputSegments) && Array.isArray(payload.timeline)) {
-    const timelineById = new Map(payload.timeline.map((item) => [item.id, item]));
-    return payload.inputSegments.map((segment) => ({
-      ...segment,
-      startMs: timelineById.get(segment.id)?.startMs,
-      endMs: timelineById.get(segment.id)?.endMs,
-    }));
-  }
-  return payload.inputSegments ?? payload.segments;
-}
-
 function buildFinalSubtitleText(inputSegments, correctionSegments) {
   const correctionsById = new Map(correctionSegments.map((segment) => [segment.id, segment.text]));
   return inputSegments
@@ -181,10 +169,6 @@ function normalizeTermText(value) {
 }
 
 function ratio(value, total) {
-  return total === 0 ? 0 : Number((value / total).toFixed(4));
-}
-
-function average(value, total) {
   return total === 0 ? 0 : Number((value / total).toFixed(4));
 }
 

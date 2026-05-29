@@ -127,6 +127,7 @@ def parse_json_object(text: str, path: str, line_number: int, label: str) -> dic
 
 
 def read_prompt_segments(payload: dict) -> object:
+    # Keep this cross-language copy aligned with scripts/subtitle-llm/schema.mjs::readPromptSegments.
     if isinstance(payload.get("inputSegments"), list) and isinstance(payload.get("timeline"), list):
         timeline_by_id = {
             item.get("id"): item
@@ -316,12 +317,15 @@ def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> di
     if not full_text.startswith(prompt_text):
         raise ValueError("training prompt is not a prefix of the full assistant record")
 
-    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
-    full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+    full_tokens = tokenize_with_offsets(tokenizer, full_text)
+    full_ids = full_tokens["input_ids"]
+    offset_mapping = full_tokens["offset_mapping"]
     input_ids = full_ids[:max_seq_length]
-    labels = [-100] * min(len(prompt_ids), len(input_ids))
-    labels.extend(input_ids[len(labels):])
-    labels = labels[: len(input_ids)]
+    labels = []
+    prompt_char_length = len(prompt_text)
+    for token_id, offset in zip(input_ids, offset_mapping[:max_seq_length]):
+        start, end = offset
+        labels.append(token_id if start >= prompt_char_length else -100)
     if all(label == -100 for label in labels):
         raise ValueError("training record contains no assistant labels after truncation")
     return {
@@ -329,6 +333,18 @@ def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> di
         "attention_mask": [1] * len(input_ids),
         "labels": labels,
     }
+
+
+def tokenize_with_offsets(tokenizer, text: str) -> dict:
+    try:
+        tokens = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
+    except TypeError as error:
+        raise ValueError("tokenizer must support offset mappings for assistant-only labels") from error
+    if "offset_mapping" not in tokens:
+        raise ValueError("tokenizer did not return offset mappings for assistant-only labels")
+    if len(tokens["input_ids"]) != len(tokens["offset_mapping"]):
+        raise ValueError("tokenizer offset mapping length does not match input ids")
+    return tokens
 
 
 if __name__ == "__main__":

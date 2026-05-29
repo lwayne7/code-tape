@@ -9,7 +9,7 @@ import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 96;
+const BASE_MAX_NEW_TOKENS = 128;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
 const MAX_DYNAMIC_NEW_TOKENS = 768;
 const NEW_TOKENS_PER_SEGMENT = 5;
@@ -157,12 +157,26 @@ async function loadPipelineWithFallback({
         : await loadDefaultPipeline("text-generation", model, options);
     } catch (error) {
       const hasNextOption = index < pipelineOptions.length - 1;
-      if (!hasNextOption || !isRecoverableModelLoadError(error, options)) {
-        throw error;
+      if (!hasNextOption) {
+        throw buildModelLoadError(error, options);
+      }
+      if (!isRecoverableModelLoadError(error, options)) {
+        throw buildModelLoadError(error, options);
       }
     }
   }
   throw new Error("本地字幕 LLM 模型加载失败");
+}
+
+function buildModelLoadError(error: unknown, options: TextGenerationPipelineOptions): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(
+    `当前浏览器无法加载本地字幕 LLM 模型（${options.device}/${options.dtype}）。请关闭其他占用内存的页面、升级浏览器后重试，或稍后再运行字幕纠错。原始错误：${detail}`,
+  );
+  if (error instanceof Error) {
+    (wrapped as Error & { cause?: unknown }).cause = error;
+  }
+  return wrapped;
 }
 
 function isRecoverableModelLoadError(
@@ -384,9 +398,19 @@ function constrainCorrectionToTrack(
   correction: SubtitleCorrectionResult,
   track: SubtitleTrack,
 ): SubtitleCorrectionResult {
-  const segments = constrainCorrectionSegments(correction.segments, track);
+  return {
+    ...correction,
+    segments: constrainCorrectionSegments(correction.segments, track),
+    chapters: constrainCorrectionChaptersToTrack(correction.chapters ?? [], track),
+  };
+}
+
+function constrainCorrectionChaptersToTrack(
+  chapters: NonNullable<SubtitleCorrectionResult["chapters"]>,
+  track: SubtitleTrack,
+): NonNullable<SubtitleCorrectionResult["chapters"]> {
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
-  const chapters = (correction.chapters ?? [])
+  return chapters
     .filter((chapter) => chapter.startMs < subtitleEndMs)
     .filter((chapter) => !chapter.title.includes("\uFFFD"))
     .map((chapter) => ({
@@ -396,7 +420,6 @@ function constrainCorrectionToTrack(
         : {}),
     }))
     .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
-  return { ...correction, segments, chapters };
 }
 
 function constrainCorrectionSegments(
@@ -407,13 +430,21 @@ function constrainCorrectionSegments(
   const seenSegmentIds = new Set<string>();
   return segments.filter((segment) => {
     const sourceText = sourceTextById.get(segment.id);
-    if (sourceText === undefined) return false;
-    if (seenSegmentIds.has(segment.id)) return false;
-    if (!segment.text.trim() || segment.text.includes("\uFFFD")) return false;
-    if (!isPlausibleTextCorrection(sourceText, segment.text)) return false;
+    if (sourceText === undefined) return dropCorrectionSegment(segment.id, "unknown-segment");
+    if (seenSegmentIds.has(segment.id)) return dropCorrectionSegment(segment.id, "duplicate-segment");
+    if (!segment.text.trim()) return dropCorrectionSegment(segment.id, "empty-text");
+    if (segment.text.includes("\uFFFD")) return dropCorrectionSegment(segment.id, "replacement-character");
+    if (!isPlausibleTextCorrection(sourceText, segment.text)) {
+      return dropCorrectionSegment(segment.id, "implausible-text");
+    }
     seenSegmentIds.add(segment.id);
     return true;
   });
+}
+
+function dropCorrectionSegment(segmentId: string, reason: string): false {
+  console.debug("[code-tape] dropped subtitle correction", { segmentId, reason });
+  return false;
 }
 
 function recoverSubtitleCorrectionResult(
@@ -484,7 +515,7 @@ function readLooseCorrectionChapters(
     const segment = timelineById.get(title.id);
     if (!segment) return [];
     return [{
-      title: inferChapterTitle(title.text, index),
+      title: fallbackChapterTitle(index),
       startMs: segment.startMs,
       endMs: segment.endMs,
     }];
@@ -513,7 +544,7 @@ function buildFallbackChapters(
     const last = chunk.at(-1);
     if (!first || !last) continue;
     chapters.push({
-      title: inferChapterTitle(chunk.map((segment) => segment.text).join(" "), index),
+      title: fallbackChapterTitle(index),
       startMs: first.startMs,
       endMs: last.endMs,
     });
@@ -521,14 +552,7 @@ function buildFallbackChapters(
   return chapters;
 }
 
-function inferChapterTitle(text: string, index: number): string {
-  const normalized = text.toLowerCase();
-  if (/use\s*state|状态|count/u.test(normalized)) return "状态设计";
-  if (/use\s*effect|副作用|清理|worker/u.test(normalized)) return "副作用清理";
-  if (/chapter|章节|jump|跳转/u.test(normalized)) return "章节跳转";
-  if (/问题|报错|error|bug|分析/u.test(normalized)) return "问题分析";
-  if (/实现|代码|组件|component|函数|function/u.test(normalized)) return "代码实现";
-  if (/测试|验证|test|expect/u.test(normalized)) return "测试验证";
+function fallbackChapterTitle(index: number): string {
   return `片段 ${index + 1}`;
 }
 

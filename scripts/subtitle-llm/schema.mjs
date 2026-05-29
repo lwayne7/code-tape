@@ -202,7 +202,7 @@ function validateTeacherChapters(chapters, timeline) {
   });
 }
 
-function readPromptSegments(payload) {
+export function readPromptSegments(payload) {
   if (Array.isArray(payload.inputSegments) && Array.isArray(payload.timeline)) {
     const timelineById = new Map(payload.timeline.map((item) => [item.id, item]));
     return payload.inputSegments.map((segment) => ({

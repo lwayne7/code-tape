@@ -173,7 +173,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
       segments: [],
       chapters: [
-        { title: "状态设计", startMs: 0, endMs: 1_000 },
+        { title: "片段 1", startMs: 0, endMs: 1_000 },
         { title: "片段 2", startMs: 1_000, endMs: 3_000 },
       ],
     });
@@ -200,7 +200,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
       segments: [{ id: "subtitle-1", text: "useState hook" }],
       chapters: [
-        { title: "状态设计", startMs: 0, endMs: 1_000 },
+        { title: "片段 1", startMs: 0, endMs: 1_000 },
         { title: "片段 2", startMs: 1_000, endMs: 3_000 },
       ],
     });
@@ -268,6 +268,40 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       ],
       chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
     });
+  });
+
+  it("records debug reasons when sparse subtitle corrections are dropped", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-404","text":"invented segment"},{"id":"subtitle-1","text":"useState hook"},{"id":"subtitle-1","text":"duplicate"},{"id":"subtitle-2","text":"chapter jump point"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":3000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    try {
+      await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
+      });
+      expect(debug).toHaveBeenCalledWith(
+        "[code-tape] dropped subtitle correction",
+        expect.objectContaining({ reason: "unknown-segment", segmentId: "subtitle-404" }),
+      );
+      expect(debug).toHaveBeenCalledWith(
+        "[code-tape] dropped subtitle correction",
+        expect.objectContaining({ reason: "duplicate-segment", segmentId: "subtitle-1" }),
+      );
+      expect(debug).toHaveBeenCalledWith(
+        "[code-tape] dropped subtitle correction",
+        expect.objectContaining({ reason: "implausible-text", segmentId: "subtitle-2" }),
+      );
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   it("drops hallucinated sparse corrections that do not preserve source code terms", async () => {
@@ -340,6 +374,32 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
   });
 
+  it("allows four-term sparse corrections to drop one source term at the preservation boundary", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"alpha beta gamma 修正"}],"chapters":[{"title":"片段 1","startMs":0,"endMs":1000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(
+      postProcessor.process({
+        track: {
+          ...makeTrack(),
+          segments: [
+            { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "alpha beta gamma delta" },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      segments: [{ id: "subtitle-1", text: "alpha beta gamma 修正" }],
+      chapters: [{ title: "片段 1", startMs: 0, endMs: 1_000 }],
+    });
+  });
+
   it("drops chapters with replacement-character quantization noise", async () => {
     const pipeline = vi.fn(async () => [
       {
@@ -406,6 +466,34 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       { device: "wasm", dtype: "q8" },
     );
     expect(pipelineFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a safer short-track generation budget for JSON chapters and sparse corrections", async () => {
+    const pipeline = vi.fn(async (_prompt: unknown, _options: { max_new_tokens: number }) => [
+      {
+        generated_text:
+          '{"segments":[],"chapters":[{"title":"片段 1","startMs":0,"endMs":5000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await postProcessor.process({ track: makeTrackWithSegments(5) });
+
+    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThanOrEqual(128);
+  });
+
+  it("wraps local LLM load failures with a user-facing browser capability error", async () => {
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => {
+        throw new Error("WebAssembly memory allocation failed");
+      }),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).rejects.toThrow(
+      /当前浏览器无法加载本地字幕 LLM 模型/,
+    );
   });
 
   it("uses a quiet custom cache when the browser Cache API rejects large model writes", async () => {

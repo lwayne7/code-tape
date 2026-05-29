@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   buildTrainingRecord,
   buildDistillationMessages,
+  readPromptSegments,
   validateSubtitleDistillationExample,
   validateSubtitleTrainingRecord,
   validateSubtitleTeacherResult,
@@ -239,6 +240,39 @@ test('builds deterministic teacher distillation messages without secrets', () =>
   assert.doesNotMatch(JSON.stringify(messages), new RegExp(`${'h'}${'f'}_|${'s'}${'k'}-`, 'u'));
 });
 
+test('subtitle scripts reuse the canonical prompt segment reader', () => {
+  const payload = {
+    inputSegments: [{ id: 'subtitle-1', text: '继续讲 use state' }],
+    timeline: [{ id: 'subtitle-1', startMs: 0, endMs: 1200 }],
+  };
+
+  assert.deepEqual(readPromptSegments(payload), [
+    { id: 'subtitle-1', text: '继续讲 use state', startMs: 0, endMs: 1200 },
+  ]);
+
+  for (const path of [
+    'scripts/subtitle-llm/evaluate-corpus.mjs',
+    'scripts/subtitle-llm/augment-corpus.mjs',
+  ]) {
+    const source = readFileSync(path, 'utf8');
+    assert.doesNotMatch(source, /function readPromptSegments/u);
+    assert.match(source, /readPromptSegments/u);
+  }
+});
+
+test('curated subtitle stability topics live outside the augmentation script', () => {
+  const dataPath = 'ml/subtitle-postprocessor/data/stability-topics.json';
+  const scriptSource = readFileSync('scripts/subtitle-llm/augment-corpus.mjs', 'utf8');
+  const data = JSON.parse(readFileSync(dataPath, 'utf8'));
+
+  assert.ok(Array.isArray(data.stabilityTopics));
+  assert.ok(Array.isArray(data.correctionTopics));
+  assert.ok(data.stabilityTopics.length >= 10);
+  assert.ok(data.correctionTopics.length >= 10);
+  assert.doesNotMatch(scriptSource, /const STABILITY_TOPICS = \[/u);
+  assert.doesNotMatch(scriptSource, /const CORRECTION_TOPICS = \[/u);
+});
+
 test('subtitle fine-tuning corpora have enough domain coverage for stable local LLM output', () => {
   const seedExamples = readJsonl('ml/subtitle-postprocessor/data/seed_examples.jsonl');
   const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
@@ -350,7 +384,7 @@ test('LoRA training masks loss to assistant JSON tokens', () => {
     'module = importlib.util.module_from_spec(spec)',
     'spec.loader.exec_module(module)',
     'apply=lambda self,messages,add_generation_prompt=False,tokenize=False: "PROMPT" if add_generation_prompt else "PROMPT{}"',
-    'call=lambda self,text,add_special_tokens=False: {"input_ids": list(range(len(text)))}',
+    'call=lambda self,text,add_special_tokens=False,return_offsets_mapping=False: {"input_ids": list(range(len(text))), **({"offset_mapping": [(i, i + 1) for i in range(len(text))]} if return_offsets_mapping else {})}',
     'FakeTokenizer=type("FakeTokenizer", (), {"apply_chat_template": apply, "__call__": call})',
     'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"},{"role":"assistant","content":"{}"}]}',
     'tokens = module.tokenize_training_record(record, FakeTokenizer(), 128)',
@@ -363,6 +397,58 @@ test('LoRA training masks loss to assistant JSON tokens', () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), [-100, -100, -100, -100, -100, -100, 6, 7]);
+});
+
+test('LoRA training masks labels by full-text offsets instead of separate prompt token counts', () => {
+  const python = [
+    'import importlib.util',
+    'import json',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[{\\"title\\":\\"片段 1\\",\\"startMs\\":0}]}"',
+    'FULL = PROMPT + ASSISTANT + "</a>"',
+    'class BoundaryMergingTokenizer:',
+    '    def __init__(self):',
+    '        self.id_to_text = {}',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        if text == PROMPT:',
+    '            return {"input_ids": list(range(999))}',
+    '        ids = []',
+    '        offsets = []',
+    '        cursor = 0',
+    '        for index, chunk_size in enumerate([1] * len(text), start=1):',
+    '            start = cursor',
+    '            end = min(len(text), cursor + chunk_size)',
+    '            if start >= end:',
+    '                break',
+    '            ids.append(index)',
+    '            offsets.append((start, end))',
+    '            self.id_to_text[index] = text[start:end]',
+    '            cursor = end',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    '    def decode(self, ids):',
+    '        return "".join(self.id_to_text[token_id] for token_id in ids)',
+    'tokenizer = BoundaryMergingTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'assistant_ids = [token_id for token_id, label in zip(tokens["input_ids"], tokens["labels"]) if label != -100]',
+    'print(tokenizer.decode(assistant_ids))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"segments"/);
+  assert.match(result.stdout, /"chapters"/);
+  assert.doesNotMatch(result.stdout, /system|payload|<u>/u);
 });
 
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
