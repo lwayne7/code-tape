@@ -9,6 +9,7 @@ import {
 } from "./types.js";
 import type {
   CloudApiError,
+  CloudPlaybackDescriptor,
   CloudRecordingDetail,
   CloudRecordingDetailResponse,
   CloudRecordingListItem,
@@ -29,6 +30,7 @@ import type {
 } from "./types.js";
 
 const REQUIRED_ASSETS: RecordingAssetKind[] = ["manifest", "meta", "events", "snapshots"];
+const PLAYBACK_DESCRIPTOR_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const RECORDING_ASSET_KIND_SET = new Set<string>(RECORDING_ASSET_KINDS);
 const RECORDING_LANGUAGES = [
@@ -69,6 +71,10 @@ export type CloudRecordingService = {
     ownerId: string;
     recordingId: string;
   }): Promise<CloudResult<DeleteRecordingResponse>>;
+  getPlaybackDescriptor(input: {
+    ownerId: string;
+    recordingId: string;
+  }): Promise<CloudResult<CloudPlaybackDescriptor>>;
 };
 
 export function createCloudRecordingService(deps: {
@@ -177,8 +183,11 @@ export function createCloudRecordingService(deps: {
       }
       if (session.status === "completed") {
         const recording = await deps.metadata.getRecording(session.recordingId);
+        if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
         const status =
-          recording?.status === "ready" || recording?.status === "failed"
+          recording.status === "ready" || recording.status === "failed"
             ? recording.status
             : "processing";
         return { ok: true, value: { recordingId: session.recordingId, status } };
@@ -198,6 +207,10 @@ export function createCloudRecordingService(deps: {
       const assets = await deps.metadata.listAssets(session.recordingId);
       const conflict = findCompleteConflict(assets, input);
       if (conflict) return { ok: false, error: conflict };
+      const recording = await deps.metadata.getRecording(session.recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
       const completedAt = now().toISOString();
       await deps.metadata.markUploadCompleted({
         sessionId,
@@ -299,6 +312,45 @@ export function createCloudRecordingService(deps: {
       return {
         ok: true,
         value: { id: deleted.id, status: "soft_deleted" as const, deletedAt },
+      };
+    },
+    async getPlaybackDescriptor({ ownerId, recordingId }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || recording.status !== "ready") {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      const assets = await deps.metadata.listAssets(recordingId);
+      const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
+      const missingRequired = REQUIRED_ASSETS.filter((kind) => !assetsByKind.has(kind));
+      if (missingRequired.length > 0) {
+        return {
+          ok: false,
+          error: { code: "not-found", message: "playback descriptor not available" },
+        };
+      }
+
+      const getUrl = (kind: RecordingAssetKind): string | null => {
+        const asset = assetsByKind.get(kind);
+        return asset ? deps.objectStorage.getAssetUrl(asset.objectKey) : null;
+      };
+
+      return {
+        ok: true,
+        value: {
+          id: recording.id,
+          title: recording.title,
+          durationMs: recording.durationMs,
+          schemaVersion: recording.schemaVersion,
+          manifestUrl: getUrl("manifest")!,
+          metaUrl: getUrl("meta")!,
+          eventsUrl: getUrl("events")!,
+          snapshotsUrl: getUrl("snapshots")!,
+          indexesUrl: getUrl("indexes"),
+          mediaUrl: getUrl("media"),
+          thumbnailUrl: getUrl("thumbnail"),
+          expiresAt: new Date(now().getTime() + PLAYBACK_DESCRIPTOR_TTL_MS).toISOString(),
+        },
       };
     },
   };

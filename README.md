@@ -29,8 +29,8 @@
     - `pre-commit` 运行 `npm run quality:precommit`，提交前覆盖仓库测试、Web lint、Web 单测和构建
     - `pre-push` 运行 `npm run quality:local`，推送前刷新 GitNexus 索引并执行完整本地质量闸门
 - 知识库
-    - 通过 GitNexus 观测代码的级联反应，进行 CICD 把控
-    - ~~使用 OpenViking 为 Agent 提供仓库的渐进式上下文~~
+    - 通过 GitNexus 观测代码的级联反应，辅助 CICD 把控
+    - ~~使用 OpenViking 为 Agent 提供仓库的渐进式上下文、持久化记忆~~
         - 需要挂载服务，背离了本项目当前快速交付的需要，清除
         - 工具不是越多越好，得精心筛选适配项目的
 - SDD

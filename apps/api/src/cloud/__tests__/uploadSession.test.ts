@@ -385,6 +385,77 @@ test("completeUpload does not regress a completed recording back to processing",
   assert.equal(recording?.updatedAt, "2026-05-27T00:02:00.000Z");
 });
 
+test("completeUpload does not revive a soft-deleted uploading recording", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const service = createCloudRecordingService({
+    metadata,
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const deleted = await service.deleteRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+  });
+  assert.equal(deleted.ok, true);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  const recording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(completed.ok, false);
+  if (completed.ok) return;
+  assert.equal(completed.error.code, "not-found");
+  assert.equal(recording?.status, "soft_deleted");
+  assert.equal(recording?.deletedAt, deleted.ok ? deleted.value.deletedAt : null);
+});
+
+test("completeUpload retry hides a soft-deleted processing recording", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const service = createCloudRecordingService({
+    metadata,
+    objectStorage: createMemoryObjectStorage(),
+  });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  assert.equal(completed.ok, true);
+
+  const deleted = await service.deleteRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+  });
+  assert.equal(deleted.ok, true);
+
+  const retried = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  const recording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(retried.ok, false);
+  if (retried.ok) return;
+  assert.equal(retried.error.code, "not-found");
+  assert.equal(recording?.status, "soft_deleted");
+  assert.equal(recording?.deletedAt, deleted.ok ? deleted.value.deletedAt : null);
+});
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];
