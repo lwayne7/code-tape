@@ -66,10 +66,14 @@ async function readCuratedTopicData() {
 }
 
 function buildCuratedExamples({ stabilityTopics, correctionTopics }) {
+  if (stabilityTopics.length === 0 || correctionTopics.length === 0) {
+    throw new Error('stability topics data must include at least one stability and correction topic');
+  }
+
   const topics = [...stabilityTopics];
   for (let index = 0; index < 170; index += 1) {
-    const base = topics[index % 10];
-    const suffix = Math.floor(index / 10) + 2;
+    const base = stabilityTopics[index % stabilityTopics.length];
+    const suffix = Math.floor(index / stabilityTopics.length) + 2;
     topics.push({
       ...base,
       fileName: base.fileName.replace(/(\.[^.]+)$/u, `.variant${suffix}$1`),

@@ -271,6 +271,8 @@ test('curated subtitle stability topics live outside the augmentation script', (
   assert.ok(data.correctionTopics.length >= 10);
   assert.doesNotMatch(scriptSource, /const STABILITY_TOPICS = \[/u);
   assert.doesNotMatch(scriptSource, /const CORRECTION_TOPICS = \[/u);
+  assert.doesNotMatch(scriptSource, /index\s*%\s*10/u);
+  assert.match(scriptSource, /stabilityTopics\.length/u);
 });
 
 test('subtitle fine-tuning corpora have enough domain coverage for stable local LLM output', () => {
