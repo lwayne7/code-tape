@@ -95,4 +95,49 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
+
+  it("treats abort as an exclusive worker reset and succeeds on the next request", async () => {
+    const firstWorker = createMockWorker();
+    const secondWorker = createMockWorker();
+    const workerFactory = vi
+      .fn()
+      .mockReturnValueOnce(firstWorker as unknown as Worker)
+      .mockReturnValueOnce(secondWorker as unknown as Worker);
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory,
+    });
+    const abortController = new AbortController();
+    const result: SubtitleCorrectionResult = {
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 2_000 }],
+    };
+
+    const warmUpPromise = postProcessor.warmUp?.();
+    await flushPromises();
+    const processPromise = postProcessor.process({
+      track: makeTrack(),
+      signal: abortController.signal,
+    });
+    await flushPromises();
+
+    abortController.abort();
+
+    await expect(processPromise).rejects.toMatchObject({ name: "AbortError" });
+    await expect(warmUpPromise).rejects.toMatchObject({ name: "AbortError" });
+    expect(firstWorker.terminate).toHaveBeenCalledTimes(1);
+
+    const retryPromise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const retryRequest = secondWorker.postMessage.mock.calls[0]?.[0] as {
+      id: string;
+      type: string;
+    };
+
+    expect(workerFactory).toHaveBeenCalledTimes(2);
+    expect(retryRequest).toEqual(expect.objectContaining({ type: "process" }));
+
+    secondWorker.dispatch({ id: retryRequest.id, type: "success", result });
+
+    await expect(retryPromise).resolves.toEqual(result);
+  });
 });

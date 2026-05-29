@@ -130,6 +130,8 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
   };
 
   const terminateWorker = (error: unknown) => {
+    // Aborting local LLM inference is deliberately coarse-grained: terminate the
+    // worker so CPU-bound/WASM generation cannot keep running behind playback.
     for (const pending of pendingRequests.values()) {
       pending.reject(error);
     }
