@@ -116,6 +116,7 @@ describe("RemoteInterviewWorkbenchPage", () => {
         cameraEnabled: false,
         connectionState: "connecting",
         iceConnectionState: "checking",
+        eventsDataChannelState: "open",
       }),
     });
 
@@ -129,6 +130,8 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(screen.getByText("connecting")).toBeInTheDocument();
     expect(screen.getByText("ICE")).toBeInTheDocument();
     expect(screen.getByText("checking")).toBeInTheDocument();
+    expect(screen.getByText("事件通道")).toBeInTheDocument();
+    expect(screen.getByText("open")).toBeInTheDocument();
   });
 
   it("binds local and remote media streams into video elements", async () => {

@@ -209,6 +209,7 @@ function InterviewMediaPanel({ state }: { state: InterviewMediaSessionState }) {
       <dl className="mt-3 grid gap-2 text-xs">
         <Metric label="WebRTC" value={state.connectionState} />
         <Metric label="ICE" value={state.iceConnectionState} />
+        <Metric label="事件通道" value={state.eventsDataChannelState} />
       </dl>
     </section>
   );

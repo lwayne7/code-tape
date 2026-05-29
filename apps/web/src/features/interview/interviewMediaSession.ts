@@ -12,11 +12,16 @@ export type InterviewTrackEvent = {
 export type InterviewDataChannelState = "not-created" | RTCDataChannelState;
 
 export type InterviewEventsDataChannel = {
+  readonly label: string;
   readonly readyState: RTCDataChannelState;
   onopen: (() => void) | null;
   onclose: (() => void) | null;
   send(data: string): void;
   close(): void;
+};
+
+export type InterviewDataChannelEvent = {
+  channel: InterviewEventsDataChannel;
 };
 
 export type InterviewPeerConnection = {
@@ -27,6 +32,7 @@ export type InterviewPeerConnection = {
   readonly signalingState: RTCSignalingState;
   onicecandidate: ((event: InterviewIceCandidateEvent) => void) | null;
   ontrack: ((event: InterviewTrackEvent) => void) | null;
+  ondatachannel: ((event: InterviewDataChannelEvent) => void) | null;
   onconnectionstatechange: (() => void) | null;
   oniceconnectionstatechange: (() => void) | null;
   onsignalingstatechange: (() => void) | null;
@@ -115,6 +121,14 @@ export function createInterviewMediaSession(
     return next;
   };
 
+  const attachEventsDataChannel = (channel: InterviewEventsDataChannel): InterviewEventsDataChannel => {
+    eventsDataChannel = channel;
+    eventsDataChannel.onopen = notify;
+    eventsDataChannel.onclose = notify;
+    notify();
+    return eventsDataChannel;
+  };
+
   peer.onicecandidate = (event) => {
     if (closed) {
       return;
@@ -131,6 +145,12 @@ export function createInterviewMediaSession(
       remoteStream.addTrack(event.track);
     }
     notify();
+  };
+  peer.ondatachannel = (event) => {
+    if (closed || event.channel.label !== EVENTS_DATA_CHANNEL_LABEL || eventsDataChannel) {
+      return;
+    }
+    attachEventsDataChannel(event.channel);
   };
   peer.onconnectionstatechange = notify;
   peer.oniceconnectionstatechange = notify;
@@ -175,14 +195,9 @@ export function createInterviewMediaSession(
       if (eventsDataChannel) {
         return eventsDataChannel;
       }
-      eventsDataChannel = peer.createDataChannel(
-        EVENTS_DATA_CHANNEL_LABEL,
-        EVENTS_DATA_CHANNEL_OPTIONS,
+      return attachEventsDataChannel(
+        peer.createDataChannel(EVENTS_DATA_CHANNEL_LABEL, EVENTS_DATA_CHANNEL_OPTIONS),
       );
-      eventsDataChannel.onopen = notify;
-      eventsDataChannel.onclose = notify;
-      notify();
-      return eventsDataChannel;
     },
     async createOffer(offerOptions) {
       const offer = await peer.createOffer(offerOptions);
@@ -221,6 +236,7 @@ export function createInterviewMediaSession(
       closed = true;
       peer.onicecandidate = null;
       peer.ontrack = null;
+      peer.ondatachannel = null;
       peer.onconnectionstatechange = null;
       peer.oniceconnectionstatechange = null;
       peer.onsignalingstatechange = null;
@@ -244,7 +260,9 @@ function closeEventsDataChannel(channel: InterviewEventsDataChannel | null): voi
   }
   channel.onopen = null;
   channel.onclose = null;
-  channel.close();
+  if (channel.readyState !== "closed") {
+    channel.close();
+  }
 }
 
 function resolveDependencies(deps: InterviewMediaSessionDependencies = {}): Required<InterviewMediaSessionDependencies> {
