@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T18:57:59Z",
+  "updatedAt": "2026-05-29T19:09:47Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        177
+        177,
+        178
       ],
       "completedIssues": [
         11,
@@ -930,6 +931,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T18:56:21Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "178": {
+      "number": 178,
+      "title": "[P1+ AI] 压缩字幕 LLM 输入以降低延迟和错段引用",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T19:09:47Z",
       "closedAt": null,
       "mergedPr": null
     }
