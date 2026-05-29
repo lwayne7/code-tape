@@ -19,8 +19,11 @@ import type {
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  DeleteRecordingResponse,
   ListRecordingsResponse,
   RecordingAssetKind,
+  RenameRecordingRequest,
+  RenameRecordingResponse,
   UploadSessionRecord,
   UploadTarget,
 } from "./types.js";
@@ -57,6 +60,15 @@ export type CloudRecordingService = {
     ownerId: string;
     recordingId: string;
   }): Promise<CloudResult<CloudRecordingDetailResponse>>;
+  renameRecording(input: {
+    ownerId: string;
+    recordingId: string;
+    input: RenameRecordingRequest;
+  }): Promise<CloudResult<RenameRecordingResponse>>;
+  deleteRecording(input: {
+    ownerId: string;
+    recordingId: string;
+  }): Promise<CloudResult<DeleteRecordingResponse>>;
 };
 
 export function createCloudRecordingService(deps: {
@@ -102,6 +114,7 @@ export function createCloudRecordingService(deps: {
         createdAt,
         updatedAt: createdAt,
         completedAt: null,
+        deletedAt: null,
         durationMs: input.durationMs,
         initialLanguage: input.initialLanguage,
         hasAudio: input.hasAudio,
@@ -223,6 +236,47 @@ export function createCloudRecordingService(deps: {
           recording: toDetail(recording),
           assets: assets.map(toAssetSummary),
         },
+      };
+    },
+    async renameRecording({ ownerId, recordingId, input }) {
+      const invalid = validateRenameTitle(input.title);
+      if (invalid) return { ok: false, error: invalid };
+
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || recording.status === "soft_deleted") {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      const updatedAt = now().toISOString();
+      const renamed: CloudRecordingRecord = {
+        ...recording,
+        title: input.title.trim(),
+        updatedAt,
+      };
+      await deps.metadata.updateRecording(renamed);
+      return {
+        ok: true,
+        value: { id: renamed.id, title: renamed.title, updatedAt },
+      };
+    },
+    async deleteRecording({ ownerId, recordingId }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || recording.status === "soft_deleted") {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      // Idempotent: if already soft_deleted, return current state (handled above via not-found).
+      const deletedAt = now().toISOString();
+      const deleted: CloudRecordingRecord = {
+        ...recording,
+        status: "soft_deleted",
+        deletedAt,
+        updatedAt: deletedAt,
+      };
+      await deps.metadata.updateRecording(deleted);
+      return {
+        ok: true,
+        value: { id: deleted.id, status: "soft_deleted", deletedAt },
       };
     },
   };
@@ -400,6 +454,22 @@ function validateBoundedText(value: string, field: string): CloudApiError | null
     return {
       code: "invalid-manifest",
       message: `${field} must be 1 to ${MAX_UPLOAD_SCALAR_LENGTH} characters`,
+    };
+  }
+  return null;
+}
+
+const MAX_RECORDING_TITLE_LENGTH = 80;
+
+function validateRenameTitle(title: unknown): CloudApiError | null {
+  if (typeof title !== "string") {
+    return { code: "bad-request", message: "title must be a string" };
+  }
+  const trimmed = title.trim();
+  if (trimmed.length < 1 || trimmed.length > MAX_RECORDING_TITLE_LENGTH) {
+    return {
+      code: "bad-request",
+      message: `title must be 1 to ${MAX_RECORDING_TITLE_LENGTH} characters`,
     };
   }
   return null;

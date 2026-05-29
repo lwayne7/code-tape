@@ -92,6 +92,7 @@ function makeRecording(input: {
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
     completedAt: input.status === "ready" ? input.createdAt : null,
+    deletedAt: null,
     durationMs: 1_000,
     initialLanguage: "javascript",
     hasAudio: false,

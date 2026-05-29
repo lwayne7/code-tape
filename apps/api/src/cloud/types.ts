@@ -140,6 +140,22 @@ export type CloudRecordingDetailResponse = {
   assets: CloudRecordingAssetSummary[];
 };
 
+export type RenameRecordingRequest = {
+  title: string;
+};
+
+export type RenameRecordingResponse = {
+  id: string;
+  title: string;
+  updatedAt: string;
+};
+
+export type DeleteRecordingResponse = {
+  id: string;
+  status: "soft_deleted";
+  deletedAt: string;
+};
+
 export type ListRecordingsResponse = {
   items: CloudRecordingListItem[];
   nextCursor: string | null;
@@ -156,6 +172,7 @@ export type CloudRecordingRecord = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  deletedAt: string | null;
   durationMs: number;
   initialLanguage: RecordingLanguage;
   hasAudio: boolean;
