@@ -22,12 +22,12 @@
 import type {
   CloudRecordingRepository,
   CloudResult,
+  CloudRecordingDetail,
+  CloudRecordingListItem,
   CompleteUploadSessionRequest,
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
-  ListRecordingsResponse,
-  CloudRecordingDetailResponse,
   UploadProgress,
   UploadTarget,
   CloudApiError,
@@ -45,9 +45,6 @@ const OWNER_TOKEN_BYTES = 32;
 
 /** 默认 API 基础路径（空串表示同源） */
 const DEFAULT_API_BASE = "";
-
-/** 默认列表分页大小 */
-const DEFAULT_LIST_LIMIT = 20;
 
 // ─────────────────────────────────────────────────────────────
 // 工厂函数
@@ -144,7 +141,7 @@ export function createCloudRecordingRepository(
     },
 
     // ── 查询录制详情 ──────────────────────────────────────
-    async get(recordingId: string): Promise<CloudResult<CloudRecordingDetailResponse>> {
+    async get(recordingId: string): Promise<CloudResult<CloudRecordingDetail>> {
       const token = repo.getOwnerToken();
       try {
         const response = await fetch(
@@ -154,32 +151,24 @@ export function createCloudRecordingRepository(
             headers: { "x-owner-token": token },
           },
         );
-        return handleJsonResponse<CloudRecordingDetailResponse>(response);
+        return handleJsonResponse<CloudRecordingDetail>(response);
       } catch (err) {
         return { ok: false, error: networkError("get recording failed", err) };
       }
     },
 
     // ── 查询录制列表 ──────────────────────────────────────
-    async list(input?: {
-      cursor?: string;
-      limit?: number;
-    }): Promise<CloudResult<ListRecordingsResponse>> {
+    async list(): Promise<CloudResult<CloudRecordingListItem[]>> {
       const token = repo.getOwnerToken();
-      const params = new URLSearchParams();
-      if (input?.cursor) params.set("cursor", input.cursor);
-      const limit = input?.limit ?? DEFAULT_LIST_LIMIT;
-      params.set("limit", String(limit));
-
       try {
         const response = await fetch(
-          `${apiBase}/api/recordings?${params.toString()}`,
+          `${apiBase}/api/recordings`,
           {
             method: "GET",
             headers: { "x-owner-token": token },
           },
         );
-        return handleJsonResponse<ListRecordingsResponse>(response);
+        return handleJsonResponse<CloudRecordingListItem[]>(response);
       } catch (err) {
         return { ok: false, error: networkError("list recordings failed", err) };
       }

@@ -106,29 +106,6 @@ export function createMemoryMetadataRepository(): MetadataRepository {
       }
       return null;
     },
-    async listRecordingsByOwner(
-      ownerId: string,
-      input: { cursor?: string; limit?: number },
-    ): Promise<{ items: CloudRecordingRecord[]; nextCursor: string | null }> {
-      const limit = input.limit ?? 20;
-      const ownerRecordings: CloudRecordingRecord[] = [];
-      for (const recording of recordings.values()) {
-        if (recording.ownerId === ownerId && recording.status !== "soft_deleted" && recording.status !== "purging" && recording.status !== "deleted") {
-          ownerRecordings.push({ ...recording });
-        }
-      }
-      // 按 createdAt 降序排列
-      ownerRecordings.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      const cursorIndex = input.cursor
-        ? ownerRecordings.findIndex((r) => r.id === input.cursor)
-        : 0;
-      const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-      const slice = ownerRecordings.slice(startIndex, startIndex + limit);
-      const nextCursor = slice.length === limit && startIndex + limit < ownerRecordings.length
-        ? slice[slice.length - 1].id
-        : null;
-      return { items: slice, nextCursor };
-    },
     async updateRecording(recording: CloudRecordingRecord): Promise<void> {
       recordings.set(recording.id, { ...recording });
     },

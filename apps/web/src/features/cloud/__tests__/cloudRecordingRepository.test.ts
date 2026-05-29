@@ -18,8 +18,8 @@ import type {
   CreateUploadSessionRequest,
   UploadTarget,
   UploadProgress,
-  CloudRecordingDetailResponse,
-  ListRecordingsItem,
+  CloudRecordingDetail,
+  CloudRecordingListItem,
 } from "../types";
 import { createCloudRecordingRepository } from "../cloudRecordingRepository";
 
@@ -82,6 +82,47 @@ function makeBlob(content = "test content", type = "application/json"): Blob {
   return new Blob([content], { type });
 }
 
+/** 构造一份 CloudRecordingDetail 测试数据 */
+function makeDetail(overrides: Partial<CloudRecordingDetail> = {}): CloudRecordingDetail {
+  return {
+    id: "rec_1",
+    title: "Test Recording",
+    durationMs: 5000,
+    createdAt: "2026-05-29T00:00:00.000Z",
+    updatedAt: "2026-05-29T00:01:00.000Z",
+    initialLanguage: "javascript",
+    hasAudio: true,
+    hasCamera: true,
+    status: "processing",
+    localPackageId: "local-pkg-1",
+    schemaVersion: "0.1.0",
+    visibility: "private",
+    completedAt: null,
+    totalSizeBytes: 53840,
+    eventCount: null,
+    snapshotCount: null,
+    failureCode: null,
+    failureMessage: null,
+    ...overrides,
+  };
+}
+
+/** 构造一份 CloudRecordingListItem 测试数据 */
+function makeListItem(overrides: Partial<CloudRecordingListItem> = {}): CloudRecordingListItem {
+  return {
+    id: "rec_1",
+    title: "Test Recording",
+    createdAt: "2026-05-29T00:00:00.000Z",
+    updatedAt: "2026-05-29T00:00:00.000Z",
+    durationMs: 5000,
+    initialLanguage: "javascript",
+    hasAudio: true,
+    hasCamera: true,
+    status: "ready",
+    ...overrides,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────
 // fetch mock 工具
 // ─────────────────────────────────────────────────────────────
@@ -126,7 +167,6 @@ function createMockXhr(): { xhr: MockXhr; instance: XMLHttpRequest } {
     open: vi.fn(),
     setRequestHeader: vi.fn(),
     send: vi.fn(function (this: MockXhr) {
-      // send 默认成功
       queueMicrotask(() => {
         if (this.onload) this.onload();
       });
@@ -143,7 +183,6 @@ function createMockXhr(): { xhr: MockXhr; instance: XMLHttpRequest } {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // 清理 localStorage 中可能残留的 owner token
   try {
     localStorage.removeItem("code-tape-cloud-owner-token");
   } catch {
@@ -160,7 +199,6 @@ afterEach(() => {
 // ─────────────────────────────────────────────────────────────
 
 function setupRepo(): CloudRecordingRepository {
-  // jsdom 默认没有 fetch，需要手动挂载 mock
   if (!vi.isMockFunction(globalThis.fetch)) {
     vi.stubGlobal("fetch", vi.fn());
   }
@@ -180,7 +218,6 @@ describe("CloudRecordingRepository", () => {
     it("首次调用生成随机 hex token 并持久化到 localStorage", () => {
       const repo = setupRepo();
       const token = repo.getOwnerToken();
-      // 64 字符 hex（32 字节）
       expect(token).toMatch(/^[a-f0-9]{64}$/);
       expect(localStorage.getItem("code-tape-cloud-owner-token")).toBe(token);
     });
@@ -339,125 +376,44 @@ describe("CloudRecordingRepository", () => {
   describe("get", () => {
     it("返回 processing 状态的录制详情", async () => {
       const repo = setupRepo();
-      const detail: CloudRecordingDetailResponse = {
-        recording: {
-          id: "rec_1",
-          ownerId: repo.getOwnerToken(),
-          localPackageId: "local-pkg-1",
-          title: "Test Recording",
-          schemaVersion: "0.1.0",
-          status: "processing",
-          visibility: "private",
-          createdAt: "2026-05-29T00:00:00.000Z",
-          updatedAt: "2026-05-29T00:01:00.000Z",
-          completedAt: "2026-05-29T00:01:00.000Z",
-          durationMs: 5000,
-          initialLanguage: "javascript",
-          hasAudio: true,
-          hasCamera: true,
-          totalSizeBytes: 53840,
-          eventCount: null,
-          snapshotCount: null,
-          failureCode: null,
-          failureMessage: null,
-        },
-        assets: [
-          { kind: "manifest", sizeBytes: 256, mimeType: "application/json", validatedAt: null },
-          { kind: "meta", sizeBytes: 512, mimeType: "application/json", validatedAt: null },
-          { kind: "events", sizeBytes: 2048, mimeType: "application/json", validatedAt: null },
-          { kind: "snapshots", sizeBytes: 1024, mimeType: "application/json", validatedAt: null },
-          { kind: "media", sizeBytes: 50000, mimeType: "video/webm", validatedAt: null },
-        ],
-      };
-      mockFetch(200, detail);
+      mockFetch(200, makeDetail({ status: "processing" }));
 
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.recording.status).toBe("processing");
-      expect(result.value.assets).toHaveLength(5);
+      expect(result.value.status).toBe("processing");
+      expect(result.value.id).toBe("rec_1");
+      expect(result.value.hasAudio).toBe(true);
     });
 
     it("worker 校验通过后返回 ready 状态", async () => {
       const repo = setupRepo();
-      const detail: CloudRecordingDetailResponse = {
-        recording: {
-          id: "rec_1",
-          ownerId: repo.getOwnerToken(),
-          localPackageId: "local-pkg-1",
-          title: "Test Recording",
-          schemaVersion: "0.1.0",
-          status: "ready",
-          visibility: "private",
-          createdAt: "2026-05-29T00:00:00.000Z",
-          updatedAt: "2026-05-29T00:02:00.000Z",
-          completedAt: "2026-05-29T00:01:00.000Z",
-          durationMs: 5000,
-          initialLanguage: "javascript",
-          hasAudio: true,
-          hasCamera: true,
-          totalSizeBytes: 53840,
-          eventCount: 10,
-          snapshotCount: 2,
-          failureCode: null,
-          failureMessage: null,
-        },
-        assets: [
-          { kind: "manifest", sizeBytes: 256, mimeType: "application/json", validatedAt: "2026-05-29T00:02:00.000Z" },
-          { kind: "meta", sizeBytes: 512, mimeType: "application/json", validatedAt: "2026-05-29T00:02:00.000Z" },
-          { kind: "events", sizeBytes: 2048, mimeType: "application/json", validatedAt: "2026-05-29T00:02:00.000Z" },
-          { kind: "snapshots", sizeBytes: 1024, mimeType: "application/json", validatedAt: "2026-05-29T00:02:00.000Z" },
-          { kind: "media", sizeBytes: 50000, mimeType: "video/webm", validatedAt: "2026-05-29T00:02:00.000Z" },
-        ],
-      };
-      mockFetch(200, detail);
+      mockFetch(200, makeDetail({
+        status: "ready",
+        eventCount: 10,
+        snapshotCount: 2,
+      }));
 
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.recording.status).toBe("ready");
+      expect(result.value.status).toBe("ready");
     });
 
     it("校验失败返回 failed 状态及 failureCode", async () => {
       const repo = setupRepo();
-      const detail: CloudRecordingDetailResponse = {
-        recording: {
-          id: "rec_1",
-          ownerId: repo.getOwnerToken(),
-          localPackageId: "local-pkg-1",
-          title: "Bad Recording",
-          schemaVersion: "0.1.0",
-          status: "failed",
-          visibility: "private",
-          createdAt: "2026-05-29T00:00:00.000Z",
-          updatedAt: "2026-05-29T00:02:00.000Z",
-          completedAt: "2026-05-29T00:01:00.000Z",
-          durationMs: 5000,
-          initialLanguage: "javascript",
-          hasAudio: true,
-          hasCamera: true,
-          totalSizeBytes: 53840,
-          eventCount: null,
-          snapshotCount: null,
-          failureCode: "checksum-mismatch",
-          failureMessage: "media checksum does not match",
-        },
-        assets: [
-          { kind: "manifest", sizeBytes: 256, mimeType: "application/json", validatedAt: null },
-          { kind: "meta", sizeBytes: 512, mimeType: "application/json", validatedAt: null },
-          { kind: "events", sizeBytes: 2048, mimeType: "application/json", validatedAt: null },
-          { kind: "snapshots", sizeBytes: 1024, mimeType: "application/json", validatedAt: null },
-          { kind: "media", sizeBytes: 50000, mimeType: "video/webm", validatedAt: null },
-        ],
-      };
-      mockFetch(200, detail);
+      mockFetch(200, makeDetail({
+        status: "failed",
+        failureCode: "checksum-mismatch",
+        failureMessage: "media checksum does not match",
+      }));
 
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.recording.status).toBe("failed");
-      expect(result.value.recording.failureCode).toBe("checksum-mismatch");
-      expect(result.value.recording.failureMessage).toBe("media checksum does not match");
+      expect(result.value.status).toBe("failed");
+      expect(result.value.failureCode).toBe("checksum-mismatch");
+      expect(result.value.failureMessage).toBe("media checksum does not match");
     });
 
     it("录制不存在返回 not-found", async () => {
@@ -480,73 +436,34 @@ describe("CloudRecordingRepository", () => {
   describe("list", () => {
     it("返回当前 owner 的 ready 录制列表", async () => {
       const repo = setupRepo();
-      const item: ListRecordingsItem = {
-        id: "rec_1",
-        title: "Test Recording",
-        createdAt: "2026-05-29T00:00:00.000Z",
-        durationMs: 5000,
-        initialLanguage: "javascript",
-        hasAudio: true,
-        hasCamera: true,
-        thumbnailUrl: null,
-        visibility: "private",
-      };
-      mockFetch(200, { items: [item], nextCursor: null });
+      mockFetch(200, [makeListItem()]);
 
       const result = await repo.list();
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.items).toHaveLength(1);
-      expect(result.value.items[0].id).toBe("rec_1");
-      expect(result.value.nextCursor).toBeNull();
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].id).toBe("rec_1");
+      expect(result.value[0].status).toBe("ready");
     });
 
-    it("支持分页 cursor", async () => {
-      const repo = setupRepo();
-      mockFetch(200, {
-        items: [
-          { id: "rec_3", title: "R3", createdAt: "2026-05-29T00:03:00.000Z", durationMs: 3000, initialLanguage: "typescript", hasAudio: false, hasCamera: false, thumbnailUrl: null, visibility: "private" as const },
-        ],
-        nextCursor: null,
-      });
-
-      const result = await repo.list({ cursor: "rec_4", limit: 10 });
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error("expected ok");
-      expect(result.value.items[0].id).toBe("rec_3");
-    });
-
-    it("不同 owner 数据隔离（token 不同则列表为空）", async () => {
-      // 先用现有 token 查询 -> 有数据
+    it("不同 owner 数据隔离（不同 token 查询到不同列表）", async () => {
       const repo1 = setupRepo();
-      mockFetch(200, {
-        items: [{ id: "rec_a", title: "A", createdAt: "2026-05-29T00:00:00.000Z", durationMs: 1000, initialLanguage: "javascript", hasAudio: false, hasCamera: false, thumbnailUrl: null, visibility: "private" as const }],
-        nextCursor: null,
-      });
+      mockFetch(200, [makeListItem({ id: "rec_a", title: "A" })]);
+
       const result1 = await repo1.list();
       expect(result1.ok).toBe(true);
       if (!result1.ok) throw new Error("expected ok");
-      expect(result1.value.items).toHaveLength(1);
+      expect(result1.value).toHaveLength(1);
 
-      // 换一个 token（模拟不同 owner） -> 空列表
-      const originalToken = repo1.getOwnerToken();
+      // 换一个 token（模拟不同 owner） → 空列表
       localStorage.removeItem("code-tape-cloud-owner-token");
       const repo2 = createCloudRecordingRepository();
-      // 第二个 repo 生成新的 token（不同 owner 身份），
-      // 在 jsdom 环境下 getRandomValues 可能是确定性的，此时 token 可能相同。
-      // 实际浏览器中 token 总是不同，此处不强行断言 token 不等，
-      // 而是通过 mock fetch 返回空列表来验证数据隔离语义。
-      const token2 = repo2.getOwnerToken();
-      // 若 token 相同，恢复原始 token 以保持数据隔离
-      if (token2 === originalToken) {
-        // 实际浏览器中不会发生；此处仅保证测试隔离正确
-      }
 
-      mockFetch(200, { items: [], nextCursor: null });
+      mockFetch(200, []);
       const result2 = await repo2.list();
       expect(result2.ok).toBe(true);
       if (!result2.ok) throw new Error("expected ok");
-      expect(result2.value.items).toHaveLength(0);
+      expect(result2.value).toHaveLength(0);
     });
   });
 
@@ -560,7 +477,6 @@ describe("CloudRecordingRepository", () => {
       const target = makeUploadTarget("manifest");
       const blob = makeBlob("x".repeat(1000));
 
-      // mock XMLHttpRequest
       const progressEvents: UploadProgress[] = [];
       const { instance: mockXhr } = createMockXhr();
       vi.spyOn(globalThis, "XMLHttpRequest").mockImplementation(() => mockXhr);
@@ -569,20 +485,15 @@ describe("CloudRecordingRepository", () => {
         progressEvents.push({ ...p });
       });
 
-      // 模拟上传进度事件
       const xhrInstance = (globalThis.XMLHttpRequest as unknown as ReturnType<typeof vi.fn>).mock.results[0].value as MockXhr;
-      // 触发 progress
       const progressEvent = new ProgressEvent("progress", { lengthComputable: true, loaded: 500, total: 1000 });
       if (xhrInstance.upload.onprogress) xhrInstance.upload.onprogress(progressEvent);
-      // 触发 load
       if (xhrInstance.onload) xhrInstance.onload();
 
       const result = await uploadPromise;
       expect(result.ok).toBe(true);
 
-      // 验证进度回调
       expect(progressEvents.length).toBeGreaterThanOrEqual(1);
-      // 初始回调：0 字节
       expect(progressEvents[0].bytesUploaded).toBe(0);
       expect(progressEvents[0].totalBytes).toBe(1000);
       expect(progressEvents[0].currentAssetKind).toBe("manifest");
@@ -594,7 +505,6 @@ describe("CloudRecordingRepository", () => {
       const blob = makeBlob("media content");
 
       const { instance: mockXhr } = createMockXhr();
-      // 覆盖 send 使其触发错误
       mockXhr.send = vi.fn(function (this: MockXhr) {
         queueMicrotask(() => {
           if (this.onerror) this.onerror();
@@ -622,11 +532,9 @@ describe("CloudRecordingRepository", () => {
       });
       vi.spyOn(globalThis, "XMLHttpRequest").mockImplementation(() => mockXhr);
 
-      // 上传失败也不应 throw —— 调用方始终拿到 CloudResult
       const result = await repo.uploadAsset(target, blob);
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
-      // 错误信息可展示
       expect(typeof result.error.message).toBe("string");
       expect(result.error.message.length).toBeGreaterThan(0);
     });
@@ -647,7 +555,7 @@ describe("CloudRecordingRepository", () => {
       if (!sessionResult.ok) throw new Error("expected ok");
       const { sessionId, uploadTargets, recordingId } = sessionResult.value;
 
-      // 2. upload assets（每个 PUT 都成功）
+      // 2. upload assets
       for (const target of uploadTargets) {
         const { instance: mockXhr } = createMockXhr();
         vi.spyOn(globalThis, "XMLHttpRequest").mockImplementation(() => mockXhr);
@@ -668,25 +576,19 @@ describe("CloudRecordingRepository", () => {
       if (!completeResult.ok) throw new Error("expected ok");
       expect(completeResult.value.status).toBe("processing");
 
-      // 4. get — processing
-      mockFetch(200, {
-        recording: { id: recordingId, status: "processing", title: "Test", visibility: "private" },
-        assets: [],
-      });
+      // 4. get → processing
+      mockFetch(200, makeDetail({ id: recordingId, status: "processing" }));
       const detail1 = await repo.get(recordingId);
       expect(detail1.ok).toBe(true);
       if (!detail1.ok) throw new Error("expected ok");
-      expect(detail1.value.recording.status).toBe("processing");
+      expect(detail1.value.status).toBe("processing");
 
-      // 5. get — ready（worker 完成后）
-      mockFetch(200, {
-        recording: { id: recordingId, status: "ready", title: "Test", visibility: "private" },
-        assets: [],
-      });
+      // 5. get → ready
+      mockFetch(200, makeDetail({ id: recordingId, status: "ready" }));
       const detail2 = await repo.get(recordingId);
       expect(detail2.ok).toBe(true);
       if (!detail2.ok) throw new Error("expected ok");
-      expect(detail2.value.recording.status).toBe("ready");
+      expect(detail2.value.status).toBe("ready");
     });
   });
 
@@ -722,7 +624,6 @@ describe("CloudRecordingRepository", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
       expect(result.value.uploadTargets).toHaveLength(4);
-      // 无 media target
       expect(result.value.uploadTargets.find((t) => t.kind === "media")).toBeUndefined();
     });
   });
