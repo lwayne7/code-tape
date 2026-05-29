@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T19:20:27Z",
+  "updatedAt": "2026-05-29T19:26:12Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        178
+        178,
+        181
       ],
       "completedIssues": [
         11,
@@ -944,6 +945,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T19:09:47Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "181": {
+      "number": 181,
+      "title": "[P1+ WebRTC] 面试官 events DataChannel 接收生命周期",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T19:26:12Z",
       "closedAt": null,
       "mergedPr": null
     }
