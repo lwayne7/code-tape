@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T14:37:25Z",
+  "updatedAt": "2026-05-29T14:42:50Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         147,
-        150
+        150,
+        152
       ],
       "completedIssues": [
         11,
@@ -731,6 +732,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T14:21:38Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "152": {
+      "number": 152,
+      "title": "[P1+ WebRTC] 前端面试房间与信令客户端",
+      "score": 2,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T14:42:50Z",
       "closedAt": null,
       "mergedPr": null
     }
