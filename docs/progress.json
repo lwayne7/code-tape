@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T17:17:23Z",
+  "updatedAt": "2026-05-29T17:22:26Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        162
+        162,
+        169
       ],
       "completedIssues": [
         11,
@@ -841,6 +842,21 @@
       "claimedAt": "2026-05-29T16:44:20Z",
       "closedAt": "2026-05-29T17:17:23Z",
       "mergedPr": 167
+    },
+    "169": {
+      "number": 169,
+      "title": "[P1] 时间点分享链接 API 与播放入口",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T17:22:26Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
