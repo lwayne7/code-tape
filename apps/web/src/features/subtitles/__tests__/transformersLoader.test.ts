@@ -3,6 +3,7 @@ import {
   configureQuietBrowserCache,
   loadTransformersModule,
   loadTransformersPipeline,
+  requestStaleTransformersImportRecovery,
   type TransformersEnvironment,
   type TransformersModule,
 } from "../transformersLoader";
@@ -37,12 +38,14 @@ describe("transformersLoader", () => {
     const importer = vi
       .fn<() => Promise<TransformersModule>>()
       .mockRejectedValue(new SyntaxError("Unexpected token"));
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
 
     await expect(loadTransformersModule({ importer, retryDelayMs: 0 })).rejects.toThrow(
       "Unexpected token",
     );
 
     expect(importer).toHaveBeenCalledTimes(1);
+    expect(dispatchEvent).not.toHaveBeenCalled();
   });
 
   it("stops retrying after the configured import attempts", async () => {
@@ -56,6 +59,33 @@ describe("transformersLoader", () => {
 
     expect(importer).toHaveBeenCalledTimes(2);
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches a Vite preload error when stale Transformers chunk loading is exhausted", async () => {
+    const error = new TypeError(
+      "Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js",
+    );
+    const importer = vi.fn<() => Promise<TransformersModule>>().mockRejectedValue(error);
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+
+    await expect(
+      loadTransformersModule({ importer, attempts: 2, retryDelayMs: 0 }),
+    ).rejects.toBe(error);
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]?.[0];
+    expect(event?.type).toBe("vite:preloadError");
+    expect(event?.cancelable).toBe(true);
+    expect((event as Event & { payload?: unknown }).payload).toBe(error);
+  });
+
+  it("does not request stale chunk recovery for a plain fetch failure", () => {
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+
+    const requested = requestStaleTransformersImportRecovery(new TypeError("Failed to fetch"));
+
+    expect(requested).toBe(false);
+    expect(dispatchEvent).not.toHaveBeenCalled();
   });
 
   it("loads a pipeline after a recovered import and applies the quiet browser cache", async () => {

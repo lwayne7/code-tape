@@ -122,6 +122,58 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
     expect(JSON.stringify(onMetric.mock.calls[0]?.[0])).not.toContain("use state hook");
   });
 
+  it("forwards stale Transformers chunk errors from the worker to Vite preload recovery", async () => {
+    const worker = createMockWorker();
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory: () => worker as unknown as Worker,
+    });
+
+    const promise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const request = worker.postMessage.mock.calls[0]?.[0] as { id: string };
+    const message =
+      "当前浏览器无法加载本地字幕 LLM 模型（wasm/q8）。原始错误：Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js";
+
+    worker.dispatch({
+      id: request.id,
+      type: "error",
+      error: { name: "Error", message },
+      metrics: { workerRequestDurationMs: 20 },
+    });
+
+    await expect(promise).rejects.toThrow("Failed to fetch dynamically imported module");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]?.[0];
+    expect(event?.type).toBe("vite:preloadError");
+    expect(event?.cancelable).toBe(true);
+    expect((event as Event & { payload?: unknown }).payload).toMatchObject({ message });
+  });
+
+  it("does not forward plain worker fetch failures to stale chunk recovery", async () => {
+    const worker = createMockWorker();
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory: () => worker as unknown as Worker,
+    });
+
+    const promise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const request = worker.postMessage.mock.calls[0]?.[0] as { id: string };
+    const message =
+      "当前浏览器无法加载本地字幕 LLM 模型（wasm/q8）。原始错误：Failed to fetch";
+
+    worker.dispatch({
+      id: request.id,
+      type: "error",
+      error: { name: "TypeError", message },
+      metrics: { workerRequestDurationMs: 20 },
+    });
+
+    await expect(promise).rejects.toThrow("Failed to fetch");
+    expect(dispatchEvent).not.toHaveBeenCalled();
+  });
+
   it("terminates in-flight worker inference when the request is aborted", async () => {
     const worker = createMockWorker();
     const onMetric = vi.fn();

@@ -1,4 +1,5 @@
 import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
+import { requestStaleTransformersImportRecovery } from "./transformersLoader";
 import type {
   SubtitleCorrectionResult,
   SubtitlePostProcessor,
@@ -209,7 +210,9 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
       pending.resolve(response.result, response.metrics);
       return;
     }
-    pending.reject(deserializeWorkerError(response.error), response.metrics);
+    const error = deserializeWorkerError(response.error);
+    requestStaleTransformersImportRecovery(error);
+    pending.reject(error, response.metrics);
   }
 
   function handleWorkerError(event: Event | ErrorEvent) {
