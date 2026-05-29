@@ -8,6 +8,16 @@ export type CreateUploadWriteResult =
   | { status: "created" }
   | { status: "idempotency-key-exists"; existingSession: UploadSessionRecord };
 
+export type UpdateRecordingIfStatusResult =
+  | { status: "updated"; recording: CloudRecordingRecord }
+  | { status: "status-mismatch"; current: CloudRecordingRecord | null };
+
+export type UpdateRecordingIfStatusInput = {
+  recordingId: string;
+  expectedStatus: CloudRecordingRecord["status"];
+  patch: Partial<Omit<CloudRecordingRecord, "id">>;
+};
+
 export type MetadataRepository = {
   findSessionByOwnerAndIdempotencyKey(
     ownerId: string,
@@ -33,15 +43,8 @@ export type MetadataRepository = {
   }): Promise<void>;
   findNextProcessingRecording(): Promise<CloudRecordingRecord | null>;
   updateRecording(recording: CloudRecordingRecord): Promise<void>;
-  // Atomically updates a recording only if its current status matches expectedStatus.
-  // Returns true if the update was applied, false if the status no longer matches
-  // (e.g., the recording was concurrently soft-deleted or transitioned to a terminal state).
-  // Implementations backed by a relational store should use a conditional UPDATE
-  // (e.g., WHERE status = expectedStatus) to make this atomic; in-memory
-  // implementations check and swap under a synchronous block.
   updateRecordingIfStatus(
-    recording: CloudRecordingRecord,
-    expectedStatus: CloudRecordingRecord["status"],
-  ): Promise<boolean>;
+    input: UpdateRecordingIfStatusInput,
+  ): Promise<UpdateRecordingIfStatusResult>;
   updateAsset(asset: CloudRecordingAssetRecord): Promise<void>;
 };

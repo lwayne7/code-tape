@@ -1537,6 +1537,35 @@ test("PATCH /api/recordings/:recordingId rejects non-string title", async () => 
   assert.equal(body.error.code, "bad-request");
 });
 
+test("PATCH /api/recordings/:recordingId rejects missing title", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-missing-title",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({}),
+    }),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, {
+    error: {
+      code: "bad-request",
+      message: "title is required",
+      requestId: "req-missing-title",
+    },
+  });
+});
+
 test("PATCH /api/recordings/:recordingId reports non-string title with a specific error", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });

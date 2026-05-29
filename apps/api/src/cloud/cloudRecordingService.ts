@@ -211,7 +211,19 @@ export function createCloudRecordingService(deps: {
         completedAt,
         uploadedAssetKinds: input.uploadedAssets.map((asset) => asset.kind),
       });
-      return { ok: true, value: { recordingId: session.recordingId, status: "processing" } };
+      const completedRecording = await deps.metadata.getRecording(session.recordingId);
+      if (
+        !completedRecording ||
+        completedRecording.ownerId !== ownerId ||
+        !isOwnerVisibleStatus(completedRecording.status)
+      ) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+      const status =
+        completedRecording.status === "ready" || completedRecording.status === "failed"
+          ? completedRecording.status
+          : "processing";
+      return { ok: true, value: { recordingId: session.recordingId, status } };
     },
     async listRecordings({ ownerId, cursor, limit }) {
       const recordings = await deps.metadata.listRecordingsByOwner({
@@ -246,19 +258,18 @@ export function createCloudRecordingService(deps: {
       };
     },
     async renameRecording({ ownerId, recordingId, input }) {
+      const invalid = validateRenameTitle(input.title);
+      if (invalid) return { ok: false, error: invalid };
+
       const recording = await deps.metadata.getRecording(recordingId);
       if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
-      const title = input.title;
-      const invalid = validateRenameTitle(title);
-      if (invalid) return { ok: false, error: invalid };
-
       const updatedAt = now().toISOString();
       const renamed: CloudRecordingRecord = {
         ...recording,
-        title: title.trim(),
+        title: input.title.trim(),
         updatedAt,
       };
       await deps.metadata.updateRecording(renamed);

@@ -110,14 +110,20 @@ export function createMemoryMetadataRepository(): MetadataRepository {
     async updateRecording(recording: CloudRecordingRecord): Promise<void> {
       recordings.set(recording.id, { ...recording });
     },
-    async updateRecordingIfStatus(
-      recording: CloudRecordingRecord,
-      expectedStatus: CloudRecordingRecord["status"],
-    ): Promise<boolean> {
-      const existing = recordings.get(recording.id);
-      if (!existing || existing.status !== expectedStatus) return false;
-      recordings.set(recording.id, { ...recording });
-      return true;
+    async updateRecordingIfStatus(input) {
+      const current = recordings.get(input.recordingId);
+      if (!current || current.status !== input.expectedStatus) {
+        return {
+          status: "status-mismatch" as const,
+          current: current ? { ...current } : null,
+        };
+      }
+      const updated = { ...current, ...input.patch, id: current.id };
+      recordings.set(current.id, updated);
+      return {
+        status: "updated" as const,
+        recording: { ...updated },
+      };
     },
     async updateAsset(asset: CloudRecordingAssetRecord): Promise<void> {
       const assets = assetsByRecording.get(asset.recordingId) ?? [];

@@ -497,6 +497,53 @@ test("completeUpload retry hides a soft-deleted processing recording", async () 
   assert.equal(recording?.deletedAt, deleted.ok ? deleted.value.deletedAt : null);
 });
 
+test("completeUpload returns not-found when delete wins the mark-complete race", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  let deleteBeforeMark = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async markUploadCompleted(input: Parameters<typeof metadata.markUploadCompleted>[0]) {
+      if (deleteBeforeMark) {
+        const session = await metadata.getSession(input.sessionId);
+        assert.ok(session);
+        const recording = await metadata.getRecording(session.recordingId);
+        assert.ok(recording);
+        await metadata.updateRecording({
+          ...recording,
+          status: "soft_deleted",
+          deletedAt: "2026-05-27T00:02:00.000Z",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      await metadata.markUploadCompleted(input);
+    },
+  };
+  const service = createCloudRecordingService({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  deleteBeforeMark = true;
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  const recording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(completed.ok, false);
+  if (completed.ok) return;
+  assert.equal(completed.error.code, "not-found");
+  assert.equal(recording?.status, "soft_deleted");
+  assert.equal(recording?.deletedAt, "2026-05-27T00:02:00.000Z");
+});
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

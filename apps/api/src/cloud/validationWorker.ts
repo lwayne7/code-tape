@@ -137,15 +137,11 @@ export async function processNextRecordingValidationJob(deps: {
   );
 
   const hasMedia = !!mediaBlob;
-  // Re-read recording to check if it was soft-deleted or transitioned during validation
   const freshRecording = await deps.metadata.getRecording(recording.id);
-  if (!freshRecording || freshRecording.status !== "processing") {
-    // Recording was deleted or transitioned to a terminal state during validation — don't revive it
+  if (!isCurrentProcessingRecording(freshRecording, recording)) {
     return { ok: false, recording: freshRecording ?? recording };
   }
-  // Use fresh recording's metadata (title, etc.) to preserve concurrent renames
-  const ready: CloudRecordingRecord = {
-    ...freshRecording,
+  const readyPatch = {
     status: "ready",
     completedAt,
     updatedAt: completedAt,
@@ -155,15 +151,16 @@ export async function processNextRecordingValidationJob(deps: {
     hasCamera: hasMedia ? freshRecording.hasCamera : false,
     failureCode: null,
     failureMessage: null,
-  };
-  // Atomically update only if status is still "processing" to prevent race conditions
-  const updated = await deps.metadata.updateRecordingIfStatus(ready, "processing");
-  if (!updated) {
-    // Recording was deleted or transitioned between our check and the write
-    const latestRecording = await deps.metadata.getRecording(recording.id);
-    return { ok: false, recording: latestRecording ?? recording };
+  } satisfies Partial<CloudRecordingRecord>;
+  const write = await deps.metadata.updateRecordingIfStatus({
+    recordingId: freshRecording.id,
+    expectedStatus: "processing",
+    patch: readyPatch,
+  });
+  if (write.status === "status-mismatch") {
+    return { ok: false, recording: write.current ?? freshRecording };
   }
-  return { ok: true, recording: ready };
+  return { ok: true, recording: write.recording };
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -243,6 +240,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "invalid recording package";
 }
 
+function isCurrentProcessingRecording(
+  freshRecording: CloudRecordingRecord | null,
+  queuedRecording: CloudRecordingRecord,
+): freshRecording is CloudRecordingRecord {
+  return (
+    !!freshRecording &&
+    freshRecording.id === queuedRecording.id &&
+    freshRecording.ownerId === queuedRecording.ownerId &&
+    freshRecording.status === "processing"
+  );
+}
+
 async function failRecording(
   metadata: MetadataRepository,
   recording: CloudRecordingRecord,
@@ -250,26 +259,24 @@ async function failRecording(
   code: CloudApiErrorCode,
   message: string,
 ): Promise<ValidationWorkerResult> {
-  // Re-read recording to check if it was soft-deleted or transitioned during validation
   const freshRecording = await metadata.getRecording(recording.id);
-  if (!freshRecording || freshRecording.status !== "processing") {
+  if (!isCurrentProcessingRecording(freshRecording, recording)) {
     return { ok: false, recording: freshRecording ?? recording };
   }
   const failedAt = now().toISOString();
-  // Use fresh recording's metadata (title, etc.) to preserve concurrent renames
-  const failed: CloudRecordingRecord = {
-    ...freshRecording,
+  const failedPatch = {
     status: "failed",
     updatedAt: failedAt,
     failureCode: code,
     failureMessage: message,
-  };
-  // Atomically update only if status is still "processing" to prevent race conditions
-  const updated = await metadata.updateRecordingIfStatus(failed, "processing");
-  if (!updated) {
-    // Recording was deleted or transitioned between our check and the write
-    const latestRecording = await metadata.getRecording(recording.id);
-    return { ok: false, recording: latestRecording ?? recording };
+  } satisfies Partial<CloudRecordingRecord>;
+  const write = await metadata.updateRecordingIfStatus({
+    recordingId: freshRecording.id,
+    expectedStatus: "processing",
+    patch: failedPatch,
+  });
+  if (write.status === "status-mismatch") {
+    return { ok: false, recording: write.current ?? freshRecording };
   }
-  return { ok: false, recording: failed };
+  return { ok: false, recording: write.recording };
 }
