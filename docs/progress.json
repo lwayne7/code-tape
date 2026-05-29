@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T14:17:00Z",
+  "updatedAt": "2026-05-29T14:21:38Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         147,
-        149
+        149,
+        150
       ],
       "completedIssues": [
         11,
@@ -716,6 +717,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T14:00:05Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "150": {
+      "number": 150,
+      "title": "[P1+] AI 字幕 LLM 后处理阶段耗时与超时兜底",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T14:21:38Z",
       "closedAt": null,
       "mergedPr": null
     }
