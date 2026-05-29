@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T12:29:51Z",
+  "updatedAt": "2026-05-29T12:34:16Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        135
+        135,
+        146
       ],
       "completedIssues": [
         11,
@@ -666,6 +667,20 @@
       "claimedAt": "2026-05-29T11:51:59Z",
       "closedAt": "2026-05-29T12:29:51Z",
       "mergedPr": 143
+    },
+    "146": {
+      "number": 146,
+      "title": "[P1+ WebRTC] 双向音视频通话基础核心",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T12:34:16Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
