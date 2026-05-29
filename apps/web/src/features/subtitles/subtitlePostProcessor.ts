@@ -15,6 +15,7 @@ const MAX_DYNAMIC_NEW_TOKENS = 768;
 const NEW_TOKENS_PER_SEGMENT = 5;
 const CHAPTER_OUTPUT_TOKEN_RESERVE = 96;
 const MAX_REPAIR_OUTPUT_CHARS = 1_000;
+const ASCII_TERM_PRESERVATION_RATIO = 0.75;
 const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
 You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
 ' }}{% endif %}{{'<|im_start|>' + message['role'] + '
@@ -71,6 +72,7 @@ export function createHuggingFaceSubtitlePostProcessor(
   options: HuggingFaceSubtitlePostProcessorOptions = {},
 ): SubtitlePostProcessor {
   const model = options.model ?? DEFAULT_POSTPROCESSOR_MODEL;
+  // Keep the cold-start path to the single validated browser target; final load errors are wrapped below.
   const pipelineOptions: TextGenerationPipelineOptions[] = [
     { device: "wasm", dtype: "q8" },
   ];
@@ -410,6 +412,7 @@ function constrainCorrectionChaptersToTrack(
   track: SubtitleTrack,
 ): NonNullable<SubtitleCorrectionResult["chapters"]> {
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
+  const seenTimelines = new Set<string>();
   return chapters
     .filter((chapter) => chapter.startMs < subtitleEndMs)
     .filter((chapter) => !chapter.title.includes("\uFFFD"))
@@ -419,7 +422,18 @@ function constrainCorrectionChaptersToTrack(
         ? { endMs: Math.min(chapter.endMs, subtitleEndMs) }
         : {}),
     }))
-    .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
+    .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs)
+    .filter((chapter) => keepUniqueChapterTimeline(chapter, seenTimelines));
+}
+
+function keepUniqueChapterTimeline(
+  chapter: NonNullable<SubtitleCorrectionResult["chapters"]>[number],
+  seenTimelines: Set<string>,
+): boolean {
+  const key = `${chapter.startMs}:${chapter.endMs ?? ""}`;
+  if (seenTimelines.has(key)) return false;
+  seenTimelines.add(key);
+  return true;
 }
 
 function constrainCorrectionSegments(
@@ -567,10 +581,8 @@ function isPlausibleTextCorrection(sourceText: string, correctedText: string): b
   if (sourceTerms.length > 0) {
     const corrected = normalizeAsciiText(correctedText);
     const preservedTerms = sourceTerms.filter((term) => corrected.includes(term));
-    if (sourceTerms.length <= 3) {
-      return preservedTerms.length === sourceTerms.length || hasNearFusedCodeTerm(sourceTerms, correctedText);
-    }
-    return preservedTerms.length / sourceTerms.length >= 0.75;
+    const requiredPreservedTerms = Math.ceil(sourceTerms.length * ASCII_TERM_PRESERVATION_RATIO);
+    return preservedTerms.length >= requiredPreservedTerms || hasNearFusedCodeTerm(sourceTerms, correctedText);
   }
 
   const sourceChars = extractCjkChars(sourceText);
