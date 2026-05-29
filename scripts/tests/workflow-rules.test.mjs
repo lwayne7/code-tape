@@ -730,6 +730,14 @@ test('README Harness documents local quality hooks', () => {
   assert.match(readme, /`pre-push` 运行 `npm run quality:local`/u);
 });
 
+test('agent prompts require codex review before final PR审查', () => {
+  for (const promptPath of ['AGENTS.md', 'CLAUDE.md']) {
+    const prompt = readFileSync(promptPath, 'utf8');
+
+    assert.match(prompt, /repo-guard 和 codex 以及 Copilot 的评论后进行审查/u);
+  }
+});
+
 test('feature scoring writes idempotent ledger and clears active issue', () => {
   const progress = claimIssue(
     createEmptyProgress(),
