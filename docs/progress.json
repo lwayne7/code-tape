@@ -1,10 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T14:00:05Z",
+  "updatedAt": "2026-05-29T14:17:00Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        135,
         147,
         149
       ],
@@ -28,7 +27,8 @@
         133,
         141,
         142,
-        146
+        146,
+        135
       ],
       "reviewedIssues": [
         4,
@@ -44,10 +44,10 @@
         119
       ],
       "bugPenalties": [],
-      "developmentScore": 44.25,
+      "developmentScore": 45.75,
       "reviewScore": 5.75,
       "penaltyScore": 0,
-      "totalScore": 50
+      "totalScore": 51.5
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -637,11 +637,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T11:15:57Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T14:17:00Z",
+      "mergedPr": 145
     },
     "139": {
       "number": 139,
@@ -1242,6 +1242,18 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T13:20:22Z"
+    },
+    {
+      "id": "pr-145-merge",
+      "type": "feature_merge",
+      "issue": 135,
+      "pr": 145,
+      "score": 2,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 1.5,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T14:17:00Z"
     }
   ]
 }
