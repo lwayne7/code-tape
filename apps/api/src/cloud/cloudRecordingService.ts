@@ -246,18 +246,32 @@ export function createCloudRecordingService(deps: {
       };
     },
     async renameRecording({ ownerId, recordingId, input }) {
-      const invalid = validateRenameTitle(input.title);
-      if (invalid) return { ok: false, error: invalid };
-
       const recording = await deps.metadata.getRecording(recordingId);
       if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
+      // Only update fields that are provided - missing fields are treated as no-op
+      const updates: Partial<CloudRecordingRecord> = {};
+      if (input.title !== undefined) {
+        const title = input.title;
+        const invalid = validateRenameTitle(title);
+        if (invalid) return { ok: false, error: invalid };
+        updates.title = title.trim();
+      }
+
+      // If no fields were provided, return current state without modification
+      if (Object.keys(updates).length === 0) {
+        return {
+          ok: true,
+          value: { id: recording.id, title: recording.title, updatedAt: recording.updatedAt },
+        };
+      }
+
       const updatedAt = now().toISOString();
       const renamed: CloudRecordingRecord = {
         ...recording,
-        title: input.title.trim(),
+        ...updates,
         updatedAt,
       };
       await deps.metadata.updateRecording(renamed);

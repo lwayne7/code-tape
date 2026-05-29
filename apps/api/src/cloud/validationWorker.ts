@@ -137,11 +137,11 @@ export async function processNextRecordingValidationJob(deps: {
   );
 
   const hasMedia = !!mediaBlob;
-  // Re-read recording to check if it was soft-deleted during validation
+  // Re-read recording to check if it was soft-deleted or transitioned during validation
   const freshRecording = await deps.metadata.getRecording(recording.id);
-  if (freshRecording?.status === "soft_deleted") {
-    // Recording was deleted during validation — don't revive it
-    return { ok: false, recording: freshRecording };
+  if (!freshRecording || freshRecording.status !== "processing") {
+    // Recording was deleted or transitioned to a terminal state during validation — don't revive it
+    return { ok: false, recording: freshRecording ?? recording };
   }
   const ready: CloudRecordingRecord = {
     ...recording,
@@ -155,7 +155,13 @@ export async function processNextRecordingValidationJob(deps: {
     failureCode: null,
     failureMessage: null,
   };
-  await deps.metadata.updateRecording(ready);
+  // Atomically update only if status is still "processing" to prevent race conditions
+  const updated = await deps.metadata.updateRecordingIfStatus(ready, "processing");
+  if (!updated) {
+    // Recording was deleted or transitioned between our check and the write
+    const latestRecording = await deps.metadata.getRecording(recording.id);
+    return { ok: false, recording: latestRecording ?? recording };
+  }
   return { ok: true, recording: ready };
 }
 
@@ -243,10 +249,10 @@ async function failRecording(
   code: CloudApiErrorCode,
   message: string,
 ): Promise<ValidationWorkerResult> {
-  // Re-read recording to check if it was soft-deleted during validation
+  // Re-read recording to check if it was soft-deleted or transitioned during validation
   const freshRecording = await metadata.getRecording(recording.id);
-  if (freshRecording?.status === "soft_deleted") {
-    return { ok: false, recording: freshRecording };
+  if (!freshRecording || freshRecording.status !== "processing") {
+    return { ok: false, recording: freshRecording ?? recording };
   }
   const failedAt = now().toISOString();
   const failed: CloudRecordingRecord = {
@@ -256,6 +262,12 @@ async function failRecording(
     failureCode: code,
     failureMessage: message,
   };
-  await metadata.updateRecording(failed);
+  // Atomically update only if status is still "processing" to prevent race conditions
+  const updated = await metadata.updateRecordingIfStatus(failed, "processing");
+  if (!updated) {
+    // Recording was deleted or transitioned between our check and the write
+    const latestRecording = await metadata.getRecording(recording.id);
+    return { ok: false, recording: latestRecording ?? recording };
+  }
   return { ok: false, recording: failed };
 }

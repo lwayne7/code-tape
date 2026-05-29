@@ -347,10 +347,15 @@ function parseRenameRecordingRequest(
       return { ok: false, error: badRequestError(`unknown field: ${key}`) };
     }
   }
-  if (!isString(value.title)) {
-    return { ok: false, error: badRequestError("title must be a string") };
+  // Only validate fields that are present - missing fields are treated as no-op
+  const result: RenameRecordingRequest = {};
+  if ("title" in value) {
+    if (!isString(value.title)) {
+      return { ok: false, error: badRequestError("title must be a string") };
+    }
+    result.title = value.title;
   }
-  return { ok: true, value: { title: value.title } };
+  return { ok: true, value: result };
 }
 
 function isRecordingAssetKind(value: string): value is RecordingAssetKind {

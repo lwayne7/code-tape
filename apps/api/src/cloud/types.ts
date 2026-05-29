@@ -156,7 +156,7 @@ export type CloudRecordingDetailResponse = {
 };
 
 export type RenameRecordingRequest = {
-  title: string;
+  title?: string;
 };
 
 export type RenameRecordingResponse = {

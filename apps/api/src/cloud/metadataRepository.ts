@@ -33,5 +33,15 @@ export type MetadataRepository = {
   }): Promise<void>;
   findNextProcessingRecording(): Promise<CloudRecordingRecord | null>;
   updateRecording(recording: CloudRecordingRecord): Promise<void>;
+  // Atomically updates a recording only if its current status matches expectedStatus.
+  // Returns true if the update was applied, false if the status no longer matches
+  // (e.g., the recording was concurrently soft-deleted or transitioned to a terminal state).
+  // Implementations backed by a relational store should use a conditional UPDATE
+  // (e.g., WHERE status = expectedStatus) to make this atomic; in-memory
+  // implementations check and swap under a synchronous block.
+  updateRecordingIfStatus(
+    recording: CloudRecordingRecord,
+    expectedStatus: CloudRecordingRecord["status"],
+  ): Promise<boolean>;
   updateAsset(asset: CloudRecordingAssetRecord): Promise<void>;
 };
