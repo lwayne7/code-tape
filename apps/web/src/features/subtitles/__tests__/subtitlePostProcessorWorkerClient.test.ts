@@ -140,4 +140,42 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
 
     await expect(retryPromise).resolves.toEqual(result);
   });
+
+  it("disposes pending warm-up work and recreates the worker on a later request", async () => {
+    const firstWorker = createMockWorker();
+    const secondWorker = createMockWorker();
+    const workerFactory = vi
+      .fn()
+      .mockReturnValueOnce(firstWorker as unknown as Worker)
+      .mockReturnValueOnce(secondWorker as unknown as Worker);
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory,
+    });
+    const result: SubtitleCorrectionResult = {
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 2_000 }],
+    };
+
+    const warmUpPromise = postProcessor.warmUp?.();
+    await flushPromises();
+
+    postProcessor.dispose?.();
+
+    await expect(warmUpPromise).rejects.toMatchObject({ name: "AbortError" });
+    expect(firstWorker.terminate).toHaveBeenCalledTimes(1);
+
+    const retryPromise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const retryRequest = secondWorker.postMessage.mock.calls[0]?.[0] as {
+      id: string;
+      type: string;
+    };
+
+    expect(workerFactory).toHaveBeenCalledTimes(2);
+    expect(retryRequest).toEqual(expect.objectContaining({ type: "process" }));
+
+    secondWorker.dispatch({ id: retryRequest.id, type: "success", result });
+
+    await expect(retryPromise).resolves.toEqual(result);
+  });
 });

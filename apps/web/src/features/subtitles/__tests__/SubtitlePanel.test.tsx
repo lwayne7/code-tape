@@ -606,6 +606,97 @@ describe("SubtitlePanel", () => {
     expect(process).not.toHaveBeenCalled();
   });
 
+  it("disposes the local LLM post-processor on unmount after warm-up starts", async () => {
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+    const dispose = vi.fn();
+
+    const { unmount } = render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+          dispose,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes the local LLM post-processor when switching recordings", async () => {
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+    const dispose = vi.fn();
+    const postProcessor: SubtitlePostProcessor = {
+      warmUp: postProcessorWarmUp,
+      process: vi.fn(async () => ({ segments: [], chapters: [] })),
+      dispose,
+    };
+    const mediaBlob = new Blob(["webm"], { type: "video/webm" });
+
+    const { rerender } = render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={mediaBlob}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <SubtitlePanel
+        recordingId="recording-2"
+        mediaBlob={mediaBlob}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={createMemorySubtitleStore()}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(2));
+  });
+
   it("warms up the local LLM before the media blob finishes loading", async () => {
     const postProcessorWarmUp = vi.fn(async () => undefined);
 

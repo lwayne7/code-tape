@@ -114,8 +114,10 @@ export function SubtitlePanel({
       cancelled = true;
       generationAbortRef.current?.abort();
       generationAbortRef.current = null;
+      postProcessorWarmUpRef.current = null;
+      postProcessor?.dispose?.();
     };
-  }, [recordingId, store]);
+  }, [postProcessor, recordingId, store]);
 
   useEffect(() => {
     activeSegmentRef.current?.scrollIntoView?.({ block: "nearest" });

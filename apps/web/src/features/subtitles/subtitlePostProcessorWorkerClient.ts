@@ -72,12 +72,18 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
   let worker: Worker | null = null;
   let workerPromise: Promise<Worker> | null = null;
   let nextRequestId = 0;
+  let workerVersion = 0;
 
   const ensureWorker = () => {
     if (worker) return Promise.resolve(worker);
     if (!workerPromise) {
+      const loadingVersion = workerVersion;
       workerPromise = loadWorker(options.workerFactory)
         .then((loadedWorker) => {
+          if (loadingVersion !== workerVersion) {
+            loadedWorker.terminate();
+            throw createAbortError();
+          }
           worker = loadedWorker;
           worker.addEventListener("message", handleWorkerMessage);
           worker.addEventListener("error", handleWorkerError);
@@ -85,7 +91,9 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
           return worker;
         })
         .catch((error: unknown) => {
-          workerPromise = null;
+          if (loadingVersion === workerVersion) {
+            workerPromise = null;
+          }
           throw error;
         });
     }
@@ -98,6 +106,7 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
   ): Promise<SubtitleCorrectionResult | undefined> => {
     if (signal?.aborted) throw createAbortError();
     const activeWorker = await ensureWorker();
+    if (activeWorker !== worker) throw createAbortError();
     if (signal?.aborted) throw createAbortError();
     const id = `subtitle-postprocess-${nextRequestId}`;
     nextRequestId += 1;
@@ -130,6 +139,7 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
   };
 
   const terminateWorker = (error: unknown) => {
+    workerVersion += 1;
     // Aborting local LLM inference is deliberately coarse-grained: terminate the
     // worker so CPU-bound/WASM generation cannot keep running behind playback.
     for (const pending of pendingRequests.values()) {
@@ -177,6 +187,9 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
       );
       if (!result) throw new Error("字幕 LLM worker 未返回纠错结果");
       return result;
+    },
+    dispose() {
+      terminateWorker(createAbortError());
     },
   };
 }
