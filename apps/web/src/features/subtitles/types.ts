@@ -50,6 +50,7 @@ export type SubtitlePostProcessorInput = {
 export type SubtitlePostProcessor = {
   warmUp?(): Promise<void>;
   process(input: SubtitlePostProcessorInput): Promise<SubtitleCorrectionResult>;
+  dispose?(): void;
 };
 
 export type SubtitleCorrectionWarning = {

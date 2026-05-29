@@ -311,7 +311,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(cache.put).toHaveBeenCalledWith("model-cache-key", expect.any(Response));
   });
 
-  it("uses a larger output budget for 100 subtitle segments", async () => {
+  it("keeps the output budget bounded for long tracks with sparse corrections", async () => {
     const track = makeTrackWithSegments(100);
     const pipeline = vi.fn(
       async (
@@ -336,7 +336,8 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       expect.any(Array),
       expect.objectContaining({ max_new_tokens: expect.any(Number) }),
     );
-    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThan(768);
+    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThanOrEqual(512);
+    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeLessThanOrEqual(1_024);
     expect(result.segments).toHaveLength(100);
   });
 

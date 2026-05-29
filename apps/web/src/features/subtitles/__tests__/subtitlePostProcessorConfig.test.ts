@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_POSTPROCESSOR_MODEL } from "../subtitlePostProcessor";
-import { resolveSubtitlePostProcessorModel } from "../subtitlePostProcessorConfig";
+import {
+  DEFAULT_POSTPROCESSOR_MODEL,
+  resolveSubtitlePostProcessorModel,
+} from "../subtitlePostProcessorConfig";
 
 describe("resolveSubtitlePostProcessorModel", () => {
   it("uses the public Hugging Face model configured for subtitle post-processing", () => {

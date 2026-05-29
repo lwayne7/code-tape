@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -234,6 +234,41 @@ test('builds deterministic teacher distillation messages without secrets', () =>
   assert.doesNotMatch(messages[1].content, /"language"/u);
   assert.doesNotMatch(JSON.stringify(messages), new RegExp(`${'h'}${'f'}_|${'s'}${'k'}-`, 'u'));
 });
+
+test('subtitle fine-tuning corpora have enough domain coverage for stable local LLM output', () => {
+  const seedExamples = readJsonl('ml/subtitle-postprocessor/data/seed_examples.jsonl');
+  const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
+  const corpusText = JSON.stringify([...seedExamples, ...distilledRecords]);
+
+  assert.ok(seedExamples.length >= 30, `expected at least 30 seed examples, got ${seedExamples.length}`);
+  assert.ok(
+    distilledRecords.length >= 30,
+    `expected at least 30 distilled training records, got ${distilledRecords.length}`,
+  );
+  for (const term of [
+    'React',
+    'TypeScript',
+    'Vite',
+    'Playwright',
+    'Vitest',
+    'Web Worker',
+    'WebGPU',
+    'IndexedDB',
+    'repo-guard',
+    'SubtitlePanel',
+    'chapters',
+  ]) {
+    assert.match(corpusText, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  }
+});
+
+function readJsonl(path) {
+  return readFileSync(path, 'utf8')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
 
 test('builds SFT records with an assistant JSON contract', () => {
   const record = buildTrainingRecord({
