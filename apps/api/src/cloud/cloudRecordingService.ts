@@ -261,11 +261,27 @@ export function createCloudRecordingService(deps: {
     },
     async deleteRecording({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
-      if (!recording || recording.ownerId !== ownerId || recording.status === "soft_deleted") {
+      if (!recording || recording.ownerId !== ownerId) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
-      // Idempotent: if already soft_deleted, return current state (handled above via not-found).
+      // Idempotent: if already soft_deleted by this owner, return current state without mutation.
+      if (recording.status === "soft_deleted") {
+        return {
+          ok: true,
+          value: {
+            id: recording.id,
+            status: "soft_deleted" as const,
+            deletedAt: recording.deletedAt!,
+          },
+        };
+      }
+
+      // Non-visible terminal states (purging/deleted) are not accessible to the owner.
+      if (!isDeleteEligibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
       const deletedAt = now().toISOString();
       const deleted: CloudRecordingRecord = {
         ...recording,
@@ -276,7 +292,7 @@ export function createCloudRecordingService(deps: {
       await deps.metadata.updateRecording(deleted);
       return {
         ok: true,
-        value: { id: deleted.id, status: "soft_deleted", deletedAt },
+        value: { id: deleted.id, status: "soft_deleted" as const, deletedAt },
       };
     },
   };
@@ -329,6 +345,12 @@ function toAssetSummary(asset: CloudRecordingAssetRecord) {
 }
 
 function isDetailVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
+  return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
+}
+
+// Statuses that are eligible for soft-delete. Excludes terminal system states
+// (purging/deleted) and soft_deleted itself (handled idempotently upstream).
+function isDeleteEligibleStatus(status: CloudRecordingRecord["status"]): boolean {
   return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
 }
 

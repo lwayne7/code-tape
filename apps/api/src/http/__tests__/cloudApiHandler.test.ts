@@ -1504,11 +1504,67 @@ test("DELETE /api/recordings/:recordingId is idempotent on soft_deleted recordin
       headers: { "x-owner-token": "owner-1" },
     }),
   );
-  const body = (await response.json()) as { error: { code: string } };
+  const body = (await response.json()) as { id: string; status: string; deletedAt: string };
 
-  // Already soft_deleted → returns 404 (not visible)
-  assert.equal(response.status, 404);
-  assert.equal(body.error.code, "not-found");
+  // Already soft_deleted by same owner → idempotent success response
+  assert.equal(response.status, 200);
+  assert.equal(body.id, "rec-deleted");
+  assert.equal(body.status, "soft_deleted");
+  assert.ok(body.deletedAt);
+});
+
+test("DELETE /api/recordings/:recordingId repeated delete preserves deletedAt and does not mutate state", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-repeat-del",
+  });
+
+  // First delete
+  const first = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const firstBody = (await first.json()) as { id: string; status: string; deletedAt: string };
+  assert.equal(first.status, 200);
+
+  // Second delete — idempotent success with same deletedAt
+  const second = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const secondBody = (await second.json()) as { id: string; status: string; deletedAt: string };
+  assert.equal(second.status, 200);
+  assert.equal(secondBody.id, firstBody.id);
+  assert.equal(secondBody.status, "soft_deleted");
+  assert.equal(secondBody.deletedAt, firstBody.deletedAt);
+});
+
+test("DELETE /api/recordings/:recordingId returns 404 for purging and deleted recordings", async () => {
+  for (const status of ["purging", "deleted"] as const) {
+    const metadata = createMemoryMetadataRepository();
+    await seedRecording(metadata, { id: `rec-${status}`, ownerId: "owner-1", status });
+    const handler = createCloudApiHandler({
+      service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+      createRequestId: () => `req-del-${status}`,
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/api/recordings/rec-${status}`, {
+        method: "DELETE",
+        headers: { "x-owner-token": "owner-1" },
+      }),
+    );
+    const body = (await response.json()) as { error: { code: string } };
+
+    assert.equal(response.status, 404, `expected 404 for ${status} recording`);
+    assert.equal(body.error.code, "not-found");
+  }
 });
 
 test("DELETE /api/recordings/:recordingId returns 404 for non-owner", async () => {
@@ -1648,6 +1704,7 @@ async function seedRecording(
   },
 ): Promise<void> {
   const createdAt = input.createdAt ?? "2026-05-27T00:00:00.000Z";
+  const deletedAt = input.status === "soft_deleted" ? createdAt : null;
   await metadata.createUpload({
     recording: {
       id: input.id,
@@ -1660,7 +1717,7 @@ async function seedRecording(
       createdAt,
       updatedAt: createdAt,
       completedAt: input.status === "ready" ? createdAt : null,
-      deletedAt: null,
+      deletedAt,
       durationMs: 12_345,
       initialLanguage: "javascript",
       hasAudio: input.hasAudio ?? false,
