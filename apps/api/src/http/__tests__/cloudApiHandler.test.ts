@@ -10,7 +10,11 @@ import { createApiHandler } from "../createApiHandler.js";
 import { createCloudApiHandler } from "../cloudApiHandler.js";
 import { createLocalDevObjectStorageHandler } from "../localDevObjectStorageHandler.js";
 import type { MetadataRepository } from "../../cloud/metadataRepository.js";
-import type { CloudRecordingRecord, RecordingStatus } from "../../cloud/types.js";
+import type {
+  CloudRecordingAssetRecord,
+  CloudRecordingRecord,
+  RecordingStatus,
+} from "../../cloud/types.js";
 
 function createTestApiHandler(
   objectStorage: ReturnType<typeof createMemoryObjectStorage> | ReturnType<typeof createLocalDevObjectStorage>,
@@ -111,23 +115,71 @@ test("GET /api/recordings returns ready recordings for the current owner sorted 
       headers: { "x-owner-token": "owner-1" },
     }),
   );
-  const body = (await response.json()) as Array<Record<string, unknown>>;
+  const body = (await response.json()) as {
+    items: Array<Record<string, unknown>>;
+    nextCursor: string | null;
+  };
 
   assert.equal(response.status, 200);
-  assert.deepEqual(body.map((item) => item.id), ["rec-ready-new", "rec-ready-old"]);
-  assert.deepEqual(Object.keys(body[0]!).sort(), [
+  assert.deepEqual(body.items.map((item) => item.id), ["rec-ready-new", "rec-ready-old"]);
+  assert.equal(body.nextCursor, null);
+  assert.deepEqual(Object.keys(body.items[0]!).sort(), [
     "createdAt",
     "durationMs",
     "hasAudio",
     "hasCamera",
     "id",
     "initialLanguage",
-    "status",
+    "thumbnailUrl",
     "title",
-    "updatedAt",
+    "visibility",
   ]);
-  assert.equal(body[0]!.status, "ready");
-  assert.equal(body[0]!.hasAudio, true);
+  assert.equal(body.items[0]!.thumbnailUrl, null);
+  assert.equal(body.items[0]!.visibility, "private");
+  assert.equal(body.items[0]!.hasAudio, true);
+});
+
+test("GET /api/recordings paginates ready recordings without skipping the first page", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready-old", ownerId: "owner-1", status: "ready", createdAt: "2026-05-27T00:00:00.000Z" });
+  await seedRecording(metadata, { id: "rec-ready-new", ownerId: "owner-1", status: "ready", createdAt: "2026-05-28T00:00:00.000Z" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-list-page",
+  });
+
+  const firstResponse = await handler(
+    new Request("http://localhost/api/recordings?limit=1", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const firstBody = (await firstResponse.json()) as {
+    items: Array<Record<string, unknown>>;
+    nextCursor: string | null;
+  };
+
+  assert.equal(firstResponse.status, 200);
+  assert.deepEqual(firstBody.items.map((item) => item.id), ["rec-ready-new"]);
+  assert.equal(firstBody.nextCursor, "rec-ready-new");
+
+  const secondResponse = await handler(
+    new Request(`http://localhost/api/recordings?limit=1&cursor=${firstBody.nextCursor}`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const secondBody = (await secondResponse.json()) as {
+    items: Array<Record<string, unknown>>;
+    nextCursor: string | null;
+  };
+
+  assert.equal(secondResponse.status, 200);
+  assert.deepEqual(secondBody.items.map((item) => item.id), ["rec-ready-old"]);
+  assert.equal(secondBody.nextCursor, null);
 });
 
 test("GET /api/recordings returns an empty list for owners with no ready recordings", async () => {
@@ -149,7 +201,7 @@ test("GET /api/recordings returns an empty list for owners with no ready recordi
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), []);
+  assert.deepEqual(await response.json(), { items: [], nextCursor: null });
 });
 
 test("GET /api/recordings requires owner token", async () => {
@@ -198,18 +250,73 @@ for (const status of ["uploading", "processing", "ready", "failed"] as const) {
         headers: { "x-owner-token": "owner-1" },
       }),
     );
-    const body = (await response.json()) as Record<string, unknown>;
+    const body = (await response.json()) as {
+      recording: Record<string, unknown>;
+      assets: Array<Record<string, unknown>>;
+    };
 
     assert.equal(response.status, 200);
-    assert.equal(body.id, `rec-${status}`);
-    assert.equal(body.status, status);
-    assert.equal(body.localPackageId, `local-rec-${status}`);
+    assert.equal(body.recording.id, `rec-${status}`);
+    assert.equal(body.recording.status, status);
+    assert.equal(body.recording.localPackageId, `local-rec-${status}`);
+    assert.deepEqual(body.assets, []);
     if (status === "failed") {
-      assert.equal(body.failureCode, "invalid-manifest");
-      assert.equal(body.failureMessage, "manifest was invalid");
+      assert.equal(body.recording.failureCode, "invalid-manifest");
+      assert.equal(body.recording.failureMessage, "manifest was invalid");
     }
   });
 }
+
+test("GET /api/recordings/:recordingId returns recording and asset summaries envelope", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, {
+    id: "rec-ready",
+    ownerId: "owner-1",
+    status: "ready",
+    assets: [
+      {
+        id: "asset-manifest",
+        recordingId: "rec-ready",
+        kind: "manifest",
+        objectKey: "recordings/rec-ready/package/manifest.json",
+        sha256: "a".repeat(64),
+        sizeBytes: 123,
+        mimeType: "application/json",
+        uploadedAt: "2026-05-27T00:00:00.000Z",
+        validatedAt: "2026-05-27T00:00:01.000Z",
+      },
+    ],
+  });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-detail-envelope",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as {
+    recording: Record<string, unknown>;
+    assets: Array<Record<string, unknown>>;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.recording.id, "rec-ready");
+  assert.deepEqual(body.assets, [
+    {
+      kind: "manifest",
+      sizeBytes: 123,
+      mimeType: "application/json",
+      validatedAt: "2026-05-27T00:00:01.000Z",
+    },
+  ]);
+});
 
 test("GET /api/recordings/:recordingId returns 404 for other owners and hidden statuses", async () => {
   const metadata = createMemoryMetadataRepository();
@@ -1105,6 +1212,7 @@ async function seedRecording(
     hasCamera?: boolean;
     failureCode?: CloudRecordingRecord["failureCode"];
     failureMessage?: string | null;
+    assets?: CloudRecordingAssetRecord[];
   },
 ): Promise<void> {
   const createdAt = input.createdAt ?? "2026-05-27T00:00:00.000Z";
@@ -1130,7 +1238,7 @@ async function seedRecording(
       failureCode: input.failureCode ?? null,
       failureMessage: input.failureMessage ?? null,
     },
-    assets: [],
+    assets: input.assets ?? [],
     session: {
       id: `session-${input.id}`,
       recordingId: input.id,
