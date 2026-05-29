@@ -226,7 +226,7 @@ export function createCloudRecordingService(deps: {
     },
     async getRecording({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
-      if (!recording || recording.ownerId !== ownerId || !isDetailVisibleStatus(recording.status)) {
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
       const assets = await deps.metadata.listAssets(recordingId);
@@ -243,7 +243,7 @@ export function createCloudRecordingService(deps: {
       if (invalid) return { ok: false, error: invalid };
 
       const recording = await deps.metadata.getRecording(recordingId);
-      if (!recording || recording.ownerId !== ownerId || recording.status === "soft_deleted") {
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
@@ -272,13 +272,13 @@ export function createCloudRecordingService(deps: {
           value: {
             id: recording.id,
             status: "soft_deleted" as const,
-            deletedAt: recording.deletedAt!,
+            deletedAt: recording.deletedAt ?? now().toISOString(),
           },
         };
       }
 
       // Non-visible terminal states (purging/deleted) are not accessible to the owner.
-      if (!isDeleteEligibleStatus(recording.status)) {
+      if (!isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
@@ -344,13 +344,7 @@ function toAssetSummary(asset: CloudRecordingAssetRecord) {
   };
 }
 
-function isDetailVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
-  return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
-}
-
-// Statuses that are eligible for soft-delete. Excludes terminal system states
-// (purging/deleted) and soft_deleted itself (handled idempotently upstream).
-function isDeleteEligibleStatus(status: CloudRecordingRecord["status"]): boolean {
+function isOwnerVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
   return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
 }
 

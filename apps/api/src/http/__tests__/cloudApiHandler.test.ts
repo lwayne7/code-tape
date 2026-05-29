@@ -1402,6 +1402,29 @@ test("PATCH /api/recordings/:recordingId returns 404 for soft_deleted recording"
   assert.equal(body.error.code, "not-found");
 });
 
+test("PATCH /api/recordings/:recordingId returns 404 for purging and deleted recordings", async () => {
+  for (const status of ["purging", "deleted"] as const) {
+    const metadata = createMemoryMetadataRepository();
+    await seedRecording(metadata, { id: `rec-${status}`, ownerId: "owner-1", status });
+    const handler = createCloudApiHandler({
+      service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+      createRequestId: () => `req-patch-${status}`,
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/api/recordings/rec-${status}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+        body: JSON.stringify({ title: "New Title" }),
+      }),
+    );
+    const body = (await response.json()) as { error: { code: string } };
+
+    assert.equal(response.status, 404, `expected 404 for ${status} recording`);
+    assert.equal(body.error.code, "not-found");
+  }
+});
+
 test("PATCH /api/recordings/:recordingId requires owner token", async () => {
   const handler = createCloudApiHandler({
     service: createCloudRecordingService({
@@ -1511,6 +1534,34 @@ test("DELETE /api/recordings/:recordingId is idempotent on soft_deleted recordin
   assert.equal(body.id, "rec-deleted");
   assert.equal(body.status, "soft_deleted");
   assert.ok(body.deletedAt);
+});
+
+test("DELETE /api/recordings/:recordingId handles soft_deleted with null deletedAt", async () => {
+  const metadata = createMemoryMetadataRepository();
+  // Seed a soft_deleted recording, then manually set deletedAt to null
+  await seedRecording(metadata, { id: "rec-null-deleted", ownerId: "owner-1", status: "soft_deleted" });
+  const recording = await metadata.getRecording("rec-null-deleted");
+  await metadata.updateRecording({ ...recording!, deletedAt: null });
+
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-null-deleted",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-null-deleted", {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as { id: string; status: string; deletedAt: string };
+
+  // Should return success with a valid deletedAt even if it was null
+  assert.equal(response.status, 200);
+  assert.equal(body.id, "rec-null-deleted");
+  assert.equal(body.status, "soft_deleted");
+  assert.ok(body.deletedAt);
+  assert.equal(typeof body.deletedAt, "string");
 });
 
 test("DELETE /api/recordings/:recordingId repeated delete preserves deletedAt and does not mutate state", async () => {
