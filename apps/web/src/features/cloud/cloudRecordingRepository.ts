@@ -579,7 +579,7 @@ function readOwnerToken(): string | null {
   try {
     if (typeof localStorage !== "undefined") {
       const token = localStorage.getItem(OWNER_TOKEN_KEY);
-      if (token && /^[a-f0-9]{64}$/i.test(token)) {
+      if (token && token.length === OWNER_TOKEN_BYTES * 2) {
         return token;
       }
     }
