@@ -2,13 +2,12 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-05-29T02:00:34Z
+更新时间：2026-05-29T07:02:56Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| MINTPIPERAS | #117 [P1] CloudRecordingRepository 上传与状态轮询 | 2026-05-29 02:00:34Z |
 | yangchloeeeee | #118 [P1] 云端播放描述 API | 2026-05-29 01:59:36Z |
 | lwayne7 | #119 [P1] 云端录制重命名与软删除 API | 2026-05-29 01:57:04Z |
 | ceilf6 | #120 [Epic] P1+ WebRTC 实时面试模式总控 | 2026-05-29 01:48:46Z |
@@ -21,14 +20,15 @@
 | ceilf6 | 29.25 | 4.25 | 0.00 | 33.50 |
 | JunMang01 | 3.00 | 0.00 | 0.00 | 3.00 |
 | lwayne7 | 1.50 | 0.00 | 0.00 | 1.50 |
-| MINTPIPERAS | 7.75 | 4.75 | 0.00 | 12.50 |
-| Suxian2001 | 5.50 | 5.50 | 0.00 | 11.00 |
+| MINTPIPERAS | 10.00 | 4.75 | 0.00 | 14.75 |
+| Suxian2001 | 5.50 | 6.25 | 0.00 | 11.75 |
 | yangchloeeeee | 10.75 | 4.50 | 0.00 | 15.25 |
 
 ## 最近流水
 
 | 时间 | 类型 | Issue | PR | 变更 |
 | --- | --- | --- | --- | --- |
+| 2026-05-29 07:02:56Z | feature_merge | #117 | #121 | MINTPIPERAS +2.25, Suxian2001 +0.75 |
 | 2026-05-29 01:40:45Z | feature_merge | #97 | #101 | lwayne7 +1.50, ceilf6 +0.50 |
 | 2026-05-29 01:05:57Z | feature_merge | #95 | #105 | yangchloeeeee +1.50, ceilf6 +0.50 |
 | 2026-05-29 00:42:27Z | feature_merge | #96 | #113 | Suxian2001 +1.50, MINTPIPERAS +0.50 |
@@ -48,4 +48,3 @@
 | 2026-05-25 13:02:09Z | feature_merge | #56 | #64 | ceilf6 +2.25, Suxian2001 +0.75 |
 | 2026-05-25 11:40:59Z | feature_merge | #57 | #63 | yangchloeeeee +2.25, ceilf6 +0.75 |
 | 2026-05-25 10:31:09Z | feature_merge | #60 | #62 | MINTPIPERAS +2.25, Suxian2001 +0.75 |
-| 2026-05-25 03:39:39Z | feature_merge | #55 | #61 | ceilf6 +3.75, yangchloeeeee +1.25 |
