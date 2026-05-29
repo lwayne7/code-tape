@@ -312,20 +312,24 @@ def main() -> None:
 def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> dict:
     messages = record["messages"]
     prompt_messages = messages[:2]
+    assistant_content = messages[2]["content"]
     prompt_text = tokenizer.apply_chat_template(prompt_messages, add_generation_prompt=True, tokenize=False)
     full_text = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
     if not full_text.startswith(prompt_text):
         raise ValueError("training prompt is not a prefix of the full assistant record")
+    assistant_start = full_text.find(assistant_content, len(prompt_text))
+    if assistant_start < 0:
+        raise ValueError("assistant content is not present after the training prompt")
+    assistant_end = assistant_start + len(assistant_content)
 
     full_tokens = tokenize_with_offsets(tokenizer, full_text)
     full_ids = full_tokens["input_ids"]
     offset_mapping = full_tokens["offset_mapping"]
     input_ids = full_ids[:max_seq_length]
     labels = []
-    prompt_char_length = len(prompt_text)
     for token_id, offset in zip(input_ids, offset_mapping[:max_seq_length]):
         start, end = offset
-        labels.append(token_id if start >= prompt_char_length else -100)
+        labels.append(token_id if start >= assistant_start and end <= assistant_end and end > start else -100)
     if all(label == -100 for label in labels):
         raise ValueError("training record contains no assistant labels after truncation")
     return {

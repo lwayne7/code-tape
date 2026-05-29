@@ -399,7 +399,7 @@ test('LoRA training masks loss to assistant JSON tokens', () => {
   assert.deepEqual(JSON.parse(result.stdout), [-100, -100, -100, -100, -100, -100, 6, 7]);
 });
 
-test('LoRA training masks labels by full-text offsets instead of separate prompt token counts', () => {
+test('LoRA training masks labels to assistant JSON without chat template tail tokens', () => {
   const python = [
     'import importlib.util',
     'import json',
@@ -446,9 +446,10 @@ test('LoRA training masks labels by full-text offsets instead of separate prompt
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /"segments"/);
-  assert.match(result.stdout, /"chapters"/);
-  assert.doesNotMatch(result.stdout, /system|payload|<u>/u);
+  assert.equal(
+    result.stdout.trim(),
+    '{"segments":[],"chapters":[{"title":"片段 1","startMs":0}]}',
+  );
 });
 
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
