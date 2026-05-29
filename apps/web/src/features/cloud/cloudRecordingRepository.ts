@@ -94,6 +94,7 @@ export function createCloudRecordingRepository(
       target: UploadTarget,
       blob: Blob,
       onProgress?: (progress: UploadProgress) => void,
+      timeoutMs?: number,
     ): Promise<CloudResult<void>> {
       const totalBytes = blob.size;
       // 上报初始进度（0 字节）
@@ -110,7 +111,7 @@ export function createCloudRecordingRepository(
             totalBytes,
             currentAssetKind: target.kind,
           });
-        });
+        }, timeoutMs);
         return { ok: true, value: undefined };
       } catch (err) {
         return {
@@ -182,7 +183,7 @@ export function createCloudRecordingRepository(
     async uploadPackage(
       pkg: RecordingPackageV1,
       blobs: { media?: Blob; thumbnail?: Blob },
-      options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void },
+      options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void; timeoutMs?: number },
     ): Promise<CloudResult<{ recordingId: string; status: string }>> {
       // 0. 校验：含媒体录制必须提供 media blob，否则会创建与本地包不一致的云端记录
       if (pkg.media && !blobs.media) {
@@ -247,7 +248,7 @@ export function createCloudRecordingRepository(
 
         const assetResult = await repo.uploadAsset(target, blob, () => {
           // 资产级别进度：每个资产完成后累加已上传字节
-        });
+        }, options?.timeoutMs);
         if (!assetResult.ok) return assetResult;
 
         // 资产上传完成，累加进度
@@ -517,10 +518,12 @@ function putBlobWithProgress(
   blob: Blob,
   headers: Record<string, string>,
   onBytes: (uploaded: number) => void,
+  timeoutMs = 30_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
+    xhr.timeout = timeoutMs;
 
     // 设置自定义请求头（由签名 URL 指定）
     for (const [key, value] of Object.entries(headers)) {

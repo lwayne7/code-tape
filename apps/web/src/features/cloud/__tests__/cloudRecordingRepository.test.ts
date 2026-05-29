@@ -608,6 +608,26 @@ describe("CloudRecordingRepository", () => {
       expect(result.error.message).toContain("asset upload failed");
     });
 
+    it("上传超时返回 network-error 并保留超时信息", async () => {
+      const repo = setupRepo();
+      const target = makeUploadTarget("media");
+      const blob = makeBlob("media content");
+
+      const { instance: mockXhr } = createMockXhr();
+      mockXhr.send = vi.fn(function (this: MockXhr) {
+        queueMicrotask(() => {
+          if (this.ontimeout) this.ontimeout();
+        });
+      });
+      vi.spyOn(globalThis, "XMLHttpRequest").mockImplementation(() => mockXhr);
+
+      const result = await repo.uploadAsset(target, blob, undefined, 100);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("network-error");
+      expect(result.error.message).toContain("timed out");
+    });
+
     it("上传失败不影响调用方继续本地播放（repository 不抛异常）", async () => {
       const repo = setupRepo();
       const target = makeUploadTarget("events");

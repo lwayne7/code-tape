@@ -161,11 +161,12 @@ export type CloudRecordingRepository = {
     input: CreateUploadSessionRequest,
   ): Promise<CloudResult<CreateUploadSessionResponse>>;
 
-  /** 通过 HTTP PUT 上传单个资产到签名 URL，支持进度回调 */
+  /** 通过 HTTP PUT 上传单个资产到签名 URL，支持进度回调与超时 */
   uploadAsset(
     target: UploadTarget,
     blob: Blob,
     onProgress?: (progress: UploadProgress) => void,
+    timeoutMs?: number,
   ): Promise<CloudResult<void>>;
 
   /** 通知服务端全部资产已上传完毕，触发校验 */
@@ -181,7 +182,7 @@ export type CloudRecordingRepository = {
   uploadPackage(
     pkg: import("@code-tape/recording-schema").RecordingPackageV1,
     blobs: { media?: Blob; thumbnail?: Blob },
-    options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void },
+    options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void; timeoutMs?: number },
   ): Promise<CloudResult<{ recordingId: string; status: string }>>;
 
   /** 查询录制详情与当前状态（uploading/processing/ready/failed） */
