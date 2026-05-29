@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:33:33Z",
+  "updatedAt": "2026-05-29T15:38:41Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         156,
-        157
+        157,
+        158
       ],
       "completedIssues": [
         11,
@@ -775,6 +776,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:17:18Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "158": {
+      "number": 158,
+      "title": "[P1] 云端播放页接入",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T15:38:41Z",
       "closedAt": null,
       "mergedPr": null
     }
