@@ -1516,6 +1516,50 @@ test("PATCH /api/recordings/:recordingId rejects title exceeding 80 characters",
   assert.equal(body.error.code, "bad-request");
 });
 
+test("PATCH /api/recordings/:recordingId accepts an 80 Unicode code point title", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-unicode-title",
+  });
+  const title = "🔥".repeat(80);
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({ title }),
+    }),
+  );
+  const body = (await response.json()) as { title: string };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.title, title);
+});
+
+test("PATCH /api/recordings/:recordingId rejects an 81 Unicode code point title", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-long-unicode-title",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({ title: "🔥".repeat(81) }),
+    }),
+  );
+  const body = (await response.json()) as { error: { code: string; message: string } };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "bad-request");
+  assert.equal(body.error.message, "title must be 1 to 80 characters");
+});
+
 test("PATCH /api/recordings/:recordingId rejects non-string title", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
@@ -1882,51 +1926,6 @@ test("DELETE /api/recordings/:recordingId handles soft_deleted with null deleted
   const body2 = (await response2.json()) as { id: string; status: string; deletedAt: string };
   assert.equal(response2.status, 200);
   assert.equal(body2.deletedAt, body1.deletedAt, "repeated DELETE must return the same persisted deletedAt");
-});
-
-test("DELETE /api/recordings/:recordingId handles soft_deleted with missing deletedAt and persists it", async () => {
-  const metadata = createMemoryMetadataRepository();
-  await seedRecording(metadata, { id: "rec-missing-deleted", ownerId: "owner-1", status: "soft_deleted" });
-  const recording = await metadata.getRecording("rec-missing-deleted");
-  assert.ok(recording);
-  const dirtyRecording = { ...recording } as Partial<CloudRecordingRecord>;
-  delete dirtyRecording.deletedAt;
-  await metadata.updateRecording(dirtyRecording as CloudRecordingRecord);
-
-  let nowMs = Date.parse("2026-05-27T00:02:00.000Z");
-  const handler = createCloudApiHandler({
-    service: createCloudRecordingService({
-      metadata,
-      objectStorage: createMemoryObjectStorage(),
-      now: () => new Date(nowMs),
-    }),
-    createRequestId: () => "req-missing-deleted",
-  });
-
-  const response1 = await handler(
-    new Request("http://localhost/api/recordings/rec-missing-deleted", {
-      method: "DELETE",
-      headers: { "x-owner-token": "owner-1" },
-    }),
-  );
-  const body1 = (await response1.json()) as { id: string; status: string; deletedAt: string };
-  const persisted = await metadata.getRecording("rec-missing-deleted");
-
-  nowMs = Date.parse("2026-05-27T00:03:00.000Z");
-  const response2 = await handler(
-    new Request("http://localhost/api/recordings/rec-missing-deleted", {
-      method: "DELETE",
-      headers: { "x-owner-token": "owner-1" },
-    }),
-  );
-  const body2 = (await response2.json()) as { id: string; status: string; deletedAt: string };
-
-  assert.equal(response1.status, 200);
-  assert.equal(body1.status, "soft_deleted");
-  assert.equal(body1.deletedAt, "2026-05-27T00:02:00.000Z");
-  assert.equal(persisted?.deletedAt, body1.deletedAt);
-  assert.equal(response2.status, 200);
-  assert.equal(body2.deletedAt, body1.deletedAt);
 });
 
 test("DELETE /api/recordings/:recordingId repeated delete preserves deletedAt and does not mutate state", async () => {

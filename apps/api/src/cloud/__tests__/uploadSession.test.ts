@@ -536,12 +536,16 @@ test("completeUpload returns not-found when delete wins the mark-complete race",
     input: { uploadedAssets: request.assets },
   });
   const recording = await metadata.getRecording(created.value.recordingId);
+  const session = await metadata.getSession(created.value.sessionId);
+  const assets = await metadata.listAssets(created.value.recordingId);
 
   assert.equal(completed.ok, false);
   if (completed.ok) return;
   assert.equal(completed.error.code, "not-found");
   assert.equal(recording?.status, "soft_deleted");
   assert.equal(recording?.deletedAt, "2026-05-27T00:02:00.000Z");
+  assert.equal(session?.status, "open");
+  assert.ok(assets.every((asset) => asset.uploadedAt === null));
 });
 
 for (const terminalStatus of ["purging", "deleted"] as const) {
@@ -584,11 +588,15 @@ for (const terminalStatus of ["purging", "deleted"] as const) {
       input: { uploadedAssets: request.assets },
     });
     const recording = await metadata.getRecording(created.value.recordingId);
+    const session = await metadata.getSession(created.value.sessionId);
+    const assets = await metadata.listAssets(created.value.recordingId);
 
     assert.equal(completed.ok, false);
     if (completed.ok) return;
     assert.equal(completed.error.code, "not-found");
     assert.equal(recording?.status, terminalStatus);
+    assert.equal(session?.status, "open");
+    assert.ok(assets.every((asset) => asset.uploadedAt === null));
   });
 }
 
@@ -711,6 +719,120 @@ for (const terminalStatus of ["purging", "deleted"] as const) {
     assert.equal(recording?.status, terminalStatus);
   });
 }
+
+test("delete returns the persisted deletedAt when dirty soft-delete repair loses the conditional write race", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const baseService = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await baseService.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const recording = await metadata.getRecording(created.value.recordingId);
+  assert.ok(recording);
+  await metadata.updateRecording({
+    ...recording,
+    status: "soft_deleted",
+    deletedAt: null,
+    updatedAt: "2026-05-27T00:05:00.000Z",
+  });
+
+  const persistedDeletedAt = "2026-05-27T00:06:00.000Z";
+  let repairBeforeWrite = true;
+  const wrappedMetadata = {
+    ...metadata,
+    async updateRecordingIfStatus(input: Parameters<typeof metadata.updateRecordingIfStatus>[0]) {
+      if (repairBeforeWrite && input.expectedStatus === "soft_deleted" && input.patch.deletedAt) {
+        repairBeforeWrite = false;
+        const current = await metadata.getRecording(input.recordingId);
+        assert.ok(current);
+        const repaired = { ...current, deletedAt: persistedDeletedAt };
+        await metadata.updateRecording(repaired);
+        return { status: "status-mismatch" as const, current: repaired };
+      }
+      return metadata.updateRecordingIfStatus(input);
+    },
+  };
+  const service = createCloudRecordingService({
+    metadata: wrappedMetadata,
+    objectStorage,
+    now: () => new Date("2026-05-27T00:07:00.000Z"),
+  });
+
+  const deleted = await service.deleteRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+  });
+  const persisted = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(deleted.ok, true);
+  if (!deleted.ok) return;
+  assert.equal(deleted.value.deletedAt, persistedDeletedAt);
+  assert.equal(persisted?.deletedAt, persistedDeletedAt);
+});
+
+test("delete returns the persisted deletedAt when a concurrent soft-delete wins the delete write race", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const baseService = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await baseService.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const persistedDeletedAt = "2026-05-27T00:08:00.000Z";
+  let softDeleteBeforeWrite = true;
+  let repairBeforeWrite = true;
+  const wrappedMetadata = {
+    ...metadata,
+    async updateRecordingIfStatus(input: Parameters<typeof metadata.updateRecordingIfStatus>[0]) {
+      if (
+        softDeleteBeforeWrite &&
+        input.expectedStatus === "uploading" &&
+        input.patch.status === "soft_deleted"
+      ) {
+        softDeleteBeforeWrite = false;
+        const current = await metadata.getRecording(input.recordingId);
+        assert.ok(current);
+        const dirtyDeleted = {
+          ...current,
+          status: "soft_deleted" as const,
+          deletedAt: null,
+          updatedAt: "2026-05-27T00:08:00.000Z",
+        };
+        await metadata.updateRecording(dirtyDeleted);
+        return { status: "status-mismatch" as const, current: dirtyDeleted };
+      }
+      if (repairBeforeWrite && input.expectedStatus === "soft_deleted" && input.patch.deletedAt) {
+        repairBeforeWrite = false;
+        const current = await metadata.getRecording(input.recordingId);
+        assert.ok(current);
+        const repaired = { ...current, deletedAt: persistedDeletedAt };
+        await metadata.updateRecording(repaired);
+        return { status: "status-mismatch" as const, current: repaired };
+      }
+      return metadata.updateRecordingIfStatus(input);
+    },
+  };
+  const service = createCloudRecordingService({
+    metadata: wrappedMetadata,
+    objectStorage,
+    now: () => new Date("2026-05-27T00:09:00.000Z"),
+  });
+
+  const deleted = await service.deleteRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+  });
+  const persisted = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(deleted.ok, true);
+  if (!deleted.ok) return;
+  assert.equal(deleted.value.deletedAt, persistedDeletedAt);
+  assert.equal(persisted?.deletedAt, persistedDeletedAt);
+});
 
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];

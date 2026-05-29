@@ -293,13 +293,14 @@ export function createCloudRecordingService(deps: {
       // Idempotent: if already soft_deleted by this owner, return current state.
       // If deletedAt is missing (dirty data), generate and persist it now.
       if (recording.status === "soft_deleted") {
-        const deletedAt = recording.deletedAt ?? now().toISOString();
-        if (recording.deletedAt == null) {
-          await deps.metadata.updateRecordingIfStatus({
-            recordingId,
-            expectedStatus: "soft_deleted",
-            patch: { deletedAt },
-          });
+        const deletedAt = await ensureSoftDeleteTimestamp({
+          metadata: deps.metadata,
+          ownerId,
+          recording,
+          fallbackDeletedAt: now().toISOString(),
+        });
+        if (!deletedAt) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
         }
         return {
           ok: true,
@@ -340,13 +341,14 @@ export function createCloudRecordingService(deps: {
           return { ok: false, error: { code: "not-found", message: "recording not found" } };
         }
         if (latest.status === "soft_deleted") {
-          const latestDeletedAt = latest.deletedAt ?? deletedAt;
-          if (latest.deletedAt == null) {
-            await deps.metadata.updateRecordingIfStatus({
-              recordingId,
-              expectedStatus: "soft_deleted",
-              patch: { deletedAt: latestDeletedAt },
-            });
+          const latestDeletedAt = await ensureSoftDeleteTimestamp({
+            metadata: deps.metadata,
+            ownerId,
+            recording: latest,
+            fallbackDeletedAt: deletedAt,
+          });
+          if (!latestDeletedAt) {
+            return { ok: false, error: { code: "not-found", message: "recording not found" } };
           }
           return {
             ok: true,
@@ -472,6 +474,32 @@ async function updateOwnerVisibleRecordingPatch(input: {
     }
     current = latest;
   }
+}
+
+async function ensureSoftDeleteTimestamp(input: {
+  metadata: MetadataRepository;
+  ownerId: string;
+  recording: CloudRecordingRecord;
+  fallbackDeletedAt: string;
+}): Promise<string | null> {
+  let current = input.recording;
+  while (current.deletedAt == null) {
+    const write = await input.metadata.updateRecordingIfStatus({
+      recordingId: current.id,
+      expectedStatus: "soft_deleted",
+      patch: { deletedAt: input.fallbackDeletedAt },
+    });
+    if (write.status === "updated") {
+      return write.recording.deletedAt;
+    }
+
+    const latest = write.current;
+    if (!latest || latest.ownerId !== input.ownerId || latest.status !== "soft_deleted") {
+      return null;
+    }
+    current = latest;
+  }
+  return current.deletedAt;
 }
 
 async function resolveExistingUploadSession(input: {
@@ -608,7 +636,8 @@ function validateRenameTitle(title: unknown): CloudApiError | null {
     return { code: "bad-request", message: "title must be a string" };
   }
   const trimmed = title.trim();
-  if (trimmed.length < 1 || trimmed.length > MAX_RECORDING_TITLE_LENGTH) {
+  const titleLength = Array.from(trimmed).length;
+  if (titleLength < 1 || titleLength > MAX_RECORDING_TITLE_LENGTH) {
     return {
       code: "bad-request",
       message: `title must be 1 to ${MAX_RECORDING_TITLE_LENGTH} characters`,

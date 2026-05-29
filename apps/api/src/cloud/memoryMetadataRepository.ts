@@ -77,19 +77,18 @@ export function createMemoryMetadataRepository(): MetadataRepository {
     }): Promise<void> {
       const session = sessions.get(input.sessionId);
       if (!session) return;
+      const recording = recordings.get(session.recordingId);
+      if (recording?.status !== "uploading") return;
       sessions.set(input.sessionId, {
         ...session,
         status: "completed",
         completedAt: input.completedAt,
       });
-      const recording = recordings.get(session.recordingId);
-      if (recording?.status === "uploading") {
-        recordings.set(recording.id, {
-          ...recording,
-          status: "processing",
-          updatedAt: input.completedAt,
-        });
-      }
+      recordings.set(recording.id, {
+        ...recording,
+        status: "processing",
+        updatedAt: input.completedAt,
+      });
       const assets = assetsByRecording.get(session.recordingId) ?? [];
       assetsByRecording.set(
         session.recordingId,
