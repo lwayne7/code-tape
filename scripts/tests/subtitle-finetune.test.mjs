@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   buildTrainingRecord,
   buildDistillationMessages,
+  readPromptSegments,
   validateSubtitleDistillationExample,
   validateSubtitleTrainingRecord,
   validateSubtitleTeacherResult,
@@ -229,10 +230,49 @@ test('builds deterministic teacher distillation messages without secrets', () =>
   assert.equal(messages[0].role, 'system');
   assert.match(messages[0].content, /只输出 JSON/);
   assert.match(messages[0].content, /Goal: correct ASR subtitle text/u);
+  assert.doesNotMatch(messages[0].content, /corrected text/u);
   assert.match(messages[1].content, /Counter\.tsx/);
   assert.match(messages[1].content, /subtitle-1/);
+  assert.match(messages[1].content, /"inputSegments"/u);
+  assert.match(messages[1].content, /"timeline"/u);
+  assert.doesNotMatch(messages[1].content, /"segments"/u);
   assert.doesNotMatch(messages[1].content, /"language"/u);
   assert.doesNotMatch(JSON.stringify(messages), new RegExp(`${'h'}${'f'}_|${'s'}${'k'}-`, 'u'));
+});
+
+test('subtitle scripts reuse the canonical prompt segment reader', () => {
+  const payload = {
+    inputSegments: [{ id: 'subtitle-1', text: '继续讲 use state' }],
+    timeline: [{ id: 'subtitle-1', startMs: 0, endMs: 1200 }],
+  };
+
+  assert.deepEqual(readPromptSegments(payload), [
+    { id: 'subtitle-1', text: '继续讲 use state', startMs: 0, endMs: 1200 },
+  ]);
+
+  for (const path of [
+    'scripts/subtitle-llm/evaluate-corpus.mjs',
+    'scripts/subtitle-llm/augment-corpus.mjs',
+  ]) {
+    const source = readFileSync(path, 'utf8');
+    assert.doesNotMatch(source, /function readPromptSegments/u);
+    assert.match(source, /readPromptSegments/u);
+  }
+});
+
+test('curated subtitle stability topics live outside the augmentation script', () => {
+  const dataPath = 'ml/subtitle-postprocessor/data/stability-topics.json';
+  const scriptSource = readFileSync('scripts/subtitle-llm/augment-corpus.mjs', 'utf8');
+  const data = JSON.parse(readFileSync(dataPath, 'utf8'));
+
+  assert.ok(Array.isArray(data.stabilityTopics));
+  assert.ok(Array.isArray(data.correctionTopics));
+  assert.ok(data.stabilityTopics.length >= 10);
+  assert.ok(data.correctionTopics.length >= 10);
+  assert.doesNotMatch(scriptSource, /const STABILITY_TOPICS = \[/u);
+  assert.doesNotMatch(scriptSource, /const CORRECTION_TOPICS = \[/u);
+  assert.doesNotMatch(scriptSource, /index\s*%\s*10/u);
+  assert.match(scriptSource, /stabilityTopics\.length/u);
 });
 
 test('subtitle fine-tuning corpora have enough domain coverage for stable local LLM output', () => {
@@ -240,10 +280,10 @@ test('subtitle fine-tuning corpora have enough domain coverage for stable local 
   const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
   const corpusText = JSON.stringify([...seedExamples, ...distilledRecords]);
 
-  assert.ok(seedExamples.length >= 30, `expected at least 30 seed examples, got ${seedExamples.length}`);
+  assert.ok(seedExamples.length >= 200, `expected at least 200 seed examples, got ${seedExamples.length}`);
   assert.ok(
-    distilledRecords.length >= 30,
-    `expected at least 30 distilled training records, got ${distilledRecords.length}`,
+    distilledRecords.length >= 200,
+    `expected at least 200 distilled training records, got ${distilledRecords.length}`,
   );
   for (const term of [
     'React',
@@ -260,6 +300,22 @@ test('subtitle fine-tuning corpora have enough domain coverage for stable local 
   ]) {
     assert.match(corpusText, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   }
+});
+
+test('subtitle fine-tuning corpus teaches sparse long-track outputs instead of full rewrites', async () => {
+  const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+  const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
+  const metrics = evaluateRecords(distilledRecords);
+
+  assert.ok(metrics.sparseOutputRate >= 0.85, `sparseOutputRate ${metrics.sparseOutputRate}`);
+  assert.ok(metrics.fullSegmentOutputRate <= 0.15, `fullSegmentOutputRate ${metrics.fullSegmentOutputRate}`);
+  assert.ok(
+    metrics.averageOutputSegmentRatio <= 0.3,
+    `averageOutputSegmentRatio ${metrics.averageOutputSegmentRatio}`,
+  );
+  assert.ok(metrics.longTrackRecordRate >= 0.75, `longTrackRecordRate ${metrics.longTrackRecordRate}`);
+  assert.equal(metrics.sparseSegmentReferenceRate, 1);
+  assert.equal(metrics.chapterSignalRate, 1);
 });
 
 function readJsonl(path) {
@@ -325,10 +381,16 @@ test('LoRA training defaults to the browser-targeted SmolLM2 base model', () => 
 test('LoRA training masks loss to assistant JSON tokens', () => {
   const python = [
     'import importlib.util',
+    'import json',
     'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
     'module = importlib.util.module_from_spec(spec)',
     'spec.loader.exec_module(module)',
-    'print("{% generation %}" in module.ASSISTANT_MASK_CHAT_TEMPLATE)',
+    'apply=lambda self,messages,add_generation_prompt=False,tokenize=False: "PROMPT" if add_generation_prompt else "PROMPT{}"',
+    'call=lambda self,text,add_special_tokens=False,return_offsets_mapping=False: {"input_ids": list(range(len(text))), **({"offset_mapping": [(i, i + 1) for i in range(len(text))]} if return_offsets_mapping else {})}',
+    'FakeTokenizer=type("FakeTokenizer", (), {"apply_chat_template": apply, "__call__": call})',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"},{"role":"assistant","content":"{}"}]}',
+    'tokens = module.tokenize_training_record(record, FakeTokenizer(), 128)',
+    'print(json.dumps(tokens["labels"]))',
   ].join('; ');
   const result = spawnSync('python3', ['-c', python], {
     cwd: new URL('../..', import.meta.url),
@@ -336,7 +398,141 @@ test('LoRA training masks loss to assistant JSON tokens', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'True');
+  assert.deepEqual(JSON.parse(result.stdout), [-100, -100, -100, -100, -100, -100, 6, 7]);
+});
+
+test('LoRA training masks labels to assistant JSON without chat template tail tokens', () => {
+  const python = [
+    'import importlib.util',
+    'import json',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[{\\"title\\":\\"片段 1\\",\\"startMs\\":0}]}"',
+    'FULL = PROMPT + ASSISTANT + "</a>"',
+    'class BoundaryMergingTokenizer:',
+    '    def __init__(self):',
+    '        self.id_to_text = {}',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        if text == PROMPT:',
+    '            return {"input_ids": list(range(999))}',
+    '        ids = []',
+    '        offsets = []',
+    '        cursor = 0',
+    '        for index, chunk_size in enumerate([1] * len(text), start=1):',
+    '            start = cursor',
+    '            end = min(len(text), cursor + chunk_size)',
+    '            if start >= end:',
+    '                break',
+    '            ids.append(index)',
+    '            offsets.append((start, end))',
+    '            self.id_to_text[index] = text[start:end]',
+    '            cursor = end',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    '    def decode(self, ids):',
+    '        return "".join(self.id_to_text[token_id] for token_id in ids)',
+    'tokenizer = BoundaryMergingTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'assistant_ids = [token_id for token_id, label in zip(tokens["input_ids"], tokens["labels"]) if label != -100]',
+    'print(tokenizer.decode(assistant_ids))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    '{"segments":[],"chapters":[{"title":"片段 1","startMs":0}]}',
+  );
+});
+
+test('LoRA training keeps tokens that overlap the assistant JSON start boundary', () => {
+  const python = [
+    'import importlib.util',
+    'import json',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>\\n"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[]}"',
+    'FULL = PROMPT + ASSISTANT + "</a>"',
+    'class CrossBoundaryTokenizer:',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        prompt_end = len(PROMPT)',
+    '        offsets = [(0, prompt_end - 1), (prompt_end - 1, prompt_end + 1)]',
+    '        cursor = prompt_end + 1',
+    '        while cursor < len(text):',
+    '            offsets.append((cursor, cursor + 1))',
+    '            cursor += 1',
+    '        ids = list(range(1, len(offsets) + 1))',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    'tokenizer = CrossBoundaryTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'boundary_index = 1',
+    'print(json.dumps({"boundaryId": tokens["input_ids"][boundary_index], "boundaryLabel": tokens["labels"][boundary_index]}))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { boundaryId: 2, boundaryLabel: 2 });
+});
+
+test('LoRA training locates assistant JSON when prompt and full chat templates differ at the boundary', () => {
+  const python = [
+    'import importlib.util',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>\\n"',
+    'FULL_PREFIX = "<s>system\\ns</s><u>payload</u><a>"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[]}"',
+    'FULL = FULL_PREFIX + ASSISTANT + "</a>"',
+    'class BoundaryDriftTokenizer:',
+    '    def __init__(self):',
+    '        self.id_to_text = {}',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        ids = []',
+    '        offsets = []',
+    '        for index, char in enumerate(text, start=1):',
+    '            ids.append(index)',
+    '            offsets.append((index - 1, index))',
+    '            self.id_to_text[index] = char',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    '    def decode(self, ids):',
+    '        return "".join(self.id_to_text[token_id] for token_id in ids)',
+    'tokenizer = BoundaryDriftTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'assistant_ids = [token_id for token_id, label in zip(tokens["input_ids"], tokens["labels"]) if label != -100]',
+    'print(tokenizer.decode(assistant_ids))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '{"segments":[],"chapters":[]}');
 });
 
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
@@ -398,7 +594,58 @@ test('subtitle corpus evaluation applies sparse corrections before scoring gloss
   const metrics = evaluateRecords([record]);
 
   assert.equal(metrics.sparseSegmentReferenceRate, 1);
+  assert.equal(metrics.sparseOutputRate, 1);
+  assert.equal(metrics.fullSegmentOutputRate, 0);
+  assert.equal(metrics.averageOutputSegmentRatio, 0.5);
   assert.equal(metrics.glossaryPreservationRate, 1);
+});
+
+test('subtitle corpus evaluation exposes full-output and long-track stability risks', async () => {
+  const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+  const fullOutputRecord = buildTrainingRecord({
+    example: {
+      ...seedExample,
+      segments: [
+        { id: 'subtitle-1', startMs: 0, endMs: 1000, text: '先看 use state' },
+        { id: 'subtitle-2', startMs: 1000, endMs: 2000, text: '然后 render result' },
+      ],
+    },
+    teacherResult: {
+      segments: [
+        { id: 'subtitle-1', text: '先看 useState' },
+        { id: 'subtitle-2', text: '然后 render result' },
+      ],
+      chapters: [{ title: '状态设计', startMs: 0, endMs: 2000 }],
+    },
+    teacherModel: 'gpt-5.5',
+  });
+  const longSparseRecord = buildTrainingRecord({
+    example: {
+      ...seedExample,
+      segments: Array.from({ length: 8 }, (_, index) => ({
+        id: `subtitle-${index + 1}`,
+        startMs: index * 1000,
+        endMs: index * 1000 + 900,
+        text: index === 5 ? '最后调用 use effect 清理 worker' : `第 ${index + 1} 段不需要修改`,
+      })),
+    },
+    teacherResult: {
+      segments: [{ id: 'subtitle-6', text: '最后调用 useEffect 清理 worker' }],
+      chapters: [
+        { title: '问题分析', startMs: 0, endMs: 3000 },
+        { title: '生命周期清理', startMs: 3000, endMs: 7900 },
+      ],
+    },
+    teacherModel: 'gpt-5.5',
+  });
+
+  const metrics = evaluateRecords([fullOutputRecord, longSparseRecord]);
+
+  assert.equal(metrics.fullSegmentOutputRate, 0.5);
+  assert.equal(metrics.sparseOutputRate, 0.5);
+  assert.equal(metrics.longTrackRecordRate, 0.5);
+  assert.equal(metrics.averageOutputSegmentRatio, 0.5625);
+  assert.equal(metrics.chapterSignalRate, 1);
 });
 
 test('subtitle corpus evaluation does not treat language style as a blocking metric', () => {
@@ -620,6 +867,53 @@ test('LoRA training JSONL validator accepts sparse subtitle corrections', () => 
   }
 });
 
+test('LoRA training JSONL validator accepts inputSegments as the prompt-side subtitle field', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-input-segments-train-'));
+  const fixturePath = join(tempDir, 'train.jsonl');
+  writeFileSync(
+    fixturePath,
+    `${JSON.stringify({
+      messages: [
+        { role: 'system', content: 'Only output JSON.' },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            inputSegments: [
+              { id: 'subtitle-1', text: '继续讲 use state' },
+            ],
+            timeline: [
+              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
+            ],
+          }),
+        },
+        {
+          role: 'assistant',
+          content: JSON.stringify({
+            segments: [{ id: 'subtitle-1', text: '继续讲 useState' }],
+            chapters: [{ title: '状态设计', startMs: 0, endMs: 1200 }],
+          }),
+        },
+      ],
+    })}\n`,
+  );
+  const result = spawnSync(
+    'python3',
+    [
+      '-c',
+      [
+        'import importlib.util',
+        'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+        'module = importlib.util.module_from_spec(spec)',
+        'spec.loader.exec_module(module)',
+        `module.validate_train_jsonl(${JSON.stringify(fixturePath)})`,
+      ].join(';'),
+    ],
+    { cwd: new URL('../..', import.meta.url), encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('dataset validator rejects empty JSONL input', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-empty-dataset-'));
   const fixturePath = join(tempDir, 'empty.jsonl');
@@ -633,6 +927,48 @@ test('dataset validator rejects empty JSONL input', () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /must contain at least one subtitle fine-tuning record/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('LoRA training JSONL validator rejects non-object inputSegments entries', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-bad-input-segments-train-'));
+  const fixturePath = join(tempDir, 'train.jsonl');
+  writeFileSync(
+    fixturePath,
+    `${JSON.stringify({
+      messages: [
+        { role: 'system', content: 'Only output JSON.' },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            inputSegments: [
+              { id: 'subtitle-1', text: '继续讲 use state' },
+              'bad-segment',
+            ],
+            timeline: [
+              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
+              { id: 'subtitle-2', startMs: 1200, endMs: 2400 },
+            ],
+          }),
+        },
+        {
+          role: 'assistant',
+          content: JSON.stringify({
+            segments: [{ id: 'subtitle-1', text: '继续讲 useState' }],
+            chapters: [{ title: '状态设计', startMs: 0, endMs: 1200 }],
+          }),
+        },
+      ],
+    })}\n`,
+  );
+
+  try {
+    const result = runTrainingValidation(fixturePath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /user segments\[1\] must be an object/);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

@@ -9,12 +9,13 @@ import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 256;
+const BASE_MAX_NEW_TOKENS = 128;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
-const MAX_DYNAMIC_NEW_TOKENS = 1_024;
-const NEW_TOKENS_PER_SEGMENT = 6;
-const CHAPTER_OUTPUT_TOKEN_RESERVE = 192;
-const MAX_REPAIR_OUTPUT_CHARS = 1_000;
+const MAX_DYNAMIC_NEW_TOKENS = 768;
+const NEW_TOKENS_PER_SEGMENT = 5;
+const CHAPTER_OUTPUT_TOKEN_RESERVE = 96;
+const MAX_REPAIR_OUTPUT_CHARS = 2_000;
+const ASCII_TERM_PRESERVATION_RATIO = 0.75;
 const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
 You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
 ' }}{% endif %}{{'<|im_start|>' + message['role'] + '
@@ -37,6 +38,7 @@ type TextGenerationPipeline = (
   options: {
     max_new_tokens: number;
     do_sample: boolean;
+    repetition_penalty: number;
     return_full_text: boolean;
     chat_template?: string;
   },
@@ -70,11 +72,9 @@ export function createHuggingFaceSubtitlePostProcessor(
   options: HuggingFaceSubtitlePostProcessorOptions = {},
 ): SubtitlePostProcessor {
   const model = options.model ?? DEFAULT_POSTPROCESSOR_MODEL;
+  // Keep the cold-start path to the single validated browser target; final load errors are wrapped below.
   const pipelineOptions: TextGenerationPipelineOptions[] = [
-    { device: "webgpu", dtype: "q4f16" },
-    { device: "webgpu", dtype: "q4" },
     { device: "wasm", dtype: "q8" },
-    { device: "wasm", dtype: "q4" },
   ];
   let pipelinePromise: Promise<TextGenerationPipeline> | null = null;
   const getPipeline = () => {
@@ -103,6 +103,7 @@ export function createHuggingFaceSubtitlePostProcessor(
       const output = await pipeline(buildSubtitlePostProcessorMessages(input), {
         max_new_tokens: maxNewTokens,
         do_sample: false,
+        repetition_penalty: 1.05,
         return_full_text: false,
         ...buildChatTemplateOption(model),
       });
@@ -115,19 +116,30 @@ export function createHuggingFaceSubtitlePostProcessor(
         );
       } catch (error) {
         if (!isRecoverableJsonOutputError(error)) throw error;
+        const recovered = recoverSubtitleCorrectionResult(generatedText, input.track);
+        if (recovered) return recovered;
       }
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
       const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
         max_new_tokens: maxNewTokens,
         do_sample: false,
+        repetition_penalty: 1.05,
         return_full_text: false,
         ...buildChatTemplateOption(model),
       });
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      return constrainCorrectionToTrack(
-        extractSubtitleCorrectionResult(readGeneratedText(retryOutput)),
-        input.track,
-      );
+      const retryGeneratedText = readGeneratedText(retryOutput);
+      try {
+        return constrainCorrectionToTrack(
+          extractSubtitleCorrectionResult(retryGeneratedText),
+          input.track,
+        );
+      } catch (error) {
+        if (!isRecoverableJsonOutputError(error)) throw error;
+        const recovered = recoverSubtitleCorrectionResult(retryGeneratedText, input.track);
+        if (recovered) return recovered;
+        throw error;
+      }
     },
   };
 }
@@ -148,12 +160,26 @@ async function loadPipelineWithFallback({
         : await loadDefaultPipeline("text-generation", model, options);
     } catch (error) {
       const hasNextOption = index < pipelineOptions.length - 1;
-      if (!hasNextOption || !isRecoverableModelLoadError(error, options)) {
-        throw error;
+      if (!hasNextOption) {
+        throw buildModelLoadError(error, options);
+      }
+      if (!isRecoverableModelLoadError(error, options)) {
+        throw buildModelLoadError(error, options);
       }
     }
   }
   throw new Error("本地字幕 LLM 模型加载失败");
+}
+
+function buildModelLoadError(error: unknown, options: TextGenerationPipelineOptions): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(
+    `当前浏览器无法加载本地字幕 LLM 模型（${options.device}/${options.dtype}）。请关闭其他占用内存的页面、升级浏览器后重试，或稍后再运行字幕纠错。原始错误：${detail}`,
+  );
+  if (error instanceof Error) {
+    (wrapped as Error & { cause?: unknown }).cause = error;
+  }
+  return wrapped;
 }
 
 function isRecoverableModelLoadError(
@@ -210,39 +236,9 @@ export function buildSubtitlePostProcessorPrompt({
   track: SubtitleTrack;
   context?: SubtitlePostProcessorContext;
 }): string {
-  const payload = {
-    language: context?.language ?? track.language ?? "unknown",
-    fileName: context?.fileName ?? null,
-    code: budgetPromptText(context?.code ?? "", MAX_PROMPT_CODE_CHARS),
-    runtimeOutput: budgetPromptText(
-      context?.runtimeOutput ?? "",
-      MAX_PROMPT_RUNTIME_OUTPUT_CHARS,
-    ),
-    glossary: context?.glossary ?? [],
-    segments: track.segments.map((segment) => ({
-      id: segment.id,
-      startMs: segment.startMs,
-      endMs: segment.endMs,
-      text: segment.text,
-    })),
-  };
-
-  return [
-    "你是 code-tape 的字幕后处理模型。",
-    "任务：修正 ASR 字幕里的前端领域术语、变量名、函数名、组件名和中英混合文本，并基于字幕内容生成章节跳转点。",
-    "规则：",
-    "- 只输出 JSON，不要输出解释、Markdown 或额外文本。",
-    "- 修正前端术语、变量名、函数名、组件名和明显的 ASR 误识别。",
-    "- segments 只返回需要修改的 segments；不需要修改的字幕段请省略，应用会保留原文。",
-    "- segments 只能引用输入中已有的 id，不能改 startMs/endMs。",
-    "- chapters 必须按时间递增、互不重叠，标题要短，适合回放导航。",
-    "- chapters 必须位于输入字幕时间轴内，不能在最后一个字幕 endMs 之后创建章节。",
-    "- 无法可靠生成章节时也必须输出 chapters: []。",
-    "输出 JSON 结构：",
-    '{"segments":[{"id":"subtitle-1","text":"修正后的文本"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
-    "输入：",
-    JSON.stringify(payload),
-  ].join("\n");
+  return buildSubtitlePostProcessorMessages({ track, context })
+    .map((message) => message.content)
+    .join("\n");
 }
 
 export function buildSubtitlePostProcessorMessages(
@@ -258,13 +254,14 @@ export function buildSubtitlePostProcessorMessages(
       role: "system",
       content: [
         "You are the code-tape subtitle post-processing model.",
-        "Only output one JSON object. Do not output Markdown, explanations, prefixes, suffixes, or code fences. 只输出 JSON。",
         "Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.",
-        "For speed, output only changed subtitle segments in segments. Omit unchanged segments; the app keeps their original text.",
+        "Input subtitle rows are in inputSegments.",
+        "Timeline rows are in timeline.",
+        "Only output JSON with segments and chapters. Do not output Markdown or explanations. 只输出 JSON。",
+        "For speed, output only changed subtitle segments in segments. Omit unchanged segments.",
+        "Each returned segment must contain only id and text.",
         "Generate short playback chapter jump points from subtitle content and timestamps.",
-        "Chapters must stay inside the input subtitle timeline. Do not create chapters at or after the final segment endMs.",
-        'Output shape: {"segments":[{"id":"subtitle-1","text":"corrected text"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
-        "The response must start with { and end with }.",
+        'Output shape example: {"segments":[{"id":"subtitle-1","text":"这里用 useState 维护 count"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
       ].join("\n"),
     },
     {
@@ -275,15 +272,14 @@ export function buildSubtitlePostProcessorMessages(
   if (options.previousOutput !== undefined) {
     messages.push(
       {
-        role: "assistant",
-        content: budgetPromptText(options.previousOutput, MAX_REPAIR_OUTPUT_CHARS),
-      },
-      {
         role: "user",
         content: [
-          "Previous output did not contain a parseable JSON object.",
-          "Output exactly one JSON object with segments and chapters arrays.",
+          "Previous output failed JSON parsing or validation.",
+          "Regenerate from scratch; do not continue, patch, or explain the previous output.",
+          "Output exactly one complete JSON object with segments and chapters arrays.",
           "No explanations, Markdown, code fences, or text outside JSON.",
+          "Previous output excerpt:",
+          budgetPromptText(readRepairOutputExcerpt(options.previousOutput), MAX_REPAIR_OUTPUT_CHARS),
         ].join("\n"),
       },
     );
@@ -308,11 +304,14 @@ function buildSubtitlePostProcessorPayload({
       ),
       glossary: context?.glossary ?? [],
     },
-    segments: track.segments.map((segment) => ({
+    inputSegments: track.segments.map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+    })),
+    timeline: track.segments.map((segment) => ({
       id: segment.id,
       startMs: segment.startMs,
       endMs: segment.endMs,
-      text: segment.text,
     })),
   };
 }
@@ -334,9 +333,21 @@ function budgetPromptText(text: string, maxChars: number): string {
   return `${text.slice(0, headChars)}${marker}${text.slice(text.length - tailChars)}`;
 }
 
+function readRepairOutputExcerpt(previousOutput: string): string {
+  try {
+    return extractJsonObjectText(previousOutput);
+  } catch {
+    return previousOutput;
+  }
+}
+
 function isRecoverableJsonOutputError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return error.message.startsWith("LLM 输出");
+  return (
+    error.message.startsWith("LLM 输出") ||
+    error.message.startsWith("LLM segments") ||
+    error.message.startsWith("LLM chapters")
+  );
 }
 
 export function extractSubtitleCorrectionResult(text: string): SubtitleCorrectionResult {
@@ -365,18 +376,224 @@ function constrainCorrectionToTrack(
   correction: SubtitleCorrectionResult,
   track: SubtitleTrack,
 ): SubtitleCorrectionResult {
+  return {
+    ...correction,
+    segments: constrainCorrectionSegments(correction.segments, track),
+    chapters: constrainCorrectionChaptersToTrack(correction.chapters ?? [], track),
+  };
+}
+
+function constrainCorrectionChaptersToTrack(
+  chapters: NonNullable<SubtitleCorrectionResult["chapters"]>,
+  track: SubtitleTrack,
+): NonNullable<SubtitleCorrectionResult["chapters"]> {
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
-  const chapters = (correction.chapters ?? [])
+  const timelineState = {
+    previousEndMs: Number.NEGATIVE_INFINITY,
+    seenTimelines: new Set<string>(),
+  };
+  return chapters
     .filter((chapter) => chapter.startMs < subtitleEndMs)
     .filter((chapter) => !chapter.title.includes("\uFFFD"))
     .map((chapter) => ({
       ...chapter,
       ...(typeof chapter.endMs === "number"
         ? { endMs: Math.min(chapter.endMs, subtitleEndMs) }
-        : {}),
+      : {}),
     }))
-    .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
-  return { ...correction, chapters };
+    .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs)
+    .sort((left, right) => left.startMs - right.startMs)
+    .filter((chapter) => keepOrderedUniqueChapterTimeline(chapter, timelineState));
+}
+
+function keepOrderedUniqueChapterTimeline(
+  chapter: NonNullable<SubtitleCorrectionResult["chapters"]>[number],
+  state: { previousEndMs: number; seenTimelines: Set<string> },
+): boolean {
+  if (chapter.startMs < state.previousEndMs) return false;
+  const key = `${chapter.startMs}:${chapter.endMs ?? ""}`;
+  if (state.seenTimelines.has(key)) return false;
+  state.seenTimelines.add(key);
+  state.previousEndMs = chapter.endMs ?? chapter.startMs;
+  return true;
+}
+
+function constrainCorrectionSegments(
+  segments: SubtitleCorrectionResult["segments"],
+  track: SubtitleTrack,
+): SubtitleCorrectionResult["segments"] {
+  const sourceTextById = new Map(track.segments.map((segment) => [segment.id, segment.text]));
+  const seenSegmentIds = new Set<string>();
+  return segments.filter((segment) => {
+    const sourceText = sourceTextById.get(segment.id);
+    if (sourceText === undefined) return dropCorrectionSegment(segment.id, "unknown-segment");
+    if (seenSegmentIds.has(segment.id)) return dropCorrectionSegment(segment.id, "duplicate-segment");
+    if (!segment.text.trim()) return dropCorrectionSegment(segment.id, "empty-text");
+    if (segment.text.includes("\uFFFD")) return dropCorrectionSegment(segment.id, "replacement-character");
+    if (!isPlausibleTextCorrection(sourceText, segment.text)) {
+      return dropCorrectionSegment(segment.id, "implausible-text");
+    }
+    seenSegmentIds.add(segment.id);
+    return true;
+  });
+}
+
+function dropCorrectionSegment(segmentId: string, reason: string): false {
+  console.debug("[code-tape] dropped subtitle correction", { segmentId, reason });
+  return false;
+}
+
+function recoverSubtitleCorrectionResult(
+  text: string,
+  track: SubtitleTrack,
+): SubtitleCorrectionResult | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(extractJsonObjectText(text));
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(value)) return null;
+  if (!Array.isArray(value.segments) || !Array.isArray(value.chapters)) return null;
+
+  const segments = constrainCorrectionSegments(readLooseCorrectionSegments(value.segments), track);
+  const chapters = readLooseCorrectionChapters(value);
+  return constrainCorrectionToTrack(
+    {
+      segments,
+      chapters,
+    },
+    track,
+  );
+}
+
+function readLooseCorrectionSegments(segments: unknown[]): SubtitleCorrectionResult["segments"] {
+  return segments.flatMap((segment, index) => {
+    try {
+      return [normalizeSegment(segment, index)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function readLooseCorrectionChapters(
+  value: Record<string, unknown>,
+): NonNullable<SubtitleCorrectionResult["chapters"]> {
+  if (Array.isArray(value.chapters)) {
+    return value.chapters.flatMap((chapter, index) => {
+      try {
+        return [normalizeChapter(chapter, index)];
+      } catch {
+        return [];
+      }
+    });
+  }
+  return [];
+}
+
+function isPlausibleTextCorrection(sourceText: string, correctedText: string): boolean {
+  const sourceTerms = extractAsciiTerms(sourceText);
+  if (sourceTerms.length > 0) {
+    const preservedTerms = countPreservedAsciiTerms(sourceTerms, correctedText);
+    const requiredPreservedTerms = Math.ceil(sourceTerms.length * ASCII_TERM_PRESERVATION_RATIO);
+    return preservedTerms >= requiredPreservedTerms;
+  }
+
+  const sourceChars = extractCjkChars(sourceText);
+  if (sourceChars.length === 0) return true;
+  const correctedChars = new Set(extractCjkChars(correctedText));
+  const sharedChars = sourceChars.filter((char) => correctedChars.has(char)).length;
+  return sharedChars / sourceChars.length >= 0.35;
+}
+
+function extractAsciiTerms(text: string): string[] {
+  return [...new Set(text.match(/[a-z][a-z0-9_.$-]*/giu)?.map(normalizeAsciiText) ?? [])]
+    .filter((term) => term.length >= 2);
+}
+
+function countPreservedAsciiTerms(sourceTerms: string[], correctedText: string): number {
+  const corrected = normalizeAsciiText(correctedText);
+  const correctedTerms = extractAsciiTerms(correctedText);
+  const preservedIndexes = new Set<number>();
+
+  sourceTerms.forEach((sourceTerm, index) => {
+    if (corrected.includes(sourceTerm)) {
+      preservedIndexes.add(index);
+      return;
+    }
+    if (hasNearCodeTerm(sourceTerm, correctedTerms)) {
+      preservedIndexes.add(index);
+    }
+  });
+
+  for (const fusedSourceTerm of buildFusedSourceTerms(sourceTerms)) {
+    if (!hasNearCodeTerm(fusedSourceTerm.term, correctedTerms)) continue;
+    for (let index = fusedSourceTerm.start; index < fusedSourceTerm.end; index += 1) {
+      preservedIndexes.add(index);
+    }
+  }
+
+  return preservedIndexes.size;
+}
+
+function buildFusedSourceTerms(sourceTerms: string[]): Array<{ term: string; start: number; end: number }> {
+  const terms: Array<{ term: string; start: number; end: number }> = [];
+  const seen = new Set<string>();
+  for (let start = 0; start < sourceTerms.length; start += 1) {
+    for (let end = start + 2; end <= sourceTerms.length; end += 1) {
+      const term = sourceTerms.slice(start, end).join("");
+      if (seen.has(term)) continue;
+      seen.add(term);
+      terms.push({ term, start, end });
+    }
+  }
+  return terms;
+}
+
+function hasNearCodeTerm(sourceTerm: string, correctedTerms: string[]): boolean {
+  return correctedTerms.some(
+    (correctedTerm) =>
+      correctedTerm !== sourceTerm &&
+      !correctedTerm.includes(sourceTerm) &&
+      isNearCodeTerm(sourceTerm, correctedTerm),
+  );
+}
+
+function isNearCodeTerm(sourceTerm: string, correctedTerm: string): boolean {
+  if (sourceTerm.length < 4 || correctedTerm.length < 3) return false;
+  const maxDistance = Math.max(2, Math.floor(Math.max(sourceTerm.length, correctedTerm.length) * 0.2));
+  return levenshteinDistanceWithin(sourceTerm, correctedTerm, maxDistance);
+}
+
+function levenshteinDistanceWithin(left: string, right: string, maxDistance: number): boolean {
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = current[0] ?? leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const distance = Math.min(
+        (previous[rightIndex] ?? 0) + 1,
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + substitutionCost,
+      );
+      current[rightIndex] = distance;
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maxDistance) return false;
+    previous = current;
+  }
+  return (previous[right.length] ?? Number.POSITIVE_INFINITY) <= maxDistance;
+}
+
+function normalizeAsciiText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9_.$-]/gu, "");
+}
+
+function extractCjkChars(text: string): string[] {
+  return text.match(/\p{Script=Han}/gu) ?? [];
 }
 
 async function loadDefaultPipeline(
