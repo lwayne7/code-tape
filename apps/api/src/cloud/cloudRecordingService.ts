@@ -181,19 +181,13 @@ export function createCloudRecordingService(deps: {
       if (session.ownerId !== ownerId) {
         return { ok: false, error: { code: "forbidden", message: "upload session owner mismatch" } };
       }
-      // Guard: if recording was soft-deleted, refuse to complete/revive it
-      const currentRecording = await deps.metadata.getRecording(session.recordingId);
-      if (currentRecording?.status === "soft_deleted") {
+      const recording = await deps.metadata.getRecording(session.recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
       if (session.status === "completed") {
-        if (!currentRecording || currentRecording.ownerId !== ownerId || !isOwnerVisibleStatus(currentRecording.status)) {
-          return { ok: false, error: { code: "not-found", message: "recording not found" } };
-        }
         const status =
-          currentRecording.status === "ready" || currentRecording.status === "failed"
-            ? currentRecording.status
-            : "processing";
+          recording.status === "ready" || recording.status === "failed" ? recording.status : "processing";
         return { ok: true, value: { recordingId: session.recordingId, status } };
       }
       if (session.status !== "open") {
@@ -211,10 +205,6 @@ export function createCloudRecordingService(deps: {
       const assets = await deps.metadata.listAssets(session.recordingId);
       const conflict = findCompleteConflict(assets, input);
       if (conflict) return { ok: false, error: conflict };
-      const recording = await deps.metadata.getRecording(session.recordingId);
-      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
-        return { ok: false, error: { code: "not-found", message: "recording not found" } };
-      }
       const completedAt = now().toISOString();
       await deps.metadata.markUploadCompleted({
         sessionId,
@@ -286,7 +276,7 @@ export function createCloudRecordingService(deps: {
       // If deletedAt is missing (dirty data), generate and persist it now.
       if (recording.status === "soft_deleted") {
         const deletedAt = recording.deletedAt ?? now().toISOString();
-        if (recording.deletedAt === null) {
+        if (recording.deletedAt == null) {
           const repaired: CloudRecordingRecord = { ...recording, deletedAt };
           await deps.metadata.updateRecording(repaired);
         }
