@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T18:50:06Z",
+  "updatedAt": "2026-05-29T18:56:21Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        175
+        175,
+        177
       ],
       "completedIssues": [
         11,
@@ -915,6 +916,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T18:41:13Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "177": {
+      "number": 177,
+      "title": "[P1+ WebRTC] 候选人 events DataChannel 创建与生命周期",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T18:56:21Z",
       "closedAt": null,
       "mergedPr": null
     }
