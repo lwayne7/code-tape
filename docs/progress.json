@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T16:35:38Z",
+  "updatedAt": "2026-05-29T16:44:20Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         162,
-        164
+        164,
+        166
       ],
       "completedIssues": [
         11,
@@ -819,6 +820,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T16:20:56Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "166": {
+      "number": 166,
+      "title": "[P1] 云端回放中心页面入口与本地上传",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T16:44:20Z",
       "closedAt": null,
       "mergedPr": null
     }
