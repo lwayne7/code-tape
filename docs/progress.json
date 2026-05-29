@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:12:23Z",
+  "updatedAt": "2026-05-29T15:14:07Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        147
+        147,
+        156
       ],
       "completedIssues": [
         11,
@@ -747,6 +748,20 @@
       "claimedAt": "2026-05-29T14:42:50Z",
       "closedAt": "2026-05-29T15:11:00Z",
       "mergedPr": 154
+    },
+    "156": {
+      "number": 156,
+      "title": "[P1+ WebRTC] 候选人面试入口 UI Shell",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T15:14:07Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
