@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T01:40:45Z",
+  "updatedAt": "2026-05-29T01:48:46Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 120,
       "completedIssues": [
         11,
         10,
@@ -535,6 +535,20 @@
       "claimedAt": "2026-05-28T07:49:02Z",
       "closedAt": "2026-05-28T09:03:34Z",
       "mergedPr": 109
+    },
+    "120": {
+      "number": 120,
+      "title": "[Epic] P1+ WebRTC 实时面试模式总控",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T01:48:46Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
