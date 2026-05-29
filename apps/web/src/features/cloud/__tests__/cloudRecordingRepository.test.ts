@@ -20,7 +20,9 @@ import type {
   UploadTarget,
   UploadProgress,
   CloudRecordingDetail,
+  CloudRecordingDetailResponse,
   CloudRecordingListItem,
+  ListRecordingsResponse,
 } from "../types";
 import { createCloudRecordingRepository } from "../cloudRecordingRepository";
 
@@ -190,20 +192,44 @@ function makeDetail(overrides: Partial<CloudRecordingDetail> = {}): CloudRecordi
   };
 }
 
+/** 构造一份 GET /api/recordings/:id 响应 envelope */
+function makeDetailResponse(
+  overrides: Partial<CloudRecordingDetail> = {},
+): CloudRecordingDetailResponse {
+  return {
+    recording: makeDetail(overrides),
+    assets: [
+      {
+        kind: "manifest",
+        sizeBytes: 256,
+        mimeType: "application/json",
+        validatedAt: "2026-05-29T00:00:01.000Z",
+      },
+    ],
+  };
+}
+
 /** 构造一份 CloudRecordingListItem 测试数据 */
 function makeListItem(overrides: Partial<CloudRecordingListItem> = {}): CloudRecordingListItem {
   return {
     id: "rec_1",
     title: "Test Recording",
     createdAt: "2026-05-29T00:00:00.000Z",
-    updatedAt: "2026-05-29T00:00:00.000Z",
     durationMs: 5000,
     initialLanguage: "javascript",
     hasAudio: true,
     hasCamera: true,
-    status: "ready",
+    thumbnailUrl: null,
+    visibility: "private",
     ...overrides,
   };
+}
+
+function makeListResponse(
+  items: CloudRecordingListItem[] = [makeListItem()],
+  nextCursor: string | null = null,
+): ListRecordingsResponse {
+  return { items, nextCursor };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -486,19 +512,23 @@ describe("CloudRecordingRepository", () => {
   describe("get", () => {
     it("返回 processing 状态的录制详情", async () => {
       const repo = setupRepo();
-      mockFetch(200, makeDetail({ status: "processing" }));
+      mockFetch(200, makeDetailResponse({ status: "processing" }));
 
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.status).toBe("processing");
-      expect(result.value.id).toBe("rec_1");
-      expect(result.value.hasAudio).toBe(true);
+      expect(result.value.recording.status).toBe("processing");
+      expect(result.value.recording.id).toBe("rec_1");
+      expect(result.value.recording.hasAudio).toBe(true);
+      expect(result.value.assets[0]).toMatchObject({
+        kind: "manifest",
+        mimeType: "application/json",
+      });
     });
 
     it("worker 校验通过后返回 ready 状态", async () => {
       const repo = setupRepo();
-      mockFetch(200, makeDetail({
+      mockFetch(200, makeDetailResponse({
         status: "ready",
         eventCount: 10,
         snapshotCount: 2,
@@ -507,12 +537,12 @@ describe("CloudRecordingRepository", () => {
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.status).toBe("ready");
+      expect(result.value.recording.status).toBe("ready");
     });
 
     it("校验失败返回 failed 状态及 failureCode", async () => {
       const repo = setupRepo();
-      mockFetch(200, makeDetail({
+      mockFetch(200, makeDetailResponse({
         status: "failed",
         failureCode: "checksum-mismatch",
         failureMessage: "media checksum does not match",
@@ -521,9 +551,9 @@ describe("CloudRecordingRepository", () => {
       const result = await repo.get("rec_1");
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.status).toBe("failed");
-      expect(result.value.failureCode).toBe("checksum-mismatch");
-      expect(result.value.failureMessage).toBe("media checksum does not match");
+      expect(result.value.recording.status).toBe("failed");
+      expect(result.value.recording.failureCode).toBe("checksum-mismatch");
+      expect(result.value.recording.failureMessage).toBe("media checksum does not match");
     });
 
     it("录制不存在返回 not-found", async () => {
@@ -546,34 +576,51 @@ describe("CloudRecordingRepository", () => {
   describe("list", () => {
     it("返回当前 owner 的 ready 录制列表", async () => {
       const repo = setupRepo();
-      mockFetch(200, [makeListItem()]);
+      mockFetch(200, makeListResponse());
 
       const result = await repo.list();
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value).toHaveLength(1);
-      expect(result.value[0].id).toBe("rec_1");
-      expect(result.value[0].status).toBe("ready");
+      expect(result.value.items).toHaveLength(1);
+      expect(result.value.nextCursor).toBe(null);
+      expect(result.value.items[0].id).toBe("rec_1");
+      expect(result.value.items[0].thumbnailUrl).toBe(null);
+      expect(result.value.items[0].visibility).toBe("private");
+    });
+
+    it("支持按 cursor/limit 请求分页列表", async () => {
+      const repo = setupRepo();
+      mockFetch(200, makeListResponse([makeListItem({ id: "rec_1" })], "rec_1"));
+
+      const result = await repo.list({ cursor: "prev_rec", limit: 1 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.items.map((item) => item.id)).toEqual(["rec_1"]);
+      expect(result.value.nextCursor).toBe("rec_1");
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings?cursor=prev_rec&limit=1",
+        expect.objectContaining({ method: "GET" }),
+      );
     });
 
     it("不同 owner 数据隔离（不同 token 查询到不同列表）", async () => {
       const repo1 = setupRepo();
-      mockFetch(200, [makeListItem({ id: "rec_a", title: "A" })]);
+      mockFetch(200, makeListResponse([makeListItem({ id: "rec_a", title: "A" })]));
 
       const result1 = await repo1.list();
       expect(result1.ok).toBe(true);
       if (!result1.ok) throw new Error("expected ok");
-      expect(result1.value).toHaveLength(1);
+      expect(result1.value.items).toHaveLength(1);
 
       // 换一个 token（模拟不同 owner） → 空列表
       localStorage.removeItem("code-tape-cloud-owner-token");
       const repo2 = createCloudRecordingRepository();
 
-      mockFetch(200, []);
+      mockFetch(200, makeListResponse([]));
       const result2 = await repo2.list();
       expect(result2.ok).toBe(true);
       if (!result2.ok) throw new Error("expected ok");
-      expect(result2.value).toHaveLength(0);
+      expect(result2.value.items).toHaveLength(0);
     });
   });
 
@@ -711,18 +758,18 @@ describe("CloudRecordingRepository", () => {
       expect(completeResult.value.status).toBe("processing");
 
       // 4. get → processing
-      mockFetch(200, makeDetail({ id: recordingId, status: "processing" }));
+      mockFetch(200, makeDetailResponse({ id: recordingId, status: "processing" }));
       const detail1 = await repo.get(recordingId);
       expect(detail1.ok).toBe(true);
       if (!detail1.ok) throw new Error("expected ok");
-      expect(detail1.value.status).toBe("processing");
+      expect(detail1.value.recording.status).toBe("processing");
 
       // 5. get → ready
-      mockFetch(200, makeDetail({ id: recordingId, status: "ready" }));
+      mockFetch(200, makeDetailResponse({ id: recordingId, status: "ready" }));
       const detail2 = await repo.get(recordingId);
       expect(detail2.ok).toBe(true);
       if (!detail2.ok) throw new Error("expected ok");
-      expect(detail2.value.status).toBe("ready");
+      expect(detail2.value.recording.status).toBe("ready");
     });
   });
 
@@ -994,25 +1041,25 @@ describe("CloudRecordingRepository", () => {
       const repo = setupRepo();
 
       // 前两次返回 processing，第三次返回 ready
-      mockFetch(200, makeDetail({ status: "processing" }));
-      mockFetch(200, makeDetail({ status: "processing" }));
-      mockFetch(200, makeDetail({ status: "ready", eventCount: 10 }));
+      mockFetch(200, makeDetailResponse({ status: "processing" }));
+      mockFetch(200, makeDetailResponse({ status: "processing" }));
+      mockFetch(200, makeDetailResponse({ status: "ready", eventCount: 10 }));
 
       const result = await repo.pollUntilReady("rec_1", { intervalMs: 10 });
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.status).toBe("ready");
+      expect(result.value.recording.status).toBe("ready");
     }, 5000);
 
     it("变为 failed 时立即返回", async () => {
       const repo = setupRepo();
-      mockFetch(200, makeDetail({ status: "failed", failureCode: "checksum-mismatch" }));
+      mockFetch(200, makeDetailResponse({ status: "failed", failureCode: "checksum-mismatch" }));
 
       const result = await repo.pollUntilReady("rec_1", { intervalMs: 10 });
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
-      expect(result.value.status).toBe("failed");
-      expect(result.value.failureCode).toBe("checksum-mismatch");
+      expect(result.value.recording.status).toBe("failed");
+      expect(result.value.recording.failureCode).toBe("checksum-mismatch");
     }, 5000);
 
     it("get 调用失败时立即返回错误", async () => {
@@ -1030,7 +1077,7 @@ describe("CloudRecordingRepository", () => {
 
       // 一直返回 processing（足够多次以覆盖 timeoutMs 内的所有轮询）
       for (let i = 0; i < 20; i++) {
-        mockFetch(200, makeDetail({ status: "processing" }));
+        mockFetch(200, makeDetailResponse({ status: "processing" }));
       }
 
       const result = await repo.pollUntilReady("rec_1", { intervalMs: 10, timeoutMs: 50 });

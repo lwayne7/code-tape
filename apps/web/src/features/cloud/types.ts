@@ -123,14 +123,23 @@ export type CloudRecordingListItem = {
   title: string;
   durationMs: number;
   createdAt: string;
+  initialLanguage: RecordingLanguage;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  thumbnailUrl: string | null;
+  visibility: "private" | "unlisted";
+};
+
+export type CloudRecordingDetail = {
+  id: string;
+  title: string;
+  durationMs: number;
+  createdAt: string;
   updatedAt: string;
   initialLanguage: RecordingLanguage;
   hasAudio: boolean;
   hasCamera: boolean;
   status: CloudRecordingStatus;
-};
-
-export type CloudRecordingDetail = CloudRecordingListItem & {
   localPackageId: string;
   schemaVersion: RecordingSchemaVersion;
   visibility: "private" | "unlisted";
@@ -140,6 +149,28 @@ export type CloudRecordingDetail = CloudRecordingListItem & {
   snapshotCount: number | null;
   failureCode: CloudApiErrorCode | null;
   failureMessage: string | null;
+};
+
+export type CloudRecordingAssetSummary = {
+  kind: RecordingAssetKind;
+  sizeBytes: number;
+  mimeType: string;
+  validatedAt: string | null;
+};
+
+export type CloudRecordingDetailResponse = {
+  recording: CloudRecordingDetail;
+  assets: CloudRecordingAssetSummary[];
+};
+
+export type ListRecordingsInput = {
+  cursor?: string;
+  limit?: number;
+};
+
+export type ListRecordingsResponse = {
+  items: CloudRecordingListItem[];
+  nextCursor: string | null;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -190,7 +221,7 @@ export type CloudRecordingRepository = {
   ): Promise<CloudResult<{ recordingId: string; status: string }>>;
 
   /** 查询录制详情与当前状态（uploading/processing/ready/failed） */
-  get(recordingId: string): Promise<CloudResult<CloudRecordingDetail>>;
+  get(recordingId: string): Promise<CloudResult<CloudRecordingDetailResponse>>;
 
   /**
    * 轮询录制状态直到 ready / failed / timeout。
@@ -199,10 +230,10 @@ export type CloudRecordingRepository = {
   pollUntilReady(
     recordingId: string,
     options?: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<CloudResult<CloudRecordingDetail>>;
+  ): Promise<CloudResult<CloudRecordingDetailResponse>>;
 
   /** 查询当前 owner 的 ready 录制列表 */
-  list(): Promise<CloudResult<CloudRecordingListItem[]>>;
+  list(input?: ListRecordingsInput): Promise<CloudResult<ListRecordingsResponse>>;
 
   /** 获取当前持久化的 owner token */
   getOwnerToken(): string;

@@ -24,12 +24,13 @@ import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash"
 import type {
   CloudRecordingRepository,
   CloudResult,
-  CloudRecordingDetail,
-  CloudRecordingListItem,
+  CloudRecordingDetailResponse,
   CompleteUploadSessionRequest,
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  ListRecordingsInput,
+  ListRecordingsResponse,
   UploadProgress,
   UploadTarget,
   CloudApiError,
@@ -148,7 +149,7 @@ export function createCloudRecordingRepository(
     },
 
     // ── 查询录制详情 ──────────────────────────────────────
-    async get(recordingId: string): Promise<CloudResult<CloudRecordingDetail>> {
+    async get(recordingId: string): Promise<CloudResult<CloudRecordingDetailResponse>> {
       const token = repo.getOwnerToken();
       try {
         const response = await fetch(
@@ -158,24 +159,25 @@ export function createCloudRecordingRepository(
             headers: { "x-owner-token": token },
           },
         );
-        return handleJsonResponse<CloudRecordingDetail>(response);
+        return handleJsonResponse<CloudRecordingDetailResponse>(response);
       } catch (err) {
         return { ok: false, error: networkError("get recording failed", err) };
       }
     },
 
     // ── 查询录制列表 ──────────────────────────────────────
-    async list(): Promise<CloudResult<CloudRecordingListItem[]>> {
+    async list(input: ListRecordingsInput = {}): Promise<CloudResult<ListRecordingsResponse>> {
       const token = repo.getOwnerToken();
+      const query = buildListQuery(input);
       try {
         const response = await fetch(
-          `${apiBase}/api/recordings`,
+          `${apiBase}/api/recordings${query}`,
           {
             method: "GET",
             headers: { "x-owner-token": token },
           },
         );
-        return handleJsonResponse<CloudRecordingListItem[]>(response);
+        return handleJsonResponse<ListRecordingsResponse>(response);
       } catch (err) {
         return { ok: false, error: networkError("list recordings failed", err) };
       }
@@ -294,7 +296,7 @@ export function createCloudRecordingRepository(
     async pollUntilReady(
       recordingId: string,
       options?: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal },
-    ): Promise<CloudResult<CloudRecordingDetail>> {
+    ): Promise<CloudResult<CloudRecordingDetailResponse>> {
       const intervalMs = options?.intervalMs ?? 3000;
       const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
       const signal = options?.signal;
@@ -311,7 +313,7 @@ export function createCloudRecordingRepository(
         const result = await repo.get(recordingId);
         if (!result.ok) return result;
 
-        const { status } = result.value;
+        const { status } = result.value.recording;
         if (status === "ready") {
           return result;
         }
@@ -351,6 +353,14 @@ export function createCloudRecordingRepository(
   };
 
   return repo;
+}
+
+function buildListQuery(input: ListRecordingsInput): string {
+  const params = new URLSearchParams();
+  if (input.cursor) params.set("cursor", input.cursor);
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 // ─────────────────────────────────────────────────────────────
