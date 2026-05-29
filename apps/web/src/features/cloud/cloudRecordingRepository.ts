@@ -68,6 +68,7 @@ export function createCloudRecordingRepository(
   options: CloudRecordingRepositoryOptions = {},
 ): CloudRecordingRepository {
   const apiBase = options.apiBase ?? DEFAULT_API_BASE;
+  let inMemoryOwnerToken: string | null = null;
 
   const repo: CloudRecordingRepository = {
     // ── 创建上传会话 ──────────────────────────────────────
@@ -183,6 +184,17 @@ export function createCloudRecordingRepository(
       blobs: { media?: Blob; thumbnail?: Blob },
       options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void },
     ): Promise<CloudResult<{ recordingId: string; status: string }>> {
+      // 0. 校验：含媒体录制必须提供 media blob，否则会创建与本地包不一致的云端记录
+      if (pkg.media && !blobs.media) {
+        return {
+          ok: false,
+          error: {
+            code: "network-error",
+            message: "Recording package has media but no media blob was provided",
+          },
+        };
+      }
+
       const onProgress = options?.onProgress;
       const idempotencyKey = options?.idempotencyKey ?? pkg.manifest.packageId;
 
@@ -310,9 +322,17 @@ export function createCloudRecordingRepository(
 
     // ── owner token 管理 ──────────────────────────────────
     getOwnerToken(): string {
+      // 1. 优先从 localStorage 读取
       const existing = readOwnerToken();
-      if (existing) return existing;
+      if (existing) {
+        inMemoryOwnerToken = existing;
+        return existing;
+      }
+      // 2. localStorage 不可用时复用实例内缓存的 token
+      if (inMemoryOwnerToken) return inMemoryOwnerToken;
+      // 3. 生成新 token 并同时写入内存和尝试持久化
       const token = generateOwnerToken();
+      inMemoryOwnerToken = token;
       persistOwnerToken(token);
       return token;
     },

@@ -302,6 +302,22 @@ describe("CloudRecordingRepository", () => {
       expect(second).toBe(first);
     });
 
+    it("localStorage 不可用时同一 repo 实例多次调用返回同一 token", () => {
+      // 模拟 localStorage 完全不可用
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("localStorage disabled");
+      });
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("localStorage disabled");
+      });
+
+      const repo = createCloudRecordingRepository();
+      const first = repo.getOwnerToken();
+      const second = repo.getOwnerToken();
+      expect(second).toBe(first);
+      expect(first).toMatch(/^[a-f0-9]{64}$/);
+    });
+
     it("不同 repository 实例共享同一持久化 token", () => {
       const repo1 = setupRepo();
       const token = repo1.getOwnerToken();
@@ -758,6 +774,21 @@ describe("CloudRecordingRepository", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
       expect(result.value.status).toBe("processing");
+    });
+
+    it("含媒体 package 缺少 media blob 时不调用 create session，并返回可展示错误", async () => {
+      const repo = setupRepo();
+      const fetchSpy = vi.mocked(fetch);
+
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      const result = await repo.uploadPackage(pkg, {});
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("network-error");
+      expect(result.error.message).toContain("media blob");
+      // 不应调用 fetch（即没有创建 session）
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it("create session 失败时透传错误", async () => {
