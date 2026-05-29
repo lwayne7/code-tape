@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T11:51:59Z",
+  "updatedAt": "2026-05-29T11:58:37Z",
   "students": {
     "ceilf6": {
       "activeIssue": 135,
@@ -32,13 +32,14 @@
         77,
         95,
         97,
-        118
+        118,
+        119
       ],
       "bugPenalties": [],
       "developmentScore": 36,
-      "reviewScore": 5,
+      "reviewScore": 5.75,
       "penaltyScore": 0,
-      "totalScore": 41,
+      "totalScore": 41.75,
       "activeIssues": [
         135,
         133,
@@ -143,16 +144,18 @@
       "totalScore": 2.25
     },
     "lwayne7": {
-      "activeIssue": 119,
+      "activeIssue": null,
       "completedIssues": [
-        97
+        97,
+        119
       ],
       "reviewedIssues": [],
       "bugPenalties": [],
-      "developmentScore": 1.5,
+      "developmentScore": 3.75,
       "reviewScore": 0,
       "penaltyScore": 0,
-      "totalScore": 1.5
+      "totalScore": 3.75,
+      "activeIssues": []
     }
   },
   "issues": {
@@ -584,11 +587,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "lwayne7",
       "claimedAt": "2026-05-29T01:57:04Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T11:58:37Z",
+      "mergedPr": 124
     },
     "126": {
       "number": 126,
@@ -1129,6 +1132,18 @@
       "developerDelta": 2.25,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T11:48:16Z"
+    },
+    {
+      "id": "pr-124-merge",
+      "type": "feature_merge",
+      "issue": 119,
+      "pr": 124,
+      "score": 3,
+      "developer": "lwayne7",
+      "reviewer": "ceilf6",
+      "developerDelta": 2.25,
+      "reviewerDelta": 0.75,
+      "createdAt": "2026-05-29T11:58:37Z"
     }
   ]
 }
