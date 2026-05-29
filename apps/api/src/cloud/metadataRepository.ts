@@ -32,6 +32,10 @@ export type MetadataRepository = {
     uploadedAssetKinds: string[];
   }): Promise<void>;
   findNextProcessingRecording(): Promise<CloudRecordingRecord | null>;
+  listRecordingsByOwner(
+    ownerId: string,
+    input: { cursor?: string; limit?: number },
+  ): Promise<{ items: CloudRecordingRecord[]; nextCursor: string | null }>;
   updateRecording(recording: CloudRecordingRecord): Promise<void>;
   updateAsset(asset: CloudRecordingAssetRecord): Promise<void>;
 };

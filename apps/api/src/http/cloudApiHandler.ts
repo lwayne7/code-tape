@@ -114,6 +114,42 @@ export function createCloudApiHandler(deps: {
       return jsonResponse(result.value, 200, requestId);
     }
 
+    // GET /api/recordings/:id — 查询录制详情与状态
+    const detailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
+    if (request.method === "GET" && detailMatch) {
+      const recordingId = detailMatch[1]!;
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const result = await deps.service.getRecording(ownerId, recordingId);
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
+    // GET /api/recordings — 查询录制列表
+    if (request.method === "GET" && url.pathname === "/api/recordings") {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      const limitRaw = url.searchParams.get("limit");
+      const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
+      if (limitRaw && (isNaN(limit as number) || (limit as number) < 1 || (limit as number) > 100)) {
+        return jsonError({ code: "bad-request", message: "invalid limit", requestId }, requestId);
+      }
+      const result = await deps.service.listRecordings(ownerId, { cursor, limit });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
     return jsonError({ code: "not-found", message: "route not found", requestId }, requestId);
   };
 }
