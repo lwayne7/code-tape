@@ -25,6 +25,7 @@ export type TransformersModuleLoaderOptions = {
 
 const DEFAULT_IMPORT_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
+const VITE_PRELOAD_ERROR_EVENT = "vite:preloadError";
 
 export async function loadTransformersModule(
   options: TransformersModuleLoaderOptions = {},
@@ -35,7 +36,9 @@ export async function loadTransformersModule(
     try {
       return await importer();
     } catch (error) {
-      if (attempt >= attempts || !isRecoverableTransformersImportError(error)) {
+      const recoverable = isRecoverableTransformersImportError(error);
+      if (attempt >= attempts || !recoverable) {
+        if (recoverable) requestStaleTransformersImportRecovery(error);
         throw error;
       }
       options.onRetry?.(error, attempt);
@@ -84,11 +87,31 @@ export function configureQuietBrowserCache(env: TransformersEnvironment | undefi
   };
 }
 
-function isRecoverableTransformersImportError(error: unknown): boolean {
+export function requestStaleTransformersImportRecovery(error: unknown): boolean {
+  if (!isStaleTransformersChunkImportError(error)) return false;
+  dispatchStaleChunkRecoveryEvent(error);
+  return true;
+}
+
+export function isRecoverableTransformersImportError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Load failed|NetworkError|Failed to fetch/iu.test(
     message,
   );
+}
+
+export function isStaleTransformersChunkImportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading chunk [\w-]+ failed/iu.test(
+    message,
+  );
+}
+
+function dispatchStaleChunkRecoveryEvent(error: unknown): void {
+  if (typeof Event === "undefined" || typeof globalThis.dispatchEvent !== "function") return;
+  const event = new Event(VITE_PRELOAD_ERROR_EVENT, { cancelable: true });
+  Object.defineProperty(event, "payload", { value: error });
+  globalThis.dispatchEvent(event);
 }
 
 async function defaultTransformersImporter(): Promise<TransformersModule> {
