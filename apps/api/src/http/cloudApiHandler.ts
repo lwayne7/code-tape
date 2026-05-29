@@ -184,8 +184,8 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function badRequestError(): CloudApiError {
-  return { code: "bad-request", message: "request body must be a valid JSON object" };
+function badRequestError(message = "request body must be a valid JSON object"): CloudApiError {
+  return { code: "bad-request", message };
 }
 
 function parseListRecordingsQuery(
@@ -323,11 +323,11 @@ function parseRenameRecordingRequest(
 ): CloudResult<RenameRecordingRequest> {
   for (const key of Object.keys(value)) {
     if (!RENAME_TOP_KEYS.has(key)) {
-      return { ok: false, error: badRequestError() };
+      return { ok: false, error: badRequestError(`unknown field: ${key}`) };
     }
   }
   if (!isString(value.title)) {
-    return { ok: false, error: badRequestError() };
+    return { ok: false, error: badRequestError("title must be a string") };
   }
   return { ok: true, value: { title: value.title } };
 }

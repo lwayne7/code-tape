@@ -1352,6 +1352,35 @@ test("PATCH /api/recordings/:recordingId rejects non-string title", async () => 
   assert.equal(body.error.code, "bad-request");
 });
 
+test("PATCH /api/recordings/:recordingId reports non-string title with a specific error", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-bad-title-message",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({ title: 123 }),
+    }),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, {
+    error: {
+      code: "bad-request",
+      message: "title must be a string",
+      requestId: "req-bad-title-message",
+    },
+  });
+});
+
 test("PATCH /api/recordings/:recordingId rejects extra fields in body", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
@@ -1371,6 +1400,35 @@ test("PATCH /api/recordings/:recordingId rejects extra fields in body", async ()
 
   assert.equal(response.status, 400);
   assert.equal(body.error.code, "bad-request");
+});
+
+test("PATCH /api/recordings/:recordingId reports unknown fields with a specific error", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-extra-message",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({ title: "New Title", extra: "field" }),
+    }),
+  );
+  const body = (await response.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, {
+    error: {
+      code: "bad-request",
+      message: "unknown field: extra",
+      requestId: "req-extra-message",
+    },
+  });
 });
 
 test("PATCH /api/recordings/:recordingId returns 404 for non-owner", async () => {
