@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:14:07Z",
+  "updatedAt": "2026-05-29T15:17:18Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         147,
-        156
+        156,
+        157
       ],
       "completedIssues": [
         11,
@@ -760,6 +761,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:14:07Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "157": {
+      "number": 157,
+      "title": "[P1] AI 字幕长轨分块后处理，降低本地 LLM JSON 与 segment 引用失败",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T15:17:18Z",
       "closedAt": null,
       "mergedPr": null
     }
