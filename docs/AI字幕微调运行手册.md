@@ -20,7 +20,11 @@
 5. 训练 student：使用小型 instruct 模型做 LoRA，评估 JSON 合法率、术语准确率、稀疏 segment 合法性和章节边界误差。
 6. 发布公开模型：将 adapter 或合并后的模型发布到 Hugging Face，再导出 Transformers.js 兼容 ONNX。
 
-seed 样本和 distilled SFT 样本不能只覆盖少数 happy path。当前仓库用测试约束两类 corpus 都至少 30 条，并要求覆盖 React、TypeScript、Vite、Playwright、Vitest、Web Worker、WebGPU/WASM、IndexedDB、repo-guard、SubtitlePanel 和章节生成等 code-tape 场景，避免小模型只学到固定样例格式。
+seed 样本和 distilled SFT 样本不能只覆盖少数 happy path。当前仓库用测试约束两类 corpus 都至少 200 条，并要求覆盖 React、TypeScript、Vite、Playwright、Vitest、Web Worker、WebGPU/WASM、IndexedDB、repo-guard、SubtitlePanel 和章节生成等 code-tape 场景，避免小模型只学到固定样例格式。
+
+为了降低浏览器本地推理等待，语料默认教模型输出稀疏 `segments`：只有需要修改的字幕段才进入 assistant JSON，未返回的字幕段由应用层保留原文。`npm run subtitle:evaluate` 会阻止训练集回到“每个 segment 全量重写”的模式，当前硬门槛是 `sparseOutputRate >= 0.85`、`fullSegmentOutputRate <= 0.15`、`averageOutputSegmentRatio <= 0.3`、`longTrackRecordRate >= 0.75`。
+
+训练 prompt 侧的原始字幕字段使用 `inputSegments`，assistant 输出字段才使用 `segments`。不要把输入和输出都命名为 `segments`，否则小模型容易复制输入里的 `startMs/endMs/text` schema，导致浏览器端出现缺少 `text`、未知字段或 JSON 截断。
 
 ## 本地命令
 
@@ -81,7 +85,7 @@ npm run subtitle:evaluate
 
 - `ceilf6/code-tape-subtitle-postprocessor-onnx`
 
-前端接入时只改公开模型 ID，不传任何 token。默认公开模型优先加载 WebGPU `q4f16`，再回退 WebGPU `q4`、WASM `q8` / `q4`；若 ONNX Runtime Web 遇到量化权重缺少 scale 等兼容问题，应继续降级或保留原始 ASR 字幕，不能在前端吞异常后展示“已纠错”。
+前端接入时只改公开模型 ID，不传任何 token。v12 默认只发布并加载通过本地 Transformers.js smoke test 的 WASM `q8` ONNX 资产；`q4f16` / `q4` 产物在输出稳定性通过同等 smoke test 前不得放回默认加载优先级。若 ONNX Runtime Web 遇到量化权重缺少 scale 等兼容问题，应保留原始 ASR 字幕，不能在前端吞异常后展示“已纠错”。
 
 合并 LoRA adapter 后发布完整模型：
 

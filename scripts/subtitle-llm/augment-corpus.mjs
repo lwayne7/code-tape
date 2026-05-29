@@ -1,0 +1,649 @@
+#!/usr/bin/env node
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
+import {
+  buildTrainingRecord,
+  validateSubtitleDistillationExample,
+  validateSubtitleTeacherResult,
+} from './schema.mjs';
+
+const SEED_PATH = 'ml/subtitle-postprocessor/data/seed_examples.jsonl';
+const DISTILLED_PATH = 'ml/subtitle-postprocessor/data/generated/distilled.jsonl';
+const CURATED_PREFIX = 'stability-sparse-';
+const CURATED_TEACHER_MODEL = 'curated-stability-v1';
+
+async function main() {
+  const existingSeedExamples = parseJsonl(await readFile(SEED_PATH, 'utf8'), SEED_PATH).filter(
+    (example) => !String(example.id).startsWith(CURATED_PREFIX),
+  );
+  const existingTrainingRecords = parseJsonl(await readFile(DISTILLED_PATH, 'utf8'), DISTILLED_PATH).filter(
+    (record) => !String(record.metadata?.id).startsWith(CURATED_PREFIX),
+  ).map(normalizeTrainingRecordPrompt);
+  const curatedExamples = buildCuratedExamples();
+  const curatedTrainingRecords = curatedExamples.map(({ teacherResult, ...example }) =>
+    buildTrainingRecord({
+      example: validateSubtitleDistillationExample(example),
+      teacherResult: validateSubtitleTeacherResult(teacherResult, example),
+      teacherModel: CURATED_TEACHER_MODEL,
+    }),
+  );
+
+  await mkdir(dirname(DISTILLED_PATH), { recursive: true });
+  await writeJsonl(SEED_PATH, [...existingSeedExamples, ...curatedExamples.map(({ teacherResult: _teacherResult, ...example }) => example)]);
+  await writeJsonl(DISTILLED_PATH, [...existingTrainingRecords, ...curatedTrainingRecords]);
+  console.log(
+    `Wrote ${existingSeedExamples.length + curatedExamples.length} seed examples and ${
+      existingTrainingRecords.length + curatedTrainingRecords.length
+    } training records`,
+  );
+}
+
+function normalizeTrainingRecordPrompt(record) {
+  const userPayload = JSON.parse(record.messages[1].content);
+  const teacherResult = JSON.parse(record.messages[2].content);
+  const example = {
+    id: record.metadata?.id ?? 'existing-subtitle-record',
+    language: userPayload.language,
+    context: userPayload.context ?? {},
+    segments: readPromptSegments(userPayload),
+  };
+  return buildTrainingRecord({
+    example: validateSubtitleDistillationExample(example),
+    teacherResult: validateSubtitleTeacherResult(teacherResult, example),
+    teacherModel: record.metadata?.teacherModel ?? 'existing-normalized',
+  });
+}
+
+function readPromptSegments(payload) {
+  if (Array.isArray(payload.inputSegments) && Array.isArray(payload.timeline)) {
+    const timelineById = new Map(payload.timeline.map((item) => [item.id, item]));
+    return payload.inputSegments.map((segment) => ({
+      ...segment,
+      startMs: timelineById.get(segment.id)?.startMs,
+      endMs: timelineById.get(segment.id)?.endMs,
+    }));
+  }
+  return payload.inputSegments ?? payload.segments;
+}
+
+function buildCuratedExamples() {
+  return STABILITY_TOPICS.map((topic, topicIndex) => {
+    const start = topic.nonContiguousIds ? 11 : 1;
+    const step = topic.nonContiguousIds ? 3 : 1;
+    const segments = topic.segments.map((text, index) => ({
+      id: `subtitle-${start + index * step}`,
+      startMs: index * 1_200,
+      endMs: index * 1_200 + 1_000,
+      text,
+    }));
+    const correctedSegments = topic.corrections.map(([segmentIndex, text]) => ({
+      id: segments[segmentIndex].id,
+      text,
+    }));
+    const chapters = topic.chapters.map(([title, startIndex, endIndex]) => ({
+      title,
+      startMs: segments[startIndex].startMs,
+      endMs:
+        endIndex >= segments.length - 1
+          ? segments[endIndex].endMs
+          : segments[endIndex].startMs,
+    }));
+    return {
+      id: `${CURATED_PREFIX}${String(topicIndex + 1).padStart(3, '0')}`,
+      language: 'zh-CN',
+      context: {
+        fileName: topic.fileName,
+        code: topic.code,
+        runtimeOutput: topic.runtimeOutput ?? '',
+        glossary: topic.glossary,
+      },
+      segments,
+      teacherResult: {
+        segments: correctedSegments,
+        chapters,
+      },
+    };
+  });
+}
+
+const STABILITY_TOPICS = [
+  topic({
+    fileName: 'SubtitlePanel.tsx',
+    code: 'const result = applySubtitleCorrection(track, correction, { durationMs }); setChapters(result.chapters);',
+    glossary: ['SubtitlePanel', 'applySubtitleCorrection', 'durationMs', 'chapters'],
+    corrections: [[2, '然后 applySubtitleCorrection 合并稀疏 corrections']],
+    chapters: [
+      ['读取字幕', 0, 2],
+      ['合并纠错', 2, 5],
+      ['渲染章节', 5, 7],
+    ],
+    segments: [
+      '先从 store 里面读取已有字幕',
+      '如果没有字幕就显示空状态',
+      '然后 apply subtitle correction 合并 sparse corrections',
+      '没有返回的字幕段保持原文',
+      '这里不要要求每一段都返回',
+      '章节写入 subtitle chapters store',
+      '最后 subtitle panel 渲染按钮',
+      '用户点击章节时调用 on seek',
+    ],
+  }),
+  topic({
+    fileName: 'subtitlePostProcessor.ts',
+    code: 'return Math.min(MAX_DYNAMIC_NEW_TOKENS, segmentCount * NEW_TOKENS_PER_SEGMENT + CHAPTER_OUTPUT_TOKEN_RESERVE);',
+    glossary: ['MAX_DYNAMIC_NEW_TOKENS', 'NEW_TOKENS_PER_SEGMENT', 'CHAPTER_OUTPUT_TOKEN_RESERVE'],
+    corrections: [
+      [1, 'max new tokens 只给少量 correction 预算'],
+      [5, '长轨道也不应该完整重写每个 segment'],
+    ],
+    chapters: [
+      ['预算估算', 0, 3],
+      ['长轨控制', 3, 7],
+    ],
+    segments: [
+      '这里先计算 segment count',
+      'max new tokens 只给少量 correction 预算',
+      'chapter output token reserve 留给章节',
+      'base max new tokens 覆盖短字幕',
+      '超过最大段数就提示用户缩短',
+      '长轨道也不应该完整重写每个 segment',
+      '输出越短浏览器等待越少',
+      '最后传给 transformers pipeline',
+    ],
+  }),
+  topic({
+    fileName: 'subtitlePostProcessorWorkerClient.ts',
+    code: 'activeWorker.postMessage({ id, type: "process", input }); worker.addEventListener("message", handleWorkerMessage);',
+    glossary: ['Web Worker', 'postMessage', 'AbortController', 'AbortError'],
+    corrections: [[3, '取消时 AbortController 会终止 worker inference']],
+    chapters: [
+      ['创建 Worker', 0, 2],
+      ['发送请求', 2, 4],
+      ['取消重建', 4, 7],
+    ],
+    segments: [
+      '主线程先确保 worker 已经创建',
+      'worker promise 会复用同一个实例',
+      '然后通过 post message 发送 process',
+      '取消时 abort controller 会终止 worker inference',
+      'pending requests 会全部 reject',
+      '下一次请求重新创建 worker',
+      '这样播放不会被 wasm 生成拖住',
+      '最后只把 json 结果发回 UI',
+    ],
+  }),
+  topic({
+    fileName: 'ReplayControls.tsx',
+    code: 'onValueChange={(value) => onSeek(value[0] ?? currentTimeMs)}',
+    glossary: ['ReplayControls', 'onSeek', 'currentTimeMs', 'progress slider'],
+    corrections: [[2, 'progress slider 改变时调用 onSeek']],
+    chapters: [
+      ['播放控制', 0, 3],
+      ['进度跳转', 3, 7],
+    ],
+    segments: [
+      '这里先判断 can seek',
+      '播放按钮只切换 is playing',
+      'progress slider 改变时调用 on seek',
+      'value 为空就回退到 current time ms',
+      '字幕后处理的时候控件仍然可点',
+      'seek 以后 scheduler 也要同步',
+      '视频 current time 使用秒',
+      '章节点击复用同一条 on seek',
+    ],
+  }),
+  topic({
+    fileName: 'CodeEditor.tsx',
+    code: 'const workerModule = await import("monaco-editor/esm/vs/editor/editor.worker?worker");',
+    glossary: ['Monaco', 'Vite', '?worker', 'dynamic import'],
+    corrections: [[0, 'Monaco worker 通过 Vite 的 ?worker 导入']],
+    chapters: [
+      ['Worker 导入', 0, 3],
+      ['编辑器初始化', 3, 7],
+    ],
+    segments: [
+      'monaco worker 通过 vite 的问号 worker 导入',
+      'dynamic import 返回 worker module',
+      '然后 new default 创建 editor worker',
+      '编辑器模型挂载后开始记录事件',
+      'on did change model content 会触发',
+      '但是不要每次输入都 flush',
+      '空闲时再 take snapshot',
+      '回放 seek 时恢复 monaco model',
+    ],
+  }),
+  topic({
+    fileName: 'subtitleStore.ts',
+    code: 'const tx = db.transaction(["subtitle-tracks", "subtitle-chapters"], "readwrite");',
+    glossary: ['IndexedDB', 'transaction', 'subtitle-tracks', 'subtitle-chapters'],
+    corrections: [[1, 'subtitle-tracks 和 subtitle-chapters 放同一个 transaction']],
+    chapters: [
+      ['事务保存', 0, 3],
+      ['失败回滚', 3, 7],
+    ],
+    segments: [
+      '保存字幕前先打开 index db',
+      'subtitle tracks 和 subtitle chapters 放同一个 transaction',
+      'track 写入成功后再写 chapters',
+      '如果中途失败 transaction 会 abort',
+      '这样不会出现半份章节',
+      '读取时先 load track',
+      '再按 recording id load chapters',
+      'UI 收到空数组也能正常渲染',
+    ],
+  }),
+  topic({
+    fileName: 'routerBase.ts',
+    code: 'export const routerBasename = normalizeRouterBasename(import.meta.env.BASE_URL);',
+    glossary: ['Vite', 'import.meta.env.BASE_URL', 'routerBasename', 'GitHub Pages'],
+    corrections: [],
+    chapters: [
+      ['路径归一化', 0, 4],
+      ['部署兼容', 4, 7],
+    ],
+    segments: [
+      '这里读取 vite 注入的 base url',
+      '本地开发时它通常是斜杠',
+      '部署到 github pages 时会带仓库名前缀',
+      'normalize 函数去掉末尾斜杠',
+      'router basename 用同一个值',
+      '这样分享链接不会丢路径',
+      '回放页刷新也能命中 route',
+      '这个样本不需要字幕纠错',
+    ],
+  }),
+  topic({
+    fileName: 'guard-pr.mjs',
+    code: 'const guardReport = findLatestRepoGuardReport(comments);',
+    glossary: ['repo-guard', 'GitHub Actions', 'pullNumber', 'CR通过'],
+    corrections: [[0, 'repo-guard 会在 GitHub Actions 里评论 PR']],
+    chapters: [
+      ['读取评论', 0, 3],
+      ['判断门禁', 3, 7],
+    ],
+    segments: [
+      'repo guard 会在 github actions 里评论 pr',
+      '我们用 pull number 找 issue comments',
+      '最新报告里会写风险等级',
+      'training pr guard 还会检查 closing issue',
+      '缺少 cr 通过时是流程门禁',
+      'repo guard 的技术评论要优先处理',
+      '如果只是流程问题就不用改代码',
+      '最后把 git nexus 摘要写到 pr body',
+    ],
+  }),
+  topic({
+    fileName: 'subtitleTranscriber.ts',
+    code: 'const TRANSCRIPTION_OPTIONS = { language: "chinese", task: "transcribe" };',
+    glossary: ['Whisper', 'language', 'chinese', 'transcribe'],
+    corrections: [[2, 'Whisper language 仍然固定为 chinese']],
+    chapters: [
+      ['ASR 设置', 0, 3],
+      ['结果归一化', 3, 7],
+    ],
+    segments: [
+      'asr pipeline 使用 whisper tiny',
+      'task 设置为 transcribe',
+      'whisper language 仍然固定为 chinese',
+      '返回 chunks 后按 timestamp 切段',
+      '没有 chunk 时回退整段 text',
+      'subtitle id 从一开始递增',
+      '后处理模型只修正术语',
+      '不要让 llm 再改时间戳',
+    ],
+  }),
+  topic({
+    fileName: 'cache.ts',
+    code: 'await cache.put(resourceKey, response.clone());',
+    glossary: ['Transformers.js', 'Cache API', 'response.clone', 'UnknownError'],
+    corrections: [[1, 'Cache API 写入 UnknownError 时不要中断模型加载']],
+    chapters: [
+      ['缓存读取', 0, 3],
+      ['缓存失败兜底', 3, 7],
+    ],
+    segments: [
+      'transformers js 会先查 browser cache',
+      'cache api 写入 unknown error 时不要中断模型加载',
+      'response clone 用来避免 body 被消费',
+      '大模型文件可能超过浏览器缓存限制',
+      '这时只吞掉 cache warning',
+      'pipeline 已经加载成功就继续推理',
+      '下次可能重新下载资源',
+      '但不能把错误展示成纠错失败',
+    ],
+  }),
+];
+
+const CORRECTION_TOPICS = [
+  topic({
+    fileName: 'ReactCounter.tsx',
+    code: 'const [count, setCount] = useState(0); return <button onClick={() => setCount(count + 1)}>{count}</button>;',
+    glossary: ['React', 'useState', 'setCount', 'onClick', 'render'],
+    corrections: [
+      [0, '打开 React 组件以后先看 useState'],
+      [3, 'onClick 里调用 setCount 触发 render'],
+    ],
+    chapters: [
+      ['状态 Hook', 0, 3],
+      ['点击更新', 3, 7],
+    ],
+    segments: [
+      '打开瑞艾克特组件以后先看 use state',
+      'count 默认从零开始',
+      '按钮上展示当前 count',
+      'on click 里调用 set count 触发 render',
+      '这里不要直接修改 state',
+      '保存以后页面会重新渲染',
+      '最后检查按钮点击结果',
+      '这一段只需要修正术语',
+    ],
+  }),
+  topic({
+    fileName: 'vite.config.ts',
+    code: 'export default defineConfig({ server: { proxy: { "/api": "http://localhost:8787" } } });',
+    glossary: ['Vite', 'defineConfig', 'proxy', 'localhost', 'npm run dev'],
+    corrections: [
+      [0, '先打开 Vite 配置文件'],
+      [2, 'server.proxy 指向 localhost API 服务'],
+    ],
+    chapters: [
+      ['打开配置', 0, 2],
+      ['配置代理', 2, 7],
+    ],
+    segments: [
+      '先打开歪特配置文件',
+      '这里 default export define config',
+      'server proxy 指向 local host API 服务',
+      '接口路径从斜杠 api 开始',
+      '保存以后重新跑 npm run dev',
+      '如果跨域失败就看 network 面板',
+      '确认请求已经命中本地服务',
+      '这一段主要生成章节',
+    ],
+  }),
+  topic({
+    fileName: 'UserCard.tsx',
+    code: 'type UserCardProps = { userName: string; onSelect(): void };',
+    glossary: ['TypeScript', 'UserCardProps', 'props', 'onSelect', 'TypeError'],
+    corrections: [
+      [0, 'TypeScript 里先定义 UserCardProps'],
+      [2, 'onSelect 从 props 传进来'],
+    ],
+    chapters: [
+      ['定义类型', 0, 3],
+      ['处理错误', 3, 7],
+    ],
+    segments: [
+      'type script 里先定义 user card props',
+      'user name 是字符串',
+      'on select 从 props 传进来',
+      '如果漏传就会报 type error',
+      '组件内部不要自己创建回调',
+      '点击按钮时调用 on select',
+      '最后补上测试覆盖',
+      '字幕只保留必要纠错',
+    ],
+  }),
+  topic({
+    fileName: 'SubtitlePanel.test.tsx',
+    code: 'await page.goto("/replay/demo"); await expect(page.getByRole("button", { name: "生成字幕" })).toBeVisible();',
+    glossary: ['Playwright', 'page.goto', 'getByRole', 'expect', 'locator'],
+    corrections: [
+      [0, 'Playwright 先 page.goto 回放页'],
+      [2, '然后用 getByRole 找生成字幕按钮'],
+    ],
+    chapters: [
+      ['打开页面', 0, 3],
+      ['定位按钮', 3, 7],
+    ],
+    segments: [
+      'play right 先 page go to 回放页',
+      '等待页面完成加载',
+      '然后用 get by role 找生成字幕按钮',
+      'expect 它 to be visible',
+      '如果 locator 超时就看 trace',
+      '测试里不要依赖固定 timeout',
+      '最后断言字幕列表出现',
+      '章节标题要短一点',
+    ],
+  }),
+  topic({
+    fileName: 'subtitlePostProcessorWorkerClient.ts',
+    code: 'worker.postMessage({ id, type: "process", input }); worker.addEventListener("message", handleWorkerMessage);',
+    glossary: ['Web Worker', 'postMessage', 'message', 'AbortController', 'inference'],
+    corrections: [
+      [0, 'Web Worker 里通过 postMessage 发送请求'],
+      [3, 'AbortController 取消当前 inference'],
+    ],
+    chapters: [
+      ['发送请求', 0, 3],
+      ['取消推理', 3, 7],
+    ],
+    segments: [
+      'web worker 里通过 post message 发送请求',
+      '主线程继续播放视频',
+      'message 事件返回处理结果',
+      'abort controller 取消当前 inference',
+      '失败时 reject pending promise',
+      '下一次点击复用已有 worker',
+      '这样页面不会被大模型卡住',
+      '最后只把 json 发回 UI',
+    ],
+  }),
+  topic({
+    fileName: 'theme.css',
+    code: ':root { --color-background: 0 0% 100%; } [data-theme="dark"] { --color-background: 220 20% 8%; }',
+    glossary: ['TailwindCSS', 'CSS variables', 'data-theme', 'background', 'dark mode'],
+    corrections: [
+      [0, 'TailwindCSS 颜色不要写死'],
+      [2, 'data-theme dark 会切换 background token'],
+    ],
+    chapters: [
+      ['颜色变量', 0, 3],
+      ['暗色模式', 3, 7],
+    ],
+    segments: [
+      'tail wind css 颜色不要写死',
+      '先放到 css variables 里面',
+      'data theme dark 会切换 background token',
+      '组件只消费语义色',
+      '这样主题切换更稳定',
+      '按钮 hover 不要重新定义一套颜色',
+      '最后检查浅色和暗色模式',
+      '这一段可以省略无变化字幕',
+    ],
+  }),
+  topic({
+    fileName: 'subtitleStore.ts',
+    code: 'const tx = db.transaction(["subtitle-tracks", "subtitle-chapters"], "readwrite"); await tracks.put(track);',
+    glossary: ['IndexedDB', 'transaction', 'readwrite', 'subtitle-tracks', 'subtitle-chapters'],
+    corrections: [
+      [0, 'IndexedDB 保存字幕要放进 transaction'],
+      [2, 'subtitle-tracks 和 subtitle-chapters 一起 readwrite'],
+    ],
+    chapters: [
+      ['创建事务', 0, 3],
+      ['写入章节', 3, 7],
+    ],
+    segments: [
+      'index db 保存字幕要放进 transaction',
+      '先打开数据库连接',
+      'subtitle tracks 和 subtitle chapters 一起 read write',
+      'track 写入成功后再写 chapters',
+      '任何一步失败都 abort',
+      '读取时按 recording id 查询',
+      '不要覆盖原始字幕',
+      'UI 收到空数组也能渲染',
+    ],
+  }),
+  topic({
+    fileName: 'ReplayControls.tsx',
+    code: 'onValueChange={(value) => onSeek(value[0] ?? currentTimeMs)} disabled={!canSeek}',
+    glossary: ['ReplayControls', 'onSeek', 'currentTimeMs', 'canSeek', 'progress slider'],
+    corrections: [
+      [0, 'ReplayControls 先判断 canSeek'],
+      [2, 'progress slider 改变时调用 onSeek'],
+      [3, 'value 为空就回退到 currentTimeMs'],
+    ],
+    chapters: [
+      ['可跳转状态', 0, 3],
+      ['拖动进度', 3, 7],
+    ],
+    segments: [
+      'replay controls 先判断 can seek',
+      '不能 seek 时禁用滑块',
+      'progress slider 改变时调用 on seek',
+      'value 为空就回退到 current time ms',
+      '视频 current time 用秒',
+      'scheduler 内部用毫秒',
+      '章节点击复用同一个 on seek',
+      '大模型运行时不能阻塞拖动',
+    ],
+  }),
+  topic({
+    fileName: 'routerBase.ts',
+    code: 'export const routerBasename = normalizeRouterBasename(import.meta.env.BASE_URL);',
+    glossary: ['Vite', 'import.meta.env.BASE_URL', 'routerBasename', 'GitHub Pages'],
+    corrections: [
+      [0, 'Vite 注入 import.meta.env.BASE_URL'],
+      [2, 'normalizeRouterBasename 去掉末尾斜杠'],
+    ],
+    chapters: [
+      ['读取 Base URL', 0, 3],
+      ['部署路径', 3, 7],
+    ],
+    segments: [
+      'vite 注入 import meta env base url',
+      '本地开发通常是斜杠',
+      'normalize router base name 去掉末尾斜杠',
+      'github pages 会带仓库名前缀',
+      'router basename 使用同一个值',
+      '分享链接刷新不能丢路径',
+      '回放页也要命中 route',
+      '章节从路径归一化开始',
+    ],
+  }),
+  topic({
+    fileName: 'SubtitlePanel.tsx',
+    code: 'const postProcessor = createHuggingFaceSubtitlePostProcessor({ model }); await postProcessor.process({ track, context });',
+    glossary: ['Hugging Face', 'Transformers.js', 'postProcessor', 'process', 'chapters'],
+    corrections: [
+      [0, '创建 Hugging Face 字幕后处理 postProcessor'],
+      [2, 'process 返回 corrections 和 chapters'],
+    ],
+    chapters: [
+      ['创建模型', 0, 3],
+      ['应用结果', 3, 7],
+    ],
+    segments: [
+      '创建 hugging face 字幕后处理 post processor',
+      '模型会走 transformers js',
+      'process 返回 corrections 和 chapters',
+      '没有修改的 segment 保持原文',
+      '章节列表写入本地 store',
+      '用户点击章节时跳转播放',
+      '如果模型输出非法就保留字幕',
+      '这里不要阻塞播放进度条',
+    ],
+  }),
+  topic({
+    fileName: 'App.test.tsx',
+    code: 'const process = vi.fn(() => Promise.resolve(result)); await waitFor(() => expect(screen.getByText("useState")).toBeInTheDocument());',
+    glossary: ['Vitest', 'vi.fn', 'waitFor', 'screen', 'toBeInTheDocument'],
+    corrections: [
+      [0, 'Vitest 里用 vi.fn 模拟异步 process'],
+      [2, 'waitFor 等 useState 文本渲染出来'],
+    ],
+    chapters: [
+      ['模拟异步', 0, 3],
+      ['等待断言', 3, 7],
+    ],
+    segments: [
+      'vit test 里用 vi fn 模拟异步 process',
+      '返回 promise resolve result',
+      'wait for 等 use state 文本渲染出来',
+      'screen get by text 找到结果',
+      'to be in the document 做断言',
+      '失败时先看 mock 是否调用',
+      '最后检查章节也写入',
+      '不要返回 markdown',
+    ],
+  }),
+  topic({
+    fileName: 'cache.ts',
+    code: 'env.useCustomCache = true; env.customCache = { async put(key, response) { await cache.put(key, response.clone()); } };',
+    glossary: ['Transformers.js', 'Cache API', 'response.clone', 'UnknownError', 'browser cache'],
+    corrections: [
+      [0, 'Transformers.js 会写 browser cache'],
+      [2, 'Cache API 报 UnknownError 时不要中断加载'],
+    ],
+    chapters: [
+      ['读取缓存', 0, 3],
+      ['失败兜底', 3, 7],
+    ],
+    segments: [
+      'transformers js 会写 browser cache',
+      '先从缓存里 match 资源',
+      'cache api 报 unknown error 时不要中断加载',
+      'response clone 避免 body 被消费',
+      '大文件可能超过浏览器限制',
+      '失败时只吞掉 warning',
+      'pipeline 加载成功就继续推理',
+      '不能展示成纠错失败',
+    ],
+  }),
+];
+
+for (let index = 0; index < 170; index += 1) {
+  const base = STABILITY_TOPICS[index % 10];
+  const suffix = Math.floor(index / 10) + 2;
+  STABILITY_TOPICS.push(
+    topic({
+      ...base,
+      fileName: base.fileName.replace(/(\.[^.]+)$/u, `.variant${suffix}$1`),
+      code: `${base.code}\n// variant ${suffix}: keep sparse subtitle corrections stable`,
+      runtimeOutput: suffix % 2 === 0 ? 'Warning: model output omitted unchanged subtitle segments' : '',
+      nonContiguousIds: suffix % 2 === 1,
+      corrections: base.corrections.slice(0, suffix % 3 === 0 ? 1 : base.corrections.length),
+      chapters: base.chapters,
+    }),
+  );
+}
+
+for (let index = 0; index < 240; index += 1) {
+  const base = CORRECTION_TOPICS[index % CORRECTION_TOPICS.length];
+  const suffix = Math.floor(index / CORRECTION_TOPICS.length) + 2;
+  STABILITY_TOPICS.push(
+    topic({
+      ...base,
+      fileName: base.fileName.replace(/(\.[^.]+)$/u, `.correction${suffix}$1`),
+      code: `${base.code}\n// correction variant ${suffix}: teach frontend ASR term fixes`,
+      runtimeOutput: suffix % 2 === 0 ? 'Warning: keep playback responsive while LLM runs' : '',
+      nonContiguousIds: suffix % 2 === 1,
+      corrections: base.corrections.slice(0, suffix % 3 === 0 ? 1 : base.corrections.length),
+      chapters: base.chapters,
+    }),
+  );
+}
+
+function topic(value) {
+  return value;
+}
+
+function parseJsonl(text, label) {
+  return text
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => JSON.parse(line, (_, value) => value, `${label}:${index + 1}`));
+}
+
+async function writeJsonl(path, records) {
+  await writeFile(path, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`);
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

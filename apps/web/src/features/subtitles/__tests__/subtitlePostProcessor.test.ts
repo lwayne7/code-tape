@@ -106,9 +106,10 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(pipelineFactory).toHaveBeenCalledWith(
       "text-generation",
       "ceilf6/code-tape-subtitle-postprocessor-onnx",
-      { device: "webgpu", dtype: "q4f16" },
+      { device: "wasm", dtype: "q8" },
     );
-    expect(pipeline.mock.calls[0]?.[0]).toEqual([
+    const promptMessages = pipeline.mock.calls[0]?.[0] as Array<{ role: string; content: string }>;
+    expect(promptMessages).toEqual([
       {
         role: "system",
         content: expect.stringContaining("只输出 JSON"),
@@ -120,10 +121,12 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     ]);
     expect(pipeline).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({ do_sample: false, return_full_text: false }),
+      expect.objectContaining({ do_sample: false, repetition_penalty: 1.05, return_full_text: false }),
     );
-    expect(JSON.stringify(pipeline.mock.calls[0]?.[0])).toContain("use state hook");
-    expect(JSON.stringify(pipeline.mock.calls[0]?.[0])).not.toContain('"language"');
+    expect(JSON.stringify(promptMessages)).toContain("use state hook");
+    expect(JSON.stringify(promptMessages)).toContain("inputSegments");
+    expect(JSON.stringify(promptMessages)).not.toContain('"language"');
+    expect(JSON.parse(promptMessages[1]?.content ?? "{}")).not.toHaveProperty("segments");
     expect(result).toEqual({
       segments: [
         { id: "subtitle-1", text: "useState hook" },
@@ -156,6 +159,22 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
     expect(pipeline).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(pipeline.mock.calls[1]?.[0])).toContain("Previous output did not contain a parseable JSON");
+  });
+
+  it("keeps playback usable with an empty correction when the local LLM retry still emits invalid JSON", async () => {
+    const pipeline = vi
+      .fn()
+      .mockResolvedValueOnce([{ generated_text: '{"segments":[{"id":"subtitle-1","text":"useState hook"}]' }])
+      .mockResolvedValueOnce([{ generated_text: "Still not JSON" }]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [],
+      chapters: [],
+    });
+    expect(pipeline).toHaveBeenCalledTimes(2);
   });
 
   it("parses Transformers.js chat message arrays nested inside generated_text", async () => {
@@ -201,6 +220,26 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
   });
 
+  it("drops unknown and repeated correction segment ids before returning the model result", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"useState hook"},{"id":"subtitle-2","text":"render result"},{"id":"subtitle-2","text":"duplicated render result"},{"id":"subtitle-3","text":"invented segment"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":3000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [
+        { id: "subtitle-1", text: "useState hook" },
+        { id: "subtitle-2", text: "render result" },
+      ],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
+    });
+  });
+
   it("drops chapters with replacement-character quantization noise", async () => {
     const pipeline = vi.fn(async () => [
       {
@@ -221,21 +260,14 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
   });
 
-  it("falls back to WASM q8 when WebGPU is unavailable", async () => {
+  it("uses the validated WASM q8 path directly for the default ONNX model", async () => {
     const pipeline = vi.fn(async (_prompt: string, _options: unknown) => [
       {
         generated_text:
           '{"segments":[{"id":"subtitle-1","text":"useState hook"},{"id":"subtitle-2","text":"render result"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":3000}]}',
       },
     ]);
-    const unavailableWebGpuError = new Error(
-      "no available backend found. ERR: WebGPU is not available in this browser",
-    );
-    const pipelineFactory = vi
-      .fn()
-      .mockRejectedValueOnce(unavailableWebGpuError)
-      .mockRejectedValueOnce(unavailableWebGpuError)
-      .mockResolvedValueOnce(pipeline);
+    const pipelineFactory = vi.fn().mockResolvedValueOnce(pipeline);
     const postProcessor = createHuggingFaceSubtitlePostProcessor({ pipelineFactory });
 
     const result = await postProcessor.process({ track: makeTrack() });
@@ -244,20 +276,9 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       1,
       "text-generation",
       "ceilf6/code-tape-subtitle-postprocessor-onnx",
-      { device: "webgpu", dtype: "q4f16" },
-    );
-    expect(pipelineFactory).toHaveBeenNthCalledWith(
-      2,
-      "text-generation",
-      "ceilf6/code-tape-subtitle-postprocessor-onnx",
-      { device: "webgpu", dtype: "q4" },
-    );
-    expect(pipelineFactory).toHaveBeenNthCalledWith(
-      3,
-      "text-generation",
-      "ceilf6/code-tape-subtitle-postprocessor-onnx",
       { device: "wasm", dtype: "q8" },
     );
+    expect(pipelineFactory).toHaveBeenCalledTimes(1);
     expect(result.chapters).toEqual([{ title: "状态设计", startMs: 0, endMs: 3_000 }]);
   });
 
@@ -282,7 +303,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       1,
       "text-generation",
       "ceilf6/code-tape-subtitle-postprocessor-onnx",
-      { device: "webgpu", dtype: "q4f16" },
+      { device: "wasm", dtype: "q8" },
     );
     expect(pipelineFactory).toHaveBeenCalledTimes(1);
   });

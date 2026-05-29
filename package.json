@@ -18,6 +18,7 @@
     "quality:ci": "npm test && npm run build:schema && npm run lint:web && npm run test:schema && npm run test:api && npm run test:web && npm run build && npm run e2e:web",
     "quality:local": "npm run contract:local && npm run quality:ci",
     "subtitle:dataset:validate": "node scripts/subtitle-llm/validate-dataset.mjs ml/subtitle-postprocessor/data/seed_examples.jsonl",
+    "subtitle:curate": "node scripts/subtitle-llm/augment-corpus.mjs",
     "subtitle:distill": "node scripts/subtitle-llm/distill-corpus.mjs --seed ml/subtitle-postprocessor/data/seed_examples.jsonl --out ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:evaluate": "node scripts/subtitle-llm/evaluate-corpus.mjs ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:train": "python3 ml/subtitle-postprocessor/train_lora.py --train-jsonl ml/subtitle-postprocessor/data/generated/distilled.jsonl",

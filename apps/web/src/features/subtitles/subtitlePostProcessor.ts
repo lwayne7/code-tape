@@ -9,7 +9,7 @@ import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 256;
+const BASE_MAX_NEW_TOKENS = 192;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
 const MAX_DYNAMIC_NEW_TOKENS = 1_024;
 const NEW_TOKENS_PER_SEGMENT = 6;
@@ -37,6 +37,7 @@ type TextGenerationPipeline = (
   options: {
     max_new_tokens: number;
     do_sample: boolean;
+    repetition_penalty: number;
     return_full_text: boolean;
     chat_template?: string;
   },
@@ -71,10 +72,7 @@ export function createHuggingFaceSubtitlePostProcessor(
 ): SubtitlePostProcessor {
   const model = options.model ?? DEFAULT_POSTPROCESSOR_MODEL;
   const pipelineOptions: TextGenerationPipelineOptions[] = [
-    { device: "webgpu", dtype: "q4f16" },
-    { device: "webgpu", dtype: "q4" },
     { device: "wasm", dtype: "q8" },
-    { device: "wasm", dtype: "q4" },
   ];
   let pipelinePromise: Promise<TextGenerationPipeline> | null = null;
   const getPipeline = () => {
@@ -103,6 +101,7 @@ export function createHuggingFaceSubtitlePostProcessor(
       const output = await pipeline(buildSubtitlePostProcessorMessages(input), {
         max_new_tokens: maxNewTokens,
         do_sample: false,
+        repetition_penalty: 1.05,
         return_full_text: false,
         ...buildChatTemplateOption(model),
       });
@@ -120,14 +119,20 @@ export function createHuggingFaceSubtitlePostProcessor(
       const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
         max_new_tokens: maxNewTokens,
         do_sample: false,
+        repetition_penalty: 1.05,
         return_full_text: false,
         ...buildChatTemplateOption(model),
       });
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      return constrainCorrectionToTrack(
-        extractSubtitleCorrectionResult(readGeneratedText(retryOutput)),
-        input.track,
-      );
+      try {
+        return constrainCorrectionToTrack(
+          extractSubtitleCorrectionResult(readGeneratedText(retryOutput)),
+          input.track,
+        );
+      } catch (error) {
+        if (!isRecoverableJsonOutputError(error)) throw error;
+      }
+      return { segments: [], chapters: [] };
     },
   };
 }
@@ -219,11 +224,14 @@ export function buildSubtitlePostProcessorPrompt({
       MAX_PROMPT_RUNTIME_OUTPUT_CHARS,
     ),
     glossary: context?.glossary ?? [],
-    segments: track.segments.map((segment) => ({
+    inputSegments: track.segments.map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+    })),
+    timeline: track.segments.map((segment) => ({
       id: segment.id,
       startMs: segment.startMs,
       endMs: segment.endMs,
-      text: segment.text,
     })),
   };
 
@@ -238,8 +246,7 @@ export function buildSubtitlePostProcessorPrompt({
     "- chapters 必须按时间递增、互不重叠，标题要短，适合回放导航。",
     "- chapters 必须位于输入字幕时间轴内，不能在最后一个字幕 endMs 之后创建章节。",
     "- 无法可靠生成章节时也必须输出 chapters: []。",
-    "输出 JSON 结构：",
-    '{"segments":[{"id":"subtitle-1","text":"修正后的文本"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
+    '输出结构示例：{"segments":[{"id":"subtitle-1","text":"这里用 useState 维护 count"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
     "输入：",
     JSON.stringify(payload),
   ].join("\n");
@@ -258,13 +265,14 @@ export function buildSubtitlePostProcessorMessages(
       role: "system",
       content: [
         "You are the code-tape subtitle post-processing model.",
-        "Only output one JSON object. Do not output Markdown, explanations, prefixes, suffixes, or code fences. 只输出 JSON。",
         "Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.",
-        "For speed, output only changed subtitle segments in segments. Omit unchanged segments; the app keeps their original text.",
+        "Input subtitle rows are in inputSegments.",
+        "Timeline rows are in timeline.",
+        "Only output JSON with segments and chapters. Do not output Markdown or explanations. 只输出 JSON。",
+        "For speed, output only changed subtitle segments in segments. Omit unchanged segments.",
+        "Each returned segment must contain only id and text.",
         "Generate short playback chapter jump points from subtitle content and timestamps.",
-        "Chapters must stay inside the input subtitle timeline. Do not create chapters at or after the final segment endMs.",
-        'Output shape: {"segments":[{"id":"subtitle-1","text":"corrected text"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
-        "The response must start with { and end with }.",
+        'Output shape example: {"segments":[{"id":"subtitle-1","text":"这里用 useState 维护 count"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
       ].join("\n"),
     },
     {
@@ -308,11 +316,14 @@ function buildSubtitlePostProcessorPayload({
       ),
       glossary: context?.glossary ?? [],
     },
-    segments: track.segments.map((segment) => ({
+    inputSegments: track.segments.map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+    })),
+    timeline: track.segments.map((segment) => ({
       id: segment.id,
       startMs: segment.startMs,
       endMs: segment.endMs,
-      text: segment.text,
     })),
   };
 }
@@ -336,7 +347,11 @@ function budgetPromptText(text: string, maxChars: number): string {
 
 function isRecoverableJsonOutputError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return error.message.startsWith("LLM 输出");
+  return (
+    error.message.startsWith("LLM 输出") ||
+    error.message.startsWith("LLM segments") ||
+    error.message.startsWith("LLM chapters")
+  );
 }
 
 export function extractSubtitleCorrectionResult(text: string): SubtitleCorrectionResult {
@@ -365,6 +380,15 @@ function constrainCorrectionToTrack(
   correction: SubtitleCorrectionResult,
   track: SubtitleTrack,
 ): SubtitleCorrectionResult {
+  const segmentIds = new Set(track.segments.map((segment) => segment.id));
+  const seenSegmentIds = new Set<string>();
+  const segments = correction.segments.filter((segment) => {
+    if (!segmentIds.has(segment.id)) return false;
+    if (seenSegmentIds.has(segment.id)) return false;
+    if (!segment.text.trim() || segment.text.includes("\uFFFD")) return false;
+    seenSegmentIds.add(segment.id);
+    return true;
+  });
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
   const chapters = (correction.chapters ?? [])
     .filter((chapter) => chapter.startMs < subtitleEndMs)
@@ -376,7 +400,7 @@ function constrainCorrectionToTrack(
         : {}),
     }))
     .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
-  return { ...correction, chapters };
+  return { ...correction, segments, chapters };
 }
 
 async function loadDefaultPipeline(

@@ -229,8 +229,12 @@ test('builds deterministic teacher distillation messages without secrets', () =>
   assert.equal(messages[0].role, 'system');
   assert.match(messages[0].content, /只输出 JSON/);
   assert.match(messages[0].content, /Goal: correct ASR subtitle text/u);
+  assert.doesNotMatch(messages[0].content, /corrected text/u);
   assert.match(messages[1].content, /Counter\.tsx/);
   assert.match(messages[1].content, /subtitle-1/);
+  assert.match(messages[1].content, /"inputSegments"/u);
+  assert.match(messages[1].content, /"timeline"/u);
+  assert.doesNotMatch(messages[1].content, /"segments"/u);
   assert.doesNotMatch(messages[1].content, /"language"/u);
   assert.doesNotMatch(JSON.stringify(messages), new RegExp(`${'h'}${'f'}_|${'s'}${'k'}-`, 'u'));
 });
@@ -240,10 +244,10 @@ test('subtitle fine-tuning corpora have enough domain coverage for stable local 
   const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
   const corpusText = JSON.stringify([...seedExamples, ...distilledRecords]);
 
-  assert.ok(seedExamples.length >= 30, `expected at least 30 seed examples, got ${seedExamples.length}`);
+  assert.ok(seedExamples.length >= 200, `expected at least 200 seed examples, got ${seedExamples.length}`);
   assert.ok(
-    distilledRecords.length >= 30,
-    `expected at least 30 distilled training records, got ${distilledRecords.length}`,
+    distilledRecords.length >= 200,
+    `expected at least 200 distilled training records, got ${distilledRecords.length}`,
   );
   for (const term of [
     'React',
@@ -260,6 +264,22 @@ test('subtitle fine-tuning corpora have enough domain coverage for stable local 
   ]) {
     assert.match(corpusText, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   }
+});
+
+test('subtitle fine-tuning corpus teaches sparse long-track outputs instead of full rewrites', async () => {
+  const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+  const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
+  const metrics = evaluateRecords(distilledRecords);
+
+  assert.ok(metrics.sparseOutputRate >= 0.85, `sparseOutputRate ${metrics.sparseOutputRate}`);
+  assert.ok(metrics.fullSegmentOutputRate <= 0.15, `fullSegmentOutputRate ${metrics.fullSegmentOutputRate}`);
+  assert.ok(
+    metrics.averageOutputSegmentRatio <= 0.3,
+    `averageOutputSegmentRatio ${metrics.averageOutputSegmentRatio}`,
+  );
+  assert.ok(metrics.longTrackRecordRate >= 0.75, `longTrackRecordRate ${metrics.longTrackRecordRate}`);
+  assert.equal(metrics.sparseSegmentReferenceRate, 1);
+  assert.equal(metrics.chapterSignalRate, 1);
 });
 
 function readJsonl(path) {
@@ -325,10 +345,16 @@ test('LoRA training defaults to the browser-targeted SmolLM2 base model', () => 
 test('LoRA training masks loss to assistant JSON tokens', () => {
   const python = [
     'import importlib.util',
+    'import json',
     'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
     'module = importlib.util.module_from_spec(spec)',
     'spec.loader.exec_module(module)',
-    'print("{% generation %}" in module.ASSISTANT_MASK_CHAT_TEMPLATE)',
+    'apply=lambda self,messages,add_generation_prompt=False,tokenize=False: "PROMPT" if add_generation_prompt else "PROMPT{}"',
+    'call=lambda self,text,add_special_tokens=False: {"input_ids": list(range(len(text)))}',
+    'FakeTokenizer=type("FakeTokenizer", (), {"apply_chat_template": apply, "__call__": call})',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"},{"role":"assistant","content":"{}"}]}',
+    'tokens = module.tokenize_training_record(record, FakeTokenizer(), 128)',
+    'print(json.dumps(tokens["labels"]))',
   ].join('; ');
   const result = spawnSync('python3', ['-c', python], {
     cwd: new URL('../..', import.meta.url),
@@ -336,7 +362,7 @@ test('LoRA training masks loss to assistant JSON tokens', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'True');
+  assert.deepEqual(JSON.parse(result.stdout), [-100, -100, -100, -100, -100, -100, 6, 7]);
 });
 
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
@@ -398,7 +424,58 @@ test('subtitle corpus evaluation applies sparse corrections before scoring gloss
   const metrics = evaluateRecords([record]);
 
   assert.equal(metrics.sparseSegmentReferenceRate, 1);
+  assert.equal(metrics.sparseOutputRate, 1);
+  assert.equal(metrics.fullSegmentOutputRate, 0);
+  assert.equal(metrics.averageOutputSegmentRatio, 0.5);
   assert.equal(metrics.glossaryPreservationRate, 1);
+});
+
+test('subtitle corpus evaluation exposes full-output and long-track stability risks', async () => {
+  const { evaluateRecords } = await import('../subtitle-llm/evaluate-corpus.mjs');
+  const fullOutputRecord = buildTrainingRecord({
+    example: {
+      ...seedExample,
+      segments: [
+        { id: 'subtitle-1', startMs: 0, endMs: 1000, text: '先看 use state' },
+        { id: 'subtitle-2', startMs: 1000, endMs: 2000, text: '然后 render result' },
+      ],
+    },
+    teacherResult: {
+      segments: [
+        { id: 'subtitle-1', text: '先看 useState' },
+        { id: 'subtitle-2', text: '然后 render result' },
+      ],
+      chapters: [{ title: '状态设计', startMs: 0, endMs: 2000 }],
+    },
+    teacherModel: 'gpt-5.5',
+  });
+  const longSparseRecord = buildTrainingRecord({
+    example: {
+      ...seedExample,
+      segments: Array.from({ length: 8 }, (_, index) => ({
+        id: `subtitle-${index + 1}`,
+        startMs: index * 1000,
+        endMs: index * 1000 + 900,
+        text: index === 5 ? '最后调用 use effect 清理 worker' : `第 ${index + 1} 段不需要修改`,
+      })),
+    },
+    teacherResult: {
+      segments: [{ id: 'subtitle-6', text: '最后调用 useEffect 清理 worker' }],
+      chapters: [
+        { title: '问题分析', startMs: 0, endMs: 3000 },
+        { title: '生命周期清理', startMs: 3000, endMs: 7900 },
+      ],
+    },
+    teacherModel: 'gpt-5.5',
+  });
+
+  const metrics = evaluateRecords([fullOutputRecord, longSparseRecord]);
+
+  assert.equal(metrics.fullSegmentOutputRate, 0.5);
+  assert.equal(metrics.sparseOutputRate, 0.5);
+  assert.equal(metrics.longTrackRecordRate, 0.5);
+  assert.equal(metrics.averageOutputSegmentRatio, 0.5625);
+  assert.equal(metrics.chapterSignalRate, 1);
 });
 
 test('subtitle corpus evaluation does not treat language style as a blocking metric', () => {
@@ -618,6 +695,53 @@ test('LoRA training JSONL validator accepts sparse subtitle corrections', () => 
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('LoRA training JSONL validator accepts inputSegments as the prompt-side subtitle field', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-input-segments-train-'));
+  const fixturePath = join(tempDir, 'train.jsonl');
+  writeFileSync(
+    fixturePath,
+    `${JSON.stringify({
+      messages: [
+        { role: 'system', content: 'Only output JSON.' },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            inputSegments: [
+              { id: 'subtitle-1', text: '继续讲 use state' },
+            ],
+            timeline: [
+              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
+            ],
+          }),
+        },
+        {
+          role: 'assistant',
+          content: JSON.stringify({
+            segments: [{ id: 'subtitle-1', text: '继续讲 useState' }],
+            chapters: [{ title: '状态设计', startMs: 0, endMs: 1200 }],
+          }),
+        },
+      ],
+    })}\n`,
+  );
+  const result = spawnSync(
+    'python3',
+    [
+      '-c',
+      [
+        'import importlib.util',
+        'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+        'module = importlib.util.module_from_spec(spec)',
+        'spec.loader.exec_module(module)',
+        `module.validate_train_jsonl(${JSON.stringify(fixturePath)})`,
+      ].join(';'),
+    ],
+    { cwd: new URL('../..', import.meta.url), encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('dataset validator rejects empty JSONL input', () => {

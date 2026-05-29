@@ -97,7 +97,7 @@ def validate_training_record(record: dict, path: str, line_number: int) -> None:
 
     user_payload = parse_json_object(messages[1]["content"], path, line_number, "user content")
     assistant_payload = parse_json_object(messages[2]["content"], path, line_number, "assistant content")
-    segments = validate_user_segments(user_payload, path, line_number)
+    segments = validate_user_segments(read_prompt_segments(user_payload), path, line_number)
     validate_assistant_payload(assistant_payload, segments, path, line_number)
 
 
@@ -126,10 +126,28 @@ def parse_json_object(text: str, path: str, line_number: int, label: str) -> dic
     return value
 
 
-def validate_user_segments(payload: dict, path: str, line_number: int) -> list[dict]:
-    segments = payload.get("segments")
+def read_prompt_segments(payload: dict) -> object:
+    if isinstance(payload.get("inputSegments"), list) and isinstance(payload.get("timeline"), list):
+        timeline_by_id = {
+            item.get("id"): item
+            for item in payload["timeline"]
+            if isinstance(item, dict)
+        }
+        return [
+            {
+                **segment,
+                "startMs": timeline_by_id.get(segment.get("id"), {}).get("startMs"),
+                "endMs": timeline_by_id.get(segment.get("id"), {}).get("endMs"),
+            }
+            for segment in payload["inputSegments"]
+            if isinstance(segment, dict)
+        ]
+    return payload.get("inputSegments", payload.get("segments"))
+
+
+def validate_user_segments(segments: object, path: str, line_number: int) -> list[dict]:
     if not isinstance(segments, list) or not segments:
-        raise SystemExit(f"{path}:{line_number} user JSON must contain a non-empty segments array")
+        raise SystemExit(f"{path}:{line_number} user JSON must contain a non-empty inputSegments array")
     seen_ids = set()
     previous_end_ms = -math.inf
     for index, segment in enumerate(segments):
@@ -224,9 +242,14 @@ def main() -> None:
     require_supported_python()
 
     from datasets import load_dataset
-    from peft import LoraConfig
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    from trl import SFTConfig, SFTTrainer
+    from peft import LoraConfig, get_peft_model
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        DataCollatorForSeq2Seq,
+        Trainer,
+        TrainingArguments,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=args.trust_remote_code)
     tokenizer.chat_template = ASSISTANT_MASK_CHAT_TEMPLATE
@@ -239,32 +262,14 @@ def main() -> None:
         trust_remote_code=args.trust_remote_code,
     )
     train_dataset = load_dataset("json", data_files=args.train_jsonl, split="train")
+    tokenized_dataset = train_dataset.map(
+        lambda record: tokenize_training_record(record, tokenizer, args.max_seq_length),
+        remove_columns=train_dataset.column_names,
+    )
 
-    sft_config_kwargs = {
-        "output_dir": args.output_dir,
-        "num_train_epochs": args.epochs,
-        "learning_rate": args.learning_rate,
-        "per_device_train_batch_size": args.batch_size,
-        "gradient_accumulation_steps": args.gradient_accumulation_steps,
-        "logging_steps": 5,
-        "save_strategy": "no",
-        "packing": False,
-        "report_to": [],
-        "optim": "adamw_torch",
-    }
-    sft_config_signature = inspect.signature(SFTConfig)
-    if "max_seq_length" in sft_config_signature.parameters:
-        sft_config_kwargs["max_seq_length"] = args.max_seq_length
-    else:
-        sft_config_kwargs["max_length"] = args.max_seq_length
-    if "assistant_only_loss" in sft_config_signature.parameters:
-        sft_config_kwargs["assistant_only_loss"] = True
-
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=train_dataset,
-        processing_class=tokenizer,
-        peft_config=LoraConfig(
+    model = get_peft_model(
+        model,
+        LoraConfig(
             r=16,
             lora_alpha=32,
             lora_dropout=0.05,
@@ -272,7 +277,27 @@ def main() -> None:
             task_type="CAUSAL_LM",
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         ),
-        args=SFTConfig(**sft_config_kwargs),
+    )
+    training_args_kwargs = {
+        "output_dir": args.output_dir,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.learning_rate,
+        "per_device_train_batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "logging_steps": 5,
+        "save_strategy": "no",
+        "report_to": [],
+        "optim": "adamw_torch",
+        "remove_unused_columns": False,
+    }
+    if "use_mps_device" in inspect.signature(TrainingArguments).parameters:
+        training_args_kwargs["use_mps_device"] = False
+
+    trainer = Trainer(
+        model=model,
+        args=TrainingArguments(**training_args_kwargs),
+        train_dataset=tokenized_dataset,
+        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, label_pad_token_id=-100),
     )
     trainer.train()
     trainer.save_model(args.output_dir)
@@ -281,6 +306,29 @@ def main() -> None:
     if args.hub_model_id:
         trainer.model.push_to_hub(args.hub_model_id, private=False)
         tokenizer.push_to_hub(args.hub_model_id, private=False)
+
+
+def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> dict:
+    messages = record["messages"]
+    prompt_messages = messages[:2]
+    prompt_text = tokenizer.apply_chat_template(prompt_messages, add_generation_prompt=True, tokenize=False)
+    full_text = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+    if not full_text.startswith(prompt_text):
+        raise ValueError("training prompt is not a prefix of the full assistant record")
+
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+    full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+    input_ids = full_ids[:max_seq_length]
+    labels = [-100] * min(len(prompt_ids), len(input_ids))
+    labels.extend(input_ids[len(labels):])
+    labels = labels[: len(input_ids)]
+    if all(label == -100 for label in labels):
+        raise ValueError("training record contains no assistant labels after truncation")
+    return {
+        "input_ids": input_ids,
+        "attention_mask": [1] * len(input_ids),
+        "labels": labels,
+    }
 
 
 if __name__ == "__main__":

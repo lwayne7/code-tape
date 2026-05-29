@@ -546,8 +546,8 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /优先保证本地小模型稳定输出可解析 JSON/u);
   assert.match(technicalPlan, /有音频媒体时可以预热本地 LLM/u);
   assert.match(technicalPlan, /默认模型：`ceilf6\/code-tape-subtitle-postprocessor-onnx`/u);
-  assert.match(technicalPlan, /优先尝试 WebGPU `q4f16`/u);
-  assert.match(technicalPlan, /回退 WASM `q8` \/ `q4`/u);
+  assert.match(technicalPlan, /WASM `q8` ONNX 资产/u);
+  assert.match(technicalPlan, /`q4f16` \/ `q4` 资产/u);
   assert.match(technicalPlan, /`segments` 是稀疏变更集/u);
   assert.match(technicalPlan, /前端领域术语、组件名、变量名、函数名/u);
   assert.match(technicalPlan, /章节跳转点/u);
@@ -556,7 +556,7 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /chapters: Array/u);
   assert.match(technicalPlan, /完整 P1\+ 模式的模型输出必须总是包含 `chapters` 数组/u);
   assert.match(technicalPlan, /JSON 解析失败[\s\S]*保留原始 ASR 字幕/u);
-  assert.match(technicalPlan, /如果只有章节非法而字幕纠错合法[\s\S]*不能污染字幕轨/u);
+  assert.match(technicalPlan, /丢弃对应非法稀疏 correction[\s\S]*不能污染字幕轨/u);
   assert.match(technicalPlan, /PRD 中“本地 LLM 纠错”和“自动分段生成章节跳转点”必须同时出现在技术方案/u);
 });
 

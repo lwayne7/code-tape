@@ -62,19 +62,29 @@ export function buildDistillationMessages(example) {
     {
       role: 'system',
       content: [
-        'You are the code-tape subtitle post-processing teacher model.',
-        'Only output JSON. Do not output Markdown or explanations. 只输出 JSON。',
+        'You are the code-tape subtitle post-processing model.',
         'Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.',
+        'Input subtitle rows are in inputSegments.',
+        'Only output JSON with segments and chapters. Do not output Markdown or explanations. 只输出 JSON。',
         'For speed, output only changed subtitle segments in segments. Omit unchanged segments.',
+        'Each returned segment must contain only id and text.',
         'Generate short playback chapter jump points from subtitle content and timestamps.',
-        'Output shape: {"segments":[{"id":"subtitle-1","text":"corrected text"}],"chapters":[{"title":"问题分析","startMs":0,"endMs":1000}]}',
+        'Output shape example: {"segments":[{"id":"subtitle-1","text":"这里用 useState 维护 count"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
       ].join('\n'),
     },
     {
       role: 'user',
       content: JSON.stringify({
         context: normalizedExample.context ?? {},
-        segments: normalizedExample.segments,
+        inputSegments: normalizedExample.segments.map((segment) => ({
+          id: segment.id,
+          text: segment.text,
+        })),
+        timeline: normalizedExample.segments.map((segment) => ({
+          id: segment.id,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+        })),
       }),
     },
   ];
@@ -114,7 +124,7 @@ export function validateSubtitleTrainingRecord(value) {
     id: value.metadata?.id ?? 'training-record',
     language: userPayload.language,
     context: userPayload.context,
-    segments: userPayload.segments,
+    segments: readPromptSegments(userPayload),
   });
   return value;
 }
@@ -190,6 +200,18 @@ function validateTeacherChapters(chapters, timeline) {
     }
     previousEndMs = chapter.endMs ?? chapter.startMs;
   });
+}
+
+function readPromptSegments(payload) {
+  if (Array.isArray(payload.inputSegments) && Array.isArray(payload.timeline)) {
+    const timelineById = new Map(payload.timeline.map((item) => [item.id, item]));
+    return payload.inputSegments.map((segment) => ({
+      ...segment,
+      startMs: timelineById.get(segment.id)?.startMs,
+      endMs: timelineById.get(segment.id)?.endMs,
+    }));
+  }
+  return payload.inputSegments ?? payload.segments;
 }
 
 function isPlainObject(value) {
