@@ -246,21 +246,19 @@ export function createCloudRecordingRepository(
           };
         }
 
-        const assetResult = await repo.uploadAsset(target, blob, () => {
-          // 资产级别进度：每个资产完成后累加已上传字节
+        const completedBytesBeforeAsset = bytesUploaded;
+        const assetResult = await repo.uploadAsset(target, blob, (p) => {
+          onProgress?.({
+            bytesUploaded: completedBytesBeforeAsset + p.bytesUploaded,
+            totalBytes,
+            currentAssetKind: p.currentAssetKind,
+          });
         }, options?.timeoutMs);
         if (!assetResult.ok) return assetResult;
 
         // 资产上传完成，累加进度
         const def = assetDefs.find((a) => a.kind === target.kind);
-        if (def) {
-          bytesUploaded += def.sizeBytes;
-          onProgress?.({
-            bytesUploaded,
-            totalBytes,
-            currentAssetKind: target.kind,
-          });
-        }
+        if (def) bytesUploaded += def.sizeBytes;
 
         uploadedAssets.push({
           kind: target.kind,

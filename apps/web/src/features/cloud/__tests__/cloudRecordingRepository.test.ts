@@ -811,6 +811,79 @@ describe("CloudRecordingRepository", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
+    it("大媒体上传过程中透传单资产字节进度到外部 onProgress", async () => {
+      const repo = setupRepo();
+      const mediaBlob = new Blob(["x".repeat(10000)]);
+
+      mockFetch(201, makeSessionResponse());
+
+      // 用一个统一 mock 捕获每个被创建的 XHR，send 为 no-op 由测试手动推进
+      const xhrMocks: MockXhr[] = [];
+      vi.spyOn(globalThis, "XMLHttpRequest").mockImplementation(() => {
+        const { xhr, instance } = createMockXhr();
+        xhr.send = vi.fn();
+        xhrMocks.push(xhr);
+        return instance;
+      });
+
+      mockFetch(200, { recordingId: "rec_1", status: "processing" });
+
+      const progressEvents: UploadProgress[] = [];
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      const uploadPromise = repo.uploadPackage(pkg, { media: mediaBlob }, {
+        onProgress: (p) => progressEvents.push({ ...p }),
+      });
+
+      // 等待 buildPackageAssetDefs (SHA hash) + createUploadSession 到达第一个 uploadAsset
+      await vi.waitFor(() => {
+        expect(xhrMocks.length).toBeGreaterThanOrEqual(1);
+      }, { timeout: 10000 });
+
+      // 资产 1 (manifest)：触发 XHR 中间进度，然后 onload 完成
+      xhrMocks[0].upload.onprogress?.(
+        new ProgressEvent("progress", { lengthComputable: true, loaded: 150, total: 500 }),
+      );
+      xhrMocks[0].onload?.();
+      await vi.waitFor(() => {
+        expect(xhrMocks.length).toBeGreaterThanOrEqual(2);
+      }, { timeout: 5000 });
+
+      // 资产 2 (meta)：触发 XHR 中间进度，然后 onload 完成
+      xhrMocks[1].upload.onprogress?.(
+        new ProgressEvent("progress", { lengthComputable: true, loaded: 200, total: 300 }),
+      );
+      xhrMocks[1].onload?.();
+      await vi.waitFor(() => {
+        expect(xhrMocks.length).toBeGreaterThanOrEqual(3);
+      }, { timeout: 5000 });
+
+      // 完成剩余资产（不再触发中间进度）
+      for (let i = 2; i < 5; i++) {
+        xhrMocks[i].onload?.();
+        if (i < 4) {
+          await vi.waitFor(() => {
+            expect(xhrMocks.length).toBeGreaterThanOrEqual(i + 2);
+          }, { timeout: 5000 });
+        }
+      }
+
+      const result = await uploadPromise;
+      expect(result.ok).toBe(true);
+
+      // 所有 progress 事件的 totalBytes 都是全局总量（非资产局部 blob.size）
+      const totalSet = new Set(progressEvents.map((e) => e.totalBytes));
+      expect(totalSet.size).toBe(1);
+
+      // bytesUploaded 单调不减（跨资产进度正确累加，不会因切换资产而跳回 0）
+      for (let i = 1; i < progressEvents.length; i++) {
+        expect(progressEvents[i].bytesUploaded).toBeGreaterThanOrEqual(progressEvents[i - 1].bytesUploaded);
+      }
+
+      // 能收到来自不同资产的进度事件（证明中间进度已透传，而非仅在资产完成后回调）
+      const kinds = new Set(progressEvents.map((e) => e.currentAssetKind));
+      expect(kinds.size).toBeGreaterThanOrEqual(2);
+    }, 15000);
+
     it("create session 失败时透传错误", async () => {
       const repo = setupRepo();
       mockFetch(422, { error: { code: "unsupported-schema", message: "bad schema" } });
