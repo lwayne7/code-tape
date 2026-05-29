@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T01:48:46Z",
+  "updatedAt": "2026-05-29T01:57:04Z",
   "students": {
     "ceilf6": {
       "activeIssue": 120,
@@ -131,7 +131,7 @@
       "totalScore": 2.25
     },
     "lwayne7": {
-      "activeIssue": null,
+      "activeIssue": 119,
       "completedIssues": [
         97
       ],
@@ -535,6 +535,20 @@
       "claimedAt": "2026-05-28T07:49:02Z",
       "closedAt": "2026-05-28T09:03:34Z",
       "mergedPr": 109
+    },
+    "119": {
+      "number": 119,
+      "title": "[P1] 云端录制重命名与软删除 API",
+      "score": 3,
+      "stack": [
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "lwayne7",
+      "claimedAt": "2026-05-29T01:57:04Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "120": {
       "number": 120,
