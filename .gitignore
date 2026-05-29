@@ -15,6 +15,7 @@ dist-ssr
 coverage
 playwright-report
 test-results
+scratch/
 
 ml/subtitle-postprocessor/data/generated
 ml/subtitle-postprocessor/output
