@@ -1,4 +1,4 @@
-import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessor";
+import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 import type {
   SubtitleCorrectionResult,
   SubtitlePostProcessor,

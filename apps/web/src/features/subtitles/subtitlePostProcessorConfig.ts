@@ -1,5 +1,5 @@
-import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessor";
-
+export const DEFAULT_POSTPROCESSOR_MODEL =
+  "ceilf6/code-tape-subtitle-postprocessor-onnx";
 export const SUBTITLE_POSTPROCESSOR_MODEL_ENV = "VITE_SUBTITLE_POSTPROCESSOR_MODEL";
 
 type SubtitlePostProcessorEnv = {

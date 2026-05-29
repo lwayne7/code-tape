@@ -4,9 +4,9 @@ import type {
   SubtitlePostProcessorContext,
   SubtitleTrack,
 } from "./types";
+import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 
-export const DEFAULT_POSTPROCESSOR_MODEL =
-  "ceilf6/code-tape-subtitle-postprocessor-onnx";
+export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
 const BASE_MAX_NEW_TOKENS = 256;
