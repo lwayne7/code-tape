@@ -560,6 +560,31 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /PRD 中“本地 LLM 纠错”和“自动分段生成章节跳转点”必须同时出现在技术方案/u);
 });
 
+test('technical plan owns P1 plus WebRTC interview architecture and jitter recovery', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+
+  assert.match(technicalPlan, /## 十二、P1\+ WebRTC 实时面试模式方案/u);
+  assert.match(technicalPlan, /不改变 P0\/P1 的核心事实源/u);
+  assert.match(technicalPlan, /候选人端仍以 `RecordingClock`、`EventBus`、`PackageBuilder` 生成本地录制包/u);
+  assert.match(technicalPlan, /面试官端以只读方式实时查看候选人的编辑器稳定状态/u);
+  assert.match(technicalPlan, /WebRTC 进行双向音视频通话/u);
+  assert.match(technicalPlan, /不引入 CRDT\/OT/u);
+  assert.match(technicalPlan, /不默认录制面试官音视频到候选人回放包/u);
+  assert.match(technicalPlan, /`RTCPeerConnection` 承载双向音频、双向视频和数据通道/u);
+  assert.match(technicalPlan, /RTCDataChannel: events/u);
+  assert.match(technicalPlan, /`events` \| `ordered: true`、可靠传输/u);
+  assert.match(technicalPlan, /`presence` \| `ordered: false`、`maxRetransmits: 0`/u);
+  assert.match(technicalPlan, /`RemoteTimelineBuffer`/u);
+  assert.match(technicalPlan, /小延迟播放 \+ 周期快照 \+ hash 校验/u);
+  assert.match(technicalPlan, /发现缺口时最多等待/u);
+  assert.match(technicalPlan, /收到 `snapshot-request` 后立即发送最新快照/u);
+  assert.match(technicalPlan, /`content-change` 后校验 `contentHash`/u);
+  assert.match(technicalPlan, /面试结束后候选人保存出的录制包通过现有 `PackageLoader` 和 `ReplayPage` 打开/u);
+  assert.match(technicalPlan, /`InterviewRoomService`/u);
+  assert.match(technicalPlan, /`InterviewSignalingServer`/u);
+  assert.match(technicalPlan, /远端媒体保存扩展属于完整方案，需要产品确认后再实现/u);
+});
+
 test('repository text does not reference the standalone cloud plan path', () => {
   const trackedFiles = execFileSync('git', ['ls-files'], {
     encoding: 'utf8',
