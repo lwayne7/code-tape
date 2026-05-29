@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T11:26:28Z",
+  "updatedAt": "2026-05-29T11:48:16Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 126,
+      "activeIssue": 135,
       "completedIssues": [
         11,
         10,
@@ -18,7 +18,9 @@
         98,
         107,
         110,
-        134
+        134,
+        126,
+        139
       ],
       "reviewedIssues": [
         4,
@@ -33,15 +35,13 @@
         118
       ],
       "bugPenalties": [],
-      "developmentScore": 30,
+      "developmentScore": 36,
       "reviewScore": 5,
       "penaltyScore": 0,
-      "totalScore": 35,
+      "totalScore": 41,
       "activeIssues": [
-        126,
         135,
-        133,
-        139
+        133
       ]
     },
     "MINTPIPERAS": {
@@ -597,11 +597,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T08:04:13.009Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T09:18:31Z",
+      "mergedPr": 132
     },
     "133": {
       "number": 133,
@@ -645,11 +645,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T11:26:28Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T11:48:16Z",
+      "mergedPr": 140
     }
   },
   "ledger": [
@@ -1090,6 +1090,30 @@
       "developerDelta": 0.75,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T11:15:39Z"
+    },
+    {
+      "id": "pr-132-merge",
+      "type": "feature_merge",
+      "issue": 126,
+      "pr": 132,
+      "score": 5,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 3.75,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T09:18:31Z"
+    },
+    {
+      "id": "pr-140-merge",
+      "type": "feature_merge",
+      "issue": 139,
+      "pr": 140,
+      "score": 3,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 2.25,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T11:48:16Z"
     }
   ]
 }
