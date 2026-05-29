@@ -324,6 +324,16 @@ describe("CloudRecordingRepository", () => {
       const repo2 = createCloudRecordingRepository();
       expect(repo2.getOwnerToken()).toBe(token);
     });
+
+    it("已持久化 token 为非 hex 脏值时忽略并重新生成合法 token", () => {
+      // 模拟 localStorage 中存在 64 位非 hex 脏值
+      localStorage.setItem("code-tape-cloud-owner-token", "z".repeat(64));
+      const repo = createCloudRecordingRepository();
+      const token = repo.getOwnerToken();
+      expect(token).toMatch(/^[a-f0-9]{64}$/);
+      // 脏值被覆盖为合法 token
+      expect(localStorage.getItem("code-tape-cloud-owner-token")).toBe(token);
+    });
   });
 
   // ───────────────────────────────────────────────────────
