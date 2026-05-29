@@ -161,7 +161,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(JSON.stringify(pipeline.mock.calls[1]?.[0])).toContain("Previous output did not contain a parseable JSON");
   });
 
-  it("keeps playback usable with an empty correction when the local LLM retry still emits invalid JSON", async () => {
+  it("keeps playback usable with fallback chapters when the local LLM retry still emits invalid JSON", async () => {
     const pipeline = vi
       .fn()
       .mockResolvedValueOnce([{ generated_text: '{"segments":[{"id":"subtitle-1","text":"useState hook"}]' }])
@@ -172,9 +172,39 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
 
     await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
       segments: [],
-      chapters: [],
+      chapters: [
+        { title: "状态设计", startMs: 0, endMs: 1_000 },
+        { title: "片段 2", startMs: 1_000, endMs: 3_000 },
+      ],
     });
     expect(pipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers sparse corrections and fallback chapters when the local LLM omits chapters", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text: [
+          { role: "user", content: "input subtitle payload" },
+          {
+            role: "assistant",
+            content:
+              '{"segments":[{"id":"subtitle-1","text":"useState hook"}]} {"timeline":[{"id":"subtitle-1","startMs":0,"endMs":1000}]}',
+          },
+        ],
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [
+        { title: "状态设计", startMs: 0, endMs: 1_000 },
+        { title: "片段 2", startMs: 1_000, endMs: 3_000 },
+      ],
+    });
+    expect(pipeline).toHaveBeenCalledTimes(1);
   });
 
   it("parses Transformers.js chat message arrays nested inside generated_text", async () => {
@@ -237,6 +267,48 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
         { id: "subtitle-2", text: "render result" },
       ],
       chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
+    });
+  });
+
+  it("drops hallucinated sparse corrections that do not preserve source code terms", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"useState hook"},{"id":"subtitle-2","text":"chapter jump point"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":3000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 3_000 }],
+    });
+  });
+
+  it("drops corrections that rewrite short hook phrases into a different code term", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"useState hook"},{"id":"subtitle-2","text":"使用 useLocales 时钟清理 worker"}],"chapters":[{"title":"副作用清理","startMs":0,"endMs":3000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({
+      track: {
+        ...makeTrack(),
+        segments: [
+          { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+          { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "use effect 里面清理 worker" },
+        ],
+      },
+    })).resolves.toEqual({
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "副作用清理", startMs: 0, endMs: 3_000 }],
     });
   });
 

@@ -9,11 +9,11 @@ import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 192;
+const BASE_MAX_NEW_TOKENS = 96;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
-const MAX_DYNAMIC_NEW_TOKENS = 1_024;
-const NEW_TOKENS_PER_SEGMENT = 6;
-const CHAPTER_OUTPUT_TOKEN_RESERVE = 192;
+const MAX_DYNAMIC_NEW_TOKENS = 768;
+const NEW_TOKENS_PER_SEGMENT = 5;
+const CHAPTER_OUTPUT_TOKEN_RESERVE = 96;
 const MAX_REPAIR_OUTPUT_CHARS = 1_000;
 const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
 You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
@@ -114,6 +114,8 @@ export function createHuggingFaceSubtitlePostProcessor(
         );
       } catch (error) {
         if (!isRecoverableJsonOutputError(error)) throw error;
+        const recovered = recoverSubtitleCorrectionResult(generatedText, input.track);
+        if (recovered) return recovered;
       }
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
       const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
@@ -131,8 +133,10 @@ export function createHuggingFaceSubtitlePostProcessor(
         );
       } catch (error) {
         if (!isRecoverableJsonOutputError(error)) throw error;
+        const recovered = recoverSubtitleCorrectionResult(readGeneratedText(retryOutput), input.track);
+        if (recovered) return recovered;
       }
-      return { segments: [], chapters: [] };
+      return { segments: [], chapters: buildFallbackChapters(input.track) };
     },
   };
 }
@@ -380,15 +384,7 @@ function constrainCorrectionToTrack(
   correction: SubtitleCorrectionResult,
   track: SubtitleTrack,
 ): SubtitleCorrectionResult {
-  const segmentIds = new Set(track.segments.map((segment) => segment.id));
-  const seenSegmentIds = new Set<string>();
-  const segments = correction.segments.filter((segment) => {
-    if (!segmentIds.has(segment.id)) return false;
-    if (seenSegmentIds.has(segment.id)) return false;
-    if (!segment.text.trim() || segment.text.includes("\uFFFD")) return false;
-    seenSegmentIds.add(segment.id);
-    return true;
-  });
+  const segments = constrainCorrectionSegments(correction.segments, track);
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
   const chapters = (correction.chapters ?? [])
     .filter((chapter) => chapter.startMs < subtitleEndMs)
@@ -401,6 +397,170 @@ function constrainCorrectionToTrack(
     }))
     .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs);
   return { ...correction, segments, chapters };
+}
+
+function constrainCorrectionSegments(
+  segments: SubtitleCorrectionResult["segments"],
+  track: SubtitleTrack,
+): SubtitleCorrectionResult["segments"] {
+  const sourceTextById = new Map(track.segments.map((segment) => [segment.id, segment.text]));
+  const seenSegmentIds = new Set<string>();
+  return segments.filter((segment) => {
+    const sourceText = sourceTextById.get(segment.id);
+    if (sourceText === undefined) return false;
+    if (seenSegmentIds.has(segment.id)) return false;
+    if (!segment.text.trim() || segment.text.includes("\uFFFD")) return false;
+    if (!isPlausibleTextCorrection(sourceText, segment.text)) return false;
+    seenSegmentIds.add(segment.id);
+    return true;
+  });
+}
+
+function recoverSubtitleCorrectionResult(
+  text: string,
+  track: SubtitleTrack,
+): SubtitleCorrectionResult | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(extractJsonObjectText(text));
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(value)) return null;
+
+  const segments = constrainCorrectionSegments(readLooseCorrectionSegments(value), track);
+  const chapters = readLooseCorrectionChapters(value, track);
+  return constrainCorrectionToTrack(
+    {
+      segments,
+      chapters: chapters.length > 0 ? chapters : buildFallbackChapters(track, segments),
+    },
+    track,
+  );
+}
+
+function readLooseCorrectionSegments(value: Record<string, unknown>): SubtitleCorrectionResult["segments"] {
+  const rawSegments = Array.isArray(value.segments)
+    ? value.segments
+    : Object.entries(value)
+        .filter(([id, text]) => id.startsWith("subtitle-") && typeof text === "string")
+        .map(([id, text]) => ({ id, text }));
+
+  return rawSegments.flatMap((segment, index) => {
+    try {
+      return [normalizeSegment(segment, index)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function readLooseCorrectionChapters(
+  value: Record<string, unknown>,
+  track: SubtitleTrack,
+): NonNullable<SubtitleCorrectionResult["chapters"]> {
+  if (Array.isArray(value.chapters)) {
+    return value.chapters.flatMap((chapter, index) => {
+      try {
+        return [normalizeChapter(chapter, index)];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  if (!Array.isArray(value.titles)) return [];
+  const timelineById = new Map(track.segments.map((segment) => [segment.id, segment]));
+  return value.titles.flatMap((title, index) => {
+    if (!isPlainObject(title)) return [];
+    if (typeof title.title === "string" && typeof title.startMs === "number") {
+      try {
+        return [normalizeChapter(title, index)];
+      } catch {
+        return [];
+      }
+    }
+    if (typeof title.id !== "string" || typeof title.text !== "string") return [];
+    const segment = timelineById.get(title.id);
+    if (!segment) return [];
+    return [{
+      title: inferChapterTitle(title.text, index),
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+    }];
+  });
+}
+
+function buildFallbackChapters(
+  track: SubtitleTrack,
+  corrections: SubtitleCorrectionResult["segments"] = [],
+): NonNullable<SubtitleCorrectionResult["chapters"]> {
+  const correctedTextById = new Map(corrections.map((segment) => [segment.id, segment.text]));
+  const segments = track.segments
+    .map((segment) => ({
+      ...segment,
+      text: correctedTextById.get(segment.id) ?? segment.text,
+    }))
+    .filter((segment) => segment.endMs > segment.startMs);
+  if (segments.length === 0) return [];
+
+  const chapterCount = Math.min(3, segments.length);
+  const chunkSize = Math.ceil(segments.length / chapterCount);
+  const chapters: NonNullable<SubtitleCorrectionResult["chapters"]> = [];
+  for (let index = 0; index < chapterCount; index += 1) {
+    const chunk = segments.slice(index * chunkSize, (index + 1) * chunkSize);
+    const first = chunk[0];
+    const last = chunk.at(-1);
+    if (!first || !last) continue;
+    chapters.push({
+      title: inferChapterTitle(chunk.map((segment) => segment.text).join(" "), index),
+      startMs: first.startMs,
+      endMs: last.endMs,
+    });
+  }
+  return chapters;
+}
+
+function inferChapterTitle(text: string, index: number): string {
+  const normalized = text.toLowerCase();
+  if (/use\s*state|状态|count/u.test(normalized)) return "状态设计";
+  if (/use\s*effect|副作用|清理|worker/u.test(normalized)) return "副作用清理";
+  if (/chapter|章节|jump|跳转/u.test(normalized)) return "章节跳转";
+  if (/问题|报错|error|bug|分析/u.test(normalized)) return "问题分析";
+  if (/实现|代码|组件|component|函数|function/u.test(normalized)) return "代码实现";
+  if (/测试|验证|test|expect/u.test(normalized)) return "测试验证";
+  return `片段 ${index + 1}`;
+}
+
+function isPlausibleTextCorrection(sourceText: string, correctedText: string): boolean {
+  const sourceTerms = extractAsciiTerms(sourceText);
+  if (sourceTerms.length > 0) {
+    const corrected = normalizeAsciiText(correctedText);
+    const preservedTerms = sourceTerms.filter((term) => corrected.includes(term));
+    if (sourceTerms.length <= 3) {
+      return preservedTerms.length === sourceTerms.length;
+    }
+    return preservedTerms.length / sourceTerms.length >= 0.75;
+  }
+
+  const sourceChars = extractCjkChars(sourceText);
+  if (sourceChars.length === 0) return true;
+  const correctedChars = new Set(extractCjkChars(correctedText));
+  const sharedChars = sourceChars.filter((char) => correctedChars.has(char)).length;
+  return sharedChars / sourceChars.length >= 0.35;
+}
+
+function extractAsciiTerms(text: string): string[] {
+  return [...new Set(text.match(/[a-z][a-z0-9_.$-]*/giu)?.map(normalizeAsciiText) ?? [])]
+    .filter((term) => term.length >= 2);
+}
+
+function normalizeAsciiText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9_.$-]/gu, "");
+}
+
+function extractCjkChars(text: string): string[] {
+  return [...new Set(text.match(/\p{Script=Han}/gu) ?? [])];
 }
 
 async function loadDefaultPipeline(
