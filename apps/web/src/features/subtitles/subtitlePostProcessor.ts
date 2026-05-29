@@ -495,14 +495,9 @@ function readLooseCorrectionChapters(
 function isPlausibleTextCorrection(sourceText: string, correctedText: string): boolean {
   const sourceTerms = extractAsciiTerms(sourceText);
   if (sourceTerms.length > 0) {
-    const corrected = normalizeAsciiText(correctedText);
-    const preservedTerms = sourceTerms.filter((term) => corrected.includes(term));
+    const preservedTerms = countPreservedAsciiTerms(sourceTerms, correctedText);
     const requiredPreservedTerms = Math.ceil(sourceTerms.length * ASCII_TERM_PRESERVATION_RATIO);
-    return (
-      preservedTerms.length >= requiredPreservedTerms ||
-      hasNearCodeTerm(sourceTerms, correctedText) ||
-      hasNearFusedCodeTerm(sourceTerms, correctedText)
-    );
+    return preservedTerms >= requiredPreservedTerms;
   }
 
   const sourceChars = extractCjkChars(sourceText);
@@ -517,36 +512,52 @@ function extractAsciiTerms(text: string): string[] {
     .filter((term) => term.length >= 2);
 }
 
-function hasNearFusedCodeTerm(sourceTerms: string[], correctedText: string): boolean {
+function countPreservedAsciiTerms(sourceTerms: string[], correctedText: string): number {
+  const corrected = normalizeAsciiText(correctedText);
   const correctedTerms = extractAsciiTerms(correctedText);
+  const preservedIndexes = new Set<number>();
+
+  sourceTerms.forEach((sourceTerm, index) => {
+    if (corrected.includes(sourceTerm)) {
+      preservedIndexes.add(index);
+      return;
+    }
+    if (hasNearCodeTerm(sourceTerm, correctedTerms)) {
+      preservedIndexes.add(index);
+    }
+  });
+
   for (const fusedSourceTerm of buildFusedSourceTerms(sourceTerms)) {
-    for (const correctedTerm of correctedTerms) {
-      if (isNearCodeTerm(fusedSourceTerm, correctedTerm)) return true;
+    if (!hasNearCodeTerm(fusedSourceTerm.term, correctedTerms)) continue;
+    for (let index = fusedSourceTerm.start; index < fusedSourceTerm.end; index += 1) {
+      preservedIndexes.add(index);
     }
   }
-  return false;
+
+  return preservedIndexes.size;
 }
 
-function hasNearCodeTerm(sourceTerms: string[], correctedText: string): boolean {
-  const correctedTerms = extractAsciiTerms(correctedText);
-  return sourceTerms.some((sourceTerm) =>
-    correctedTerms.some(
-      (correctedTerm) =>
-        correctedTerm !== sourceTerm &&
-        !correctedTerm.includes(sourceTerm) &&
-        isNearCodeTerm(sourceTerm, correctedTerm),
-    ),
-  );
-}
-
-function buildFusedSourceTerms(sourceTerms: string[]): string[] {
-  const terms = new Set<string>();
+function buildFusedSourceTerms(sourceTerms: string[]): Array<{ term: string; start: number; end: number }> {
+  const terms: Array<{ term: string; start: number; end: number }> = [];
+  const seen = new Set<string>();
   for (let start = 0; start < sourceTerms.length; start += 1) {
     for (let end = start + 2; end <= sourceTerms.length; end += 1) {
-      terms.add(sourceTerms.slice(start, end).join(""));
+      const term = sourceTerms.slice(start, end).join("");
+      if (seen.has(term)) continue;
+      seen.add(term);
+      terms.push({ term, start, end });
     }
   }
-  return [...terms];
+  return terms;
+}
+
+function hasNearCodeTerm(sourceTerm: string, correctedTerms: string[]): boolean {
+  return correctedTerms.some(
+    (correctedTerm) =>
+      correctedTerm !== sourceTerm &&
+      !correctedTerm.includes(sourceTerm) &&
+      isNearCodeTerm(sourceTerm, correctedTerm),
+  );
 }
 
 function isNearCodeTerm(sourceTerm: string, correctedTerm: string): boolean {

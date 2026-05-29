@@ -480,6 +480,32 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
   });
 
+  it("drops truncated corrections even when one source term is fused", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"useState"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(
+      postProcessor.process({
+        track: {
+          ...makeTrack(),
+          segments: [
+            { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "先讲 use state，再看 render result" },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      segments: [],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 1_000 }],
+    });
+  });
+
   it("keeps single-term frontend typo corrections without requiring the misspelling to survive", async () => {
     const pipeline = vi.fn(async () => [
       {
