@@ -537,6 +537,7 @@ function putBlobWithProgress(
     xhr.onload = () => {
       // 2xx 状态码视为成功
       if (xhr.status >= 200 && xhr.status < 300) {
+        onBytes(blob.size);
         resolve();
       } else {
         reject(

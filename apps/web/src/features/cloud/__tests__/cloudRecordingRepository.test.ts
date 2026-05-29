@@ -586,6 +586,10 @@ describe("CloudRecordingRepository", () => {
       expect(progressEvents[0].bytesUploaded).toBe(0);
       expect(progressEvents[0].totalBytes).toBe(1000);
       expect(progressEvents[0].currentAssetKind).toBe("manifest");
+
+      // onload 补发最终字节数后，最后一次进度应到达 100%
+      const last = progressEvents[progressEvents.length - 1];
+      expect(last.bytesUploaded).toBe(last.totalBytes);
     });
 
     it("PUT 失败返回 network-error 并保留错误信息", async () => {
@@ -882,6 +886,11 @@ describe("CloudRecordingRepository", () => {
       // 能收到来自不同资产的进度事件（证明中间进度已透传，而非仅在资产完成后回调）
       const kinds = new Set(progressEvents.map((e) => e.currentAssetKind));
       expect(kinds.size).toBeGreaterThanOrEqual(2);
+
+      // 最终进度到达 100%（onload 补发 blob.size 确保 UI 不会停在非 100%）
+      const globalTotal = [...totalSet][0];
+      const lastEvent = progressEvents[progressEvents.length - 1];
+      expect(lastEvent.bytesUploaded).toBe(globalTotal);
     }, 15000);
 
     it("create session 失败时透传错误", async () => {
