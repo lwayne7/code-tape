@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T22:12:33Z",
+  "updatedAt": "2026-05-29T22:14:48Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        189
+        189,
+        193
       ],
       "completedIssues": [
         11,
@@ -1035,6 +1036,20 @@
       "claimedAt": "2026-05-29T21:43:08Z",
       "closedAt": "2026-05-29T22:12:33Z",
       "mergedPr": 192
+    },
+    "193": {
+      "number": 193,
+      "title": "增强纠错并生成章节的 worker stale chunk 恢复覆盖",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T22:14:48Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
