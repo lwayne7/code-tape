@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:58:02Z",
+  "updatedAt": "2026-05-29T16:20:56Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         158,
-        162
+        162,
+        164
       ],
       "completedIssues": [
         11,
@@ -805,6 +806,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:53:54Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "164": {
+      "number": 164,
+      "title": "[Bug] 生成字幕 Transformers 动态 chunk 加载失败",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T16:20:56Z",
       "closedAt": null,
       "mergedPr": null
     }
