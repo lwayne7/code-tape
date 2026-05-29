@@ -49,9 +49,11 @@ export function createCloudApiHandler(deps: {
           requestId,
         );
       }
-      const result = await deps.service.listRecordings({ ownerId });
+      const listParams = parseListRecordingsQuery(url.searchParams);
+      if (!listParams.ok) return jsonError({ ...listParams.error, requestId }, requestId);
+      const result = await deps.service.listRecordings({ ownerId, ...listParams.value });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
-      return jsonResponse(result.value.recordings, 200, requestId);
+      return jsonResponse(result.value, 200, requestId);
     }
 
     const playbackMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/playback$/);
@@ -159,6 +161,33 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 function badRequestError(): CloudApiError {
   return { code: "bad-request", message: "request body must be a valid JSON object" };
+}
+
+function parseListRecordingsQuery(
+  searchParams: URLSearchParams,
+): CloudResult<{ cursor?: string; limit?: number }> {
+  const cursorParam = searchParams.get("cursor")?.trim();
+  const limitParam = searchParams.get("limit");
+  if (limitParam === null) {
+    return {
+      ok: true,
+      value: cursorParam ? { cursor: cursorParam } : {},
+    };
+  }
+  if (!/^\d+$/u.test(limitParam)) {
+    return { ok: false, error: badRequestError() };
+  }
+  const limit = Number(limitParam);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    return { ok: false, error: badRequestError() };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(cursorParam ? { cursor: cursorParam } : {}),
+      limit,
+    },
+  };
 }
 
 function parseCreateUploadSessionRequest(

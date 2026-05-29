@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T02:00:34Z",
+  "updatedAt": "2026-05-29T08:04:13.009Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 120,
+      "activeIssue": 126,
       "completedIssues": [
         11,
         10,
@@ -37,12 +37,13 @@
       "totalScore": 33.5
     },
     "MINTPIPERAS": {
-      "activeIssue": 117,
+      "activeIssue": null,
       "completedIssues": [
         9,
         60,
         67,
-        94
+        94,
+        117
       ],
       "reviewedIssues": [
         11,
@@ -54,10 +55,10 @@
         96
       ],
       "bugPenalties": [],
-      "developmentScore": 7.75,
+      "developmentScore": 10,
       "reviewScore": 4.75,
       "penaltyScore": 0,
-      "totalScore": 12.5
+      "totalScore": 14.75
     },
     "Suxian2001": {
       "activeIssue": null,
@@ -74,13 +75,14 @@
         67,
         58,
         94,
-        110
+        110,
+        117
       ],
       "bugPenalties": [],
       "developmentScore": 5.5,
-      "reviewScore": 5.5,
+      "reviewScore": 6.25,
       "penaltyScore": 0,
-      "totalScore": 11
+      "totalScore": 11.75
     },
     "yangchloeeeee": {
       "activeIssue": 118,
@@ -544,11 +546,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "MINTPIPERAS",
       "claimedAt": "2026-05-29T02:00:34Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T07:02:56Z",
+      "mergedPr": 121
     },
     "118": {
       "number": 118,
@@ -578,17 +580,17 @@
       "closedAt": null,
       "mergedPr": null
     },
-    "120": {
-      "number": 120,
-      "title": "[Epic] P1+ WebRTC 实时面试模式总控",
-      "score": 1,
+    "126": {
+      "number": 126,
+      "title": "[P1+ WebRTC] 面试房间与 WebSocket 信令",
+      "score": 5,
       "stack": [
-        "react",
-        "typescript"
+        "typescript",
+        "node"
       ],
       "status": "claimed",
       "assignee": "ceilf6",
-      "claimedAt": "2026-05-29T01:48:46Z",
+      "claimedAt": "2026-05-29T08:04:13.009Z",
       "closedAt": null,
       "mergedPr": null
     }
@@ -995,6 +997,18 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0.5,
       "createdAt": "2026-05-29T01:40:45Z"
+    },
+    {
+      "id": "pr-121-merge",
+      "type": "feature_merge",
+      "issue": 117,
+      "pr": 121,
+      "score": 3,
+      "developer": "MINTPIPERAS",
+      "reviewer": "Suxian2001",
+      "developerDelta": 2.25,
+      "reviewerDelta": 0.75,
+      "createdAt": "2026-05-29T07:02:56Z"
     }
   ]
 }

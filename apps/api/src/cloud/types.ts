@@ -102,14 +102,23 @@ export type CloudRecordingListItem = {
   title: string;
   durationMs: number;
   createdAt: string;
+  initialLanguage: RecordingLanguage;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  thumbnailUrl: string | null;
+  visibility: "private" | "unlisted";
+};
+
+export type CloudRecordingDetail = {
+  id: string;
+  title: string;
+  durationMs: number;
+  createdAt: string;
   updatedAt: string;
   initialLanguage: RecordingLanguage;
   hasAudio: boolean;
   hasCamera: boolean;
   status: RecordingStatus;
-};
-
-export type CloudRecordingDetail = CloudRecordingListItem & {
   localPackageId: string;
   schemaVersion: RecordingSchemaVersion;
   visibility: "private" | "unlisted";
@@ -134,6 +143,21 @@ export type CloudPlaybackDescriptor = {
   mediaUrl: string | null;
   thumbnailUrl: string | null;
   expiresAt: string;
+};
+
+export type CloudRecordingAssetSummary = Pick<
+  CloudRecordingAssetRecord,
+  "kind" | "sizeBytes" | "mimeType" | "validatedAt"
+>;
+
+export type CloudRecordingDetailResponse = {
+  recording: CloudRecordingDetail;
+  assets: CloudRecordingAssetSummary[];
+};
+
+export type ListRecordingsResponse = {
+  items: CloudRecordingListItem[];
+  nextCursor: string | null;
 };
 
 export type CloudRecordingRecord = {
