@@ -10,6 +10,7 @@ import {
 import type {
   CloudApiError,
   CloudRecordingDetail,
+  CloudRecordingDetailResponse,
   CloudRecordingListItem,
   CloudRecordingAssetRecord,
   CloudRecordingRecord,
@@ -18,6 +19,7 @@ import type {
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  ListRecordingsResponse,
   RecordingAssetKind,
   UploadSessionRecord,
   UploadTarget,
@@ -34,6 +36,7 @@ const RECORDING_LANGUAGES = [
 const RECORDING_LANGUAGE_SET = new Set<string>(RECORDING_LANGUAGES);
 const MAX_UPLOAD_SCALAR_LENGTH = 128;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
+const DEFAULT_LIST_LIMIT = 20;
 
 export type CloudRecordingService = {
   createUploadSession(input: {
@@ -47,11 +50,13 @@ export type CloudRecordingService = {
   }): Promise<CloudResult<CompleteUploadSessionResponse>>;
   listRecordings(input: {
     ownerId: string;
-  }): Promise<CloudResult<{ recordings: CloudRecordingListItem[] }>>;
+    cursor?: string;
+    limit?: number;
+  }): Promise<CloudResult<ListRecordingsResponse>>;
   getRecording(input: {
     ownerId: string;
     recordingId: string;
-  }): Promise<CloudResult<CloudRecordingDetail>>;
+  }): Promise<CloudResult<CloudRecordingDetailResponse>>;
 };
 
 export function createCloudRecordingService(deps: {
@@ -188,15 +193,21 @@ export function createCloudRecordingService(deps: {
       });
       return { ok: true, value: { recordingId: session.recordingId, status: "processing" } };
     },
-    async listRecordings({ ownerId }) {
+    async listRecordings({ ownerId, cursor, limit }) {
       const recordings = await deps.metadata.listRecordingsByOwner({
         ownerId,
         statuses: ["ready"],
       });
+      const pageSize = limit ?? DEFAULT_LIST_LIMIT;
+      const cursorIndex = cursor ? recordings.findIndex((recording) => recording.id === cursor) : -1;
+      const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+      const page = recordings.slice(startIndex, startIndex + pageSize);
+      const hasMore = startIndex + pageSize < recordings.length;
       return {
         ok: true,
         value: {
-          recordings: recordings.map(toListItem),
+          items: page.map(toListItem),
+          nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
         },
       };
     },
@@ -205,7 +216,14 @@ export function createCloudRecordingService(deps: {
       if (!recording || recording.ownerId !== ownerId || !isDetailVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
-      return { ok: true, value: toDetail(recording) };
+      const assets = await deps.metadata.listAssets(recordingId);
+      return {
+        ok: true,
+        value: {
+          recording: toDetail(recording),
+          assets: assets.map(toAssetSummary),
+        },
+      };
     },
   };
 }
@@ -216,17 +234,25 @@ function toListItem(recording: CloudRecordingRecord): CloudRecordingListItem {
     title: recording.title,
     durationMs: recording.durationMs,
     createdAt: recording.createdAt,
-    updatedAt: recording.updatedAt,
     initialLanguage: recording.initialLanguage,
     hasAudio: recording.hasAudio,
     hasCamera: recording.hasCamera,
-    status: recording.status,
+    thumbnailUrl: null,
+    visibility: recording.visibility,
   };
 }
 
 function toDetail(recording: CloudRecordingRecord): CloudRecordingDetail {
   return {
-    ...toListItem(recording),
+    id: recording.id,
+    title: recording.title,
+    durationMs: recording.durationMs,
+    createdAt: recording.createdAt,
+    updatedAt: recording.updatedAt,
+    initialLanguage: recording.initialLanguage,
+    hasAudio: recording.hasAudio,
+    hasCamera: recording.hasCamera,
+    status: recording.status,
     localPackageId: recording.localPackageId,
     schemaVersion: recording.schemaVersion,
     visibility: recording.visibility,
@@ -236,6 +262,15 @@ function toDetail(recording: CloudRecordingRecord): CloudRecordingDetail {
     snapshotCount: recording.snapshotCount,
     failureCode: recording.failureCode,
     failureMessage: recording.failureMessage,
+  };
+}
+
+function toAssetSummary(asset: CloudRecordingAssetRecord) {
+  return {
+    kind: asset.kind,
+    sizeBytes: asset.sizeBytes,
+    mimeType: asset.mimeType,
+    validatedAt: asset.validatedAt,
   };
 }
 
