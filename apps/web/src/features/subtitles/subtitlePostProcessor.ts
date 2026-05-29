@@ -14,7 +14,7 @@ const MAX_POSTPROCESSOR_SEGMENTS = 120;
 const MAX_DYNAMIC_NEW_TOKENS = 768;
 const NEW_TOKENS_PER_SEGMENT = 5;
 const CHAPTER_OUTPUT_TOKEN_RESERVE = 96;
-const MAX_REPAIR_OUTPUT_CHARS = 1_000;
+const MAX_REPAIR_OUTPUT_CHARS = 2_000;
 const ASCII_TERM_PRESERVATION_RATIO = 0.75;
 const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
 You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
@@ -128,17 +128,18 @@ export function createHuggingFaceSubtitlePostProcessor(
         ...buildChatTemplateOption(model),
       });
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+      const retryGeneratedText = readGeneratedText(retryOutput);
       try {
         return constrainCorrectionToTrack(
-          extractSubtitleCorrectionResult(readGeneratedText(retryOutput)),
+          extractSubtitleCorrectionResult(retryGeneratedText),
           input.track,
         );
       } catch (error) {
         if (!isRecoverableJsonOutputError(error)) throw error;
-        const recovered = recoverSubtitleCorrectionResult(readGeneratedText(retryOutput), input.track);
+        const recovered = recoverSubtitleCorrectionResult(retryGeneratedText, input.track);
         if (recovered) return recovered;
+        throw error;
       }
-      return { segments: [], chapters: buildFallbackChapters(input.track) };
     },
   };
 }
@@ -235,41 +236,9 @@ export function buildSubtitlePostProcessorPrompt({
   track: SubtitleTrack;
   context?: SubtitlePostProcessorContext;
 }): string {
-  const payload = {
-    language: context?.language ?? track.language ?? "unknown",
-    fileName: context?.fileName ?? null,
-    code: budgetPromptText(context?.code ?? "", MAX_PROMPT_CODE_CHARS),
-    runtimeOutput: budgetPromptText(
-      context?.runtimeOutput ?? "",
-      MAX_PROMPT_RUNTIME_OUTPUT_CHARS,
-    ),
-    glossary: context?.glossary ?? [],
-    inputSegments: track.segments.map((segment) => ({
-      id: segment.id,
-      text: segment.text,
-    })),
-    timeline: track.segments.map((segment) => ({
-      id: segment.id,
-      startMs: segment.startMs,
-      endMs: segment.endMs,
-    })),
-  };
-
-  return [
-    "你是 code-tape 的字幕后处理模型。",
-    "任务：修正 ASR 字幕里的前端领域术语、变量名、函数名、组件名和中英混合文本，并基于字幕内容生成章节跳转点。",
-    "规则：",
-    "- 只输出 JSON，不要输出解释、Markdown 或额外文本。",
-    "- 修正前端术语、变量名、函数名、组件名和明显的 ASR 误识别。",
-    "- segments 只返回需要修改的 segments；不需要修改的字幕段请省略，应用会保留原文。",
-    "- segments 只能引用输入中已有的 id，不能改 startMs/endMs。",
-    "- chapters 必须按时间递增、互不重叠，标题要短，适合回放导航。",
-    "- chapters 必须位于输入字幕时间轴内，不能在最后一个字幕 endMs 之后创建章节。",
-    "- 无法可靠生成章节时也必须输出 chapters: []。",
-    '输出结构示例：{"segments":[{"id":"subtitle-1","text":"这里用 useState 维护 count"}],"chapters":[{"title":"状态设计","startMs":0,"endMs":1000}]}',
-    "输入：",
-    JSON.stringify(payload),
-  ].join("\n");
+  return buildSubtitlePostProcessorMessages({ track, context })
+    .map((message) => message.content)
+    .join("\n");
 }
 
 export function buildSubtitlePostProcessorMessages(
@@ -303,15 +272,14 @@ export function buildSubtitlePostProcessorMessages(
   if (options.previousOutput !== undefined) {
     messages.push(
       {
-        role: "assistant",
-        content: budgetPromptText(options.previousOutput, MAX_REPAIR_OUTPUT_CHARS),
-      },
-      {
         role: "user",
         content: [
-          "Previous output did not contain a parseable JSON object.",
-          "Output exactly one JSON object with segments and chapters arrays.",
+          "Previous output failed JSON parsing or validation.",
+          "Regenerate from scratch; do not continue, patch, or explain the previous output.",
+          "Output exactly one complete JSON object with segments and chapters arrays.",
           "No explanations, Markdown, code fences, or text outside JSON.",
+          "Previous output excerpt:",
+          budgetPromptText(readRepairOutputExcerpt(options.previousOutput), MAX_REPAIR_OUTPUT_CHARS),
         ].join("\n"),
       },
     );
@@ -365,6 +333,14 @@ function budgetPromptText(text: string, maxChars: number): string {
   return `${text.slice(0, headChars)}${marker}${text.slice(text.length - tailChars)}`;
 }
 
+function readRepairOutputExcerpt(previousOutput: string): string {
+  try {
+    return extractJsonObjectText(previousOutput);
+  } catch {
+    return previousOutput;
+  }
+}
+
 function isRecoverableJsonOutputError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
@@ -412,7 +388,10 @@ function constrainCorrectionChaptersToTrack(
   track: SubtitleTrack,
 ): NonNullable<SubtitleCorrectionResult["chapters"]> {
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
-  const seenTimelines = new Set<string>();
+  const timelineState = {
+    previousEndMs: Number.NEGATIVE_INFINITY,
+    seenTimelines: new Set<string>(),
+  };
   return chapters
     .filter((chapter) => chapter.startMs < subtitleEndMs)
     .filter((chapter) => !chapter.title.includes("\uFFFD"))
@@ -420,19 +399,22 @@ function constrainCorrectionChaptersToTrack(
       ...chapter,
       ...(typeof chapter.endMs === "number"
         ? { endMs: Math.min(chapter.endMs, subtitleEndMs) }
-        : {}),
+      : {}),
     }))
     .filter((chapter) => chapter.endMs === undefined || chapter.endMs > chapter.startMs)
-    .filter((chapter) => keepUniqueChapterTimeline(chapter, seenTimelines));
+    .sort((left, right) => left.startMs - right.startMs)
+    .filter((chapter) => keepOrderedUniqueChapterTimeline(chapter, timelineState));
 }
 
-function keepUniqueChapterTimeline(
+function keepOrderedUniqueChapterTimeline(
   chapter: NonNullable<SubtitleCorrectionResult["chapters"]>[number],
-  seenTimelines: Set<string>,
+  state: { previousEndMs: number; seenTimelines: Set<string> },
 ): boolean {
+  if (chapter.startMs < state.previousEndMs) return false;
   const key = `${chapter.startMs}:${chapter.endMs ?? ""}`;
-  if (seenTimelines.has(key)) return false;
-  seenTimelines.add(key);
+  if (state.seenTimelines.has(key)) return false;
+  state.seenTimelines.add(key);
+  state.previousEndMs = chapter.endMs ?? chapter.startMs;
   return true;
 }
 
@@ -472,26 +454,21 @@ function recoverSubtitleCorrectionResult(
     return null;
   }
   if (!isPlainObject(value)) return null;
+  if (!Array.isArray(value.segments) || !Array.isArray(value.chapters)) return null;
 
-  const segments = constrainCorrectionSegments(readLooseCorrectionSegments(value), track);
-  const chapters = readLooseCorrectionChapters(value, track);
+  const segments = constrainCorrectionSegments(readLooseCorrectionSegments(value.segments), track);
+  const chapters = readLooseCorrectionChapters(value);
   return constrainCorrectionToTrack(
     {
       segments,
-      chapters: chapters.length > 0 ? chapters : buildFallbackChapters(track, segments),
+      chapters,
     },
     track,
   );
 }
 
-function readLooseCorrectionSegments(value: Record<string, unknown>): SubtitleCorrectionResult["segments"] {
-  const rawSegments = Array.isArray(value.segments)
-    ? value.segments
-    : Object.entries(value)
-        .filter(([id, text]) => id.startsWith("subtitle-") && typeof text === "string")
-        .map(([id, text]) => ({ id, text }));
-
-  return rawSegments.flatMap((segment, index) => {
+function readLooseCorrectionSegments(segments: unknown[]): SubtitleCorrectionResult["segments"] {
+  return segments.flatMap((segment, index) => {
     try {
       return [normalizeSegment(segment, index)];
     } catch {
@@ -502,7 +479,6 @@ function readLooseCorrectionSegments(value: Record<string, unknown>): SubtitleCo
 
 function readLooseCorrectionChapters(
   value: Record<string, unknown>,
-  track: SubtitleTrack,
 ): NonNullable<SubtitleCorrectionResult["chapters"]> {
   if (Array.isArray(value.chapters)) {
     return value.chapters.flatMap((chapter, index) => {
@@ -513,67 +489,7 @@ function readLooseCorrectionChapters(
       }
     });
   }
-
-  if (!Array.isArray(value.titles)) return [];
-  const timelineById = new Map(track.segments.map((segment) => [segment.id, segment]));
-  const seenSegmentIds = new Set<string>();
-  const chapters: NonNullable<SubtitleCorrectionResult["chapters"]> = [];
-  for (const title of value.titles) {
-    if (!isPlainObject(title)) continue;
-    if (typeof title.title === "string" && typeof title.startMs === "number") {
-      try {
-        chapters.push(normalizeChapter(title, chapters.length));
-      } catch {
-        // Keep recovering other loose chapter entries.
-      }
-      continue;
-    }
-    if (typeof title.id !== "string" || typeof title.text !== "string") continue;
-    if (seenSegmentIds.has(title.id)) continue;
-    const segment = timelineById.get(title.id);
-    if (!segment) continue;
-    seenSegmentIds.add(title.id);
-    chapters.push({
-      title: fallbackChapterTitle(chapters.length),
-      startMs: segment.startMs,
-      endMs: segment.endMs,
-    });
-  }
-  return chapters;
-}
-
-function buildFallbackChapters(
-  track: SubtitleTrack,
-  corrections: SubtitleCorrectionResult["segments"] = [],
-): NonNullable<SubtitleCorrectionResult["chapters"]> {
-  const correctedTextById = new Map(corrections.map((segment) => [segment.id, segment.text]));
-  const segments = track.segments
-    .map((segment) => ({
-      ...segment,
-      text: correctedTextById.get(segment.id) ?? segment.text,
-    }))
-    .filter((segment) => segment.endMs > segment.startMs);
-  if (segments.length === 0) return [];
-
-  const chapterCount = Math.min(3, segments.length);
-  const chunkSize = Math.ceil(segments.length / chapterCount);
-  const chapters: NonNullable<SubtitleCorrectionResult["chapters"]> = [];
-  for (let index = 0; index < chapterCount; index += 1) {
-    const chunk = segments.slice(index * chunkSize, (index + 1) * chunkSize);
-    const first = chunk[0];
-    const last = chunk.at(-1);
-    if (!first || !last) continue;
-    chapters.push({
-      title: fallbackChapterTitle(index),
-      startMs: first.startMs,
-      endMs: last.endMs,
-    });
-  }
-  return chapters;
-}
-
-function fallbackChapterTitle(index: number): string {
-  return `片段 ${index + 1}`;
+  return [];
 }
 
 function isPlausibleTextCorrection(sourceText: string, correctedText: string): boolean {
@@ -582,7 +498,11 @@ function isPlausibleTextCorrection(sourceText: string, correctedText: string): b
     const corrected = normalizeAsciiText(correctedText);
     const preservedTerms = sourceTerms.filter((term) => corrected.includes(term));
     const requiredPreservedTerms = Math.ceil(sourceTerms.length * ASCII_TERM_PRESERVATION_RATIO);
-    return preservedTerms.length >= requiredPreservedTerms || hasNearFusedCodeTerm(sourceTerms, correctedText);
+    return (
+      preservedTerms.length >= requiredPreservedTerms ||
+      hasNearCodeTerm(sourceTerms, correctedText) ||
+      hasNearFusedCodeTerm(sourceTerms, correctedText)
+    );
   }
 
   const sourceChars = extractCjkChars(sourceText);
@@ -607,6 +527,18 @@ function hasNearFusedCodeTerm(sourceTerms: string[], correctedText: string): boo
   return false;
 }
 
+function hasNearCodeTerm(sourceTerms: string[], correctedText: string): boolean {
+  const correctedTerms = extractAsciiTerms(correctedText);
+  return sourceTerms.some((sourceTerm) =>
+    correctedTerms.some(
+      (correctedTerm) =>
+        correctedTerm !== sourceTerm &&
+        !correctedTerm.includes(sourceTerm) &&
+        isNearCodeTerm(sourceTerm, correctedTerm),
+    ),
+  );
+}
+
 function buildFusedSourceTerms(sourceTerms: string[]): string[] {
   const terms = new Set<string>();
   for (let start = 0; start < sourceTerms.length; start += 1) {
@@ -618,8 +550,8 @@ function buildFusedSourceTerms(sourceTerms: string[]): string[] {
 }
 
 function isNearCodeTerm(sourceTerm: string, correctedTerm: string): boolean {
-  if (sourceTerm.length < 5 || correctedTerm.length < 5) return false;
-  const maxDistance = Math.max(1, Math.floor(Math.max(sourceTerm.length, correctedTerm.length) * 0.2));
+  if (sourceTerm.length < 4 || correctedTerm.length < 3) return false;
+  const maxDistance = Math.max(2, Math.floor(Math.max(sourceTerm.length, correctedTerm.length) * 0.2));
   return levenshteinDistanceWithin(sourceTerm, correctedTerm, maxDistance);
 }
 
@@ -650,7 +582,7 @@ function normalizeAsciiText(text: string): string {
 }
 
 function extractCjkChars(text: string): string[] {
-  return [...new Set(text.match(/\p{Script=Han}/gu) ?? [])];
+  return text.match(/\p{Script=Han}/gu) ?? [];
 }
 
 async function loadDefaultPipeline(

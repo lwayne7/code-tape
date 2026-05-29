@@ -139,9 +139,8 @@ def read_prompt_segments(payload: dict) -> object:
                 **segment,
                 "startMs": timeline_by_id.get(segment.get("id"), {}).get("startMs"),
                 "endMs": timeline_by_id.get(segment.get("id"), {}).get("endMs"),
-            }
+            } if isinstance(segment, dict) else segment
             for segment in payload["inputSegments"]
-            if isinstance(segment, dict)
         ]
     return payload.get("inputSegments", payload.get("segments"))
 

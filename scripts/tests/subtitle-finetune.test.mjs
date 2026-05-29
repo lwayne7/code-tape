@@ -932,6 +932,48 @@ test('dataset validator rejects empty JSONL input', () => {
   }
 });
 
+test('LoRA training JSONL validator rejects non-object inputSegments entries', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-bad-input-segments-train-'));
+  const fixturePath = join(tempDir, 'train.jsonl');
+  writeFileSync(
+    fixturePath,
+    `${JSON.stringify({
+      messages: [
+        { role: 'system', content: 'Only output JSON.' },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            inputSegments: [
+              { id: 'subtitle-1', text: '继续讲 use state' },
+              'bad-segment',
+            ],
+            timeline: [
+              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
+              { id: 'subtitle-2', startMs: 1200, endMs: 2400 },
+            ],
+          }),
+        },
+        {
+          role: 'assistant',
+          content: JSON.stringify({
+            segments: [{ id: 'subtitle-1', text: '继续讲 useState' }],
+            chapters: [{ title: '状态设计', startMs: 0, endMs: 1200 }],
+          }),
+        },
+      ],
+    })}\n`,
+  );
+
+  try {
+    const result = runTrainingValidation(fixturePath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /user segments\[1\] must be an object/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('distillation CLI rejects empty seed JSONL without writing output', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'subtitle-empty-distill-'));
   const seedPath = join(tempDir, 'empty-seed.jsonl');

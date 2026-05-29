@@ -205,11 +205,14 @@ function validateTeacherChapters(chapters, timeline) {
 export function readPromptSegments(payload) {
   if (Array.isArray(payload.inputSegments) && Array.isArray(payload.timeline)) {
     const timelineById = new Map(payload.timeline.map((item) => [item.id, item]));
-    return payload.inputSegments.map((segment) => ({
-      ...segment,
-      startMs: timelineById.get(segment.id)?.startMs,
-      endMs: timelineById.get(segment.id)?.endMs,
-    }));
+    return payload.inputSegments.map((segment) => {
+      if (!isPlainObject(segment)) return segment;
+      return {
+        ...segment,
+        startMs: timelineById.get(segment.id)?.startMs,
+        endMs: timelineById.get(segment.id)?.endMs,
+      };
+    });
   }
   return payload.inputSegments ?? payload.segments;
 }
