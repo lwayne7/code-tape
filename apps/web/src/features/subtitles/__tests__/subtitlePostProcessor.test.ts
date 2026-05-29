@@ -312,6 +312,34 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
   });
 
+  it("keeps near-match corrections that fuse ASR words into frontend tool names", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[{"id":"subtitle-1","text":"Playwright 跑端到端测试"},{"id":"subtitle-2","text":"Vitest 负责单元测试"}],"chapters":[{"title":"测试验证","startMs":0,"endMs":3000}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({
+      track: {
+        ...makeTrack(),
+        segments: [
+          { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "play right 跑端到端测试" },
+          { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "vit test 负责单元测试" },
+        ],
+      },
+    })).resolves.toEqual({
+      segments: [
+        { id: "subtitle-1", text: "Playwright 跑端到端测试" },
+        { id: "subtitle-2", text: "Vitest 负责单元测试" },
+      ],
+      chapters: [{ title: "测试验证", startMs: 0, endMs: 3_000 }],
+    });
+  });
+
   it("drops chapters with replacement-character quantization noise", async () => {
     const pipeline = vi.fn(async () => [
       {

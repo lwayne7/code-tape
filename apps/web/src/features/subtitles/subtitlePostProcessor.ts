@@ -538,7 +538,7 @@ function isPlausibleTextCorrection(sourceText: string, correctedText: string): b
     const corrected = normalizeAsciiText(correctedText);
     const preservedTerms = sourceTerms.filter((term) => corrected.includes(term));
     if (sourceTerms.length <= 3) {
-      return preservedTerms.length === sourceTerms.length;
+      return preservedTerms.length === sourceTerms.length || hasNearFusedCodeTerm(sourceTerms, correctedText);
     }
     return preservedTerms.length / sourceTerms.length >= 0.75;
   }
@@ -553,6 +553,54 @@ function isPlausibleTextCorrection(sourceText: string, correctedText: string): b
 function extractAsciiTerms(text: string): string[] {
   return [...new Set(text.match(/[a-z][a-z0-9_.$-]*/giu)?.map(normalizeAsciiText) ?? [])]
     .filter((term) => term.length >= 2);
+}
+
+function hasNearFusedCodeTerm(sourceTerms: string[], correctedText: string): boolean {
+  const correctedTerms = extractAsciiTerms(correctedText);
+  for (const fusedSourceTerm of buildFusedSourceTerms(sourceTerms)) {
+    for (const correctedTerm of correctedTerms) {
+      if (isNearCodeTerm(fusedSourceTerm, correctedTerm)) return true;
+    }
+  }
+  return false;
+}
+
+function buildFusedSourceTerms(sourceTerms: string[]): string[] {
+  const terms = new Set<string>();
+  for (let start = 0; start < sourceTerms.length; start += 1) {
+    for (let end = start + 2; end <= sourceTerms.length; end += 1) {
+      terms.add(sourceTerms.slice(start, end).join(""));
+    }
+  }
+  return [...terms];
+}
+
+function isNearCodeTerm(sourceTerm: string, correctedTerm: string): boolean {
+  if (sourceTerm.length < 5 || correctedTerm.length < 5) return false;
+  const maxDistance = Math.max(1, Math.floor(Math.max(sourceTerm.length, correctedTerm.length) * 0.2));
+  return levenshteinDistanceWithin(sourceTerm, correctedTerm, maxDistance);
+}
+
+function levenshteinDistanceWithin(left: string, right: string, maxDistance: number): boolean {
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = current[0] ?? leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const distance = Math.min(
+        (previous[rightIndex] ?? 0) + 1,
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + substitutionCost,
+      );
+      current[rightIndex] = distance;
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maxDistance) return false;
+    previous = current;
+  }
+  return (previous[right.length] ?? Number.POSITIVE_INFINITY) <= maxDistance;
 }
 
 function normalizeAsciiText(text: string): string {
