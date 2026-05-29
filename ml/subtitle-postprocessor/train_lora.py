@@ -329,7 +329,8 @@ def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> di
     labels = []
     for token_id, offset in zip(input_ids, offset_mapping[:max_seq_length]):
         start, end = offset
-        labels.append(token_id if start >= assistant_start and end <= assistant_end and end > start else -100)
+        overlaps_assistant_content = start < assistant_end and end > assistant_start
+        labels.append(token_id if overlaps_assistant_content and end > start else -100)
     if all(label == -100 for label in labels):
         raise ValueError("training record contains no assistant labels after truncation")
     return {

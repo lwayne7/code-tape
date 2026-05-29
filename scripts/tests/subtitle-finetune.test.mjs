@@ -452,6 +452,45 @@ test('LoRA training masks labels to assistant JSON without chat template tail to
   );
 });
 
+test('LoRA training keeps tokens that overlap the assistant JSON start boundary', () => {
+  const python = [
+    'import importlib.util',
+    'import json',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>\\n"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[]}"',
+    'FULL = PROMPT + ASSISTANT + "</a>"',
+    'class CrossBoundaryTokenizer:',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        prompt_end = len(PROMPT)',
+    '        offsets = [(0, prompt_end - 1), (prompt_end - 1, prompt_end + 1)]',
+    '        cursor = prompt_end + 1',
+    '        while cursor < len(text):',
+    '            offsets.append((cursor, cursor + 1))',
+    '            cursor += 1',
+    '        ids = list(range(1, len(offsets) + 1))',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    'tokenizer = CrossBoundaryTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'boundary_index = 1',
+    'print(json.dumps({"boundaryId": tokens["input_ids"][boundary_index], "boundaryLabel": tokens["labels"][boundary_index]}))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { boundaryId: 2, boundaryLabel: 2 });
+});
+
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
   const result = spawnSync(
     'node',
