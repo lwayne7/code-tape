@@ -19,6 +19,8 @@
  * - 对 P0 本地保存/回放主链路的任何修改
  */
 
+import type { RecordingPackageV1 } from "@code-tape/recording-schema";
+import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash";
 import type {
   CloudRecordingRepository,
   CloudResult,
@@ -31,6 +33,7 @@ import type {
   UploadProgress,
   UploadTarget,
   CloudApiError,
+  RecordingAssetKind,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────
@@ -174,6 +177,137 @@ export function createCloudRecordingRepository(
       }
     },
 
+    // ── 一步上传完整 RecordingPackageV1 ──────────────────
+    async uploadPackage(
+      pkg: RecordingPackageV1,
+      blobs: { media?: Blob; thumbnail?: Blob },
+      options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void },
+    ): Promise<CloudResult<{ recordingId: string; status: string }>> {
+      const onProgress = options?.onProgress;
+      const idempotencyKey = options?.idempotencyKey ?? pkg.manifest.packageId;
+
+      // 1. 序列化 JSON 资产并计算 sha256 / size
+      const assetDefs = await buildPackageAssetDefs(pkg, blobs);
+
+      // 2. 创建上传会话
+      const sessionInput: CreateUploadSessionRequest = {
+        idempotencyKey,
+        localPackageId: pkg.manifest.packageId,
+        title: pkg.meta.title,
+        schemaVersion: pkg.manifest.schemaVersion,
+        durationMs: pkg.meta.durationMs,
+        initialLanguage: pkg.meta.initialLanguage,
+        hasAudio: pkg.media?.hasAudio ?? false,
+        hasCamera: pkg.media?.hasCamera ?? false,
+        assets: assetDefs.map((a) => ({
+          kind: a.kind,
+          sha256: a.sha256,
+          sizeBytes: a.sizeBytes,
+          mimeType: a.mimeType,
+        })),
+      };
+      const sessionResult = await repo.createUploadSession(sessionInput);
+      if (!sessionResult.ok) return sessionResult;
+      const { sessionId, recordingId, uploadTargets } = sessionResult.value;
+
+      // 3. 按 target 上传各资产
+      const totalBytes = assetDefs.reduce((sum, a) => sum + a.sizeBytes, 0);
+      let bytesUploaded = 0;
+      const uploadedAssets: { kind: RecordingAssetKind; sha256: string; sizeBytes: number }[] = [];
+
+      // 构建 kind → blob 映射
+      const blobByKind = new Map<string, Blob>();
+      for (const asset of assetDefs) {
+        blobByKind.set(asset.kind, asset.blob);
+      }
+
+      for (const target of uploadTargets) {
+        const blob = blobByKind.get(target.kind);
+        if (!blob) {
+          return {
+            ok: false,
+            error: {
+              code: "network-error",
+              message: `missing blob for upload target kind: ${target.kind}`,
+            },
+          };
+        }
+
+        const assetResult = await repo.uploadAsset(target, blob, () => {
+          // 资产级别进度：每个资产完成后累加已上传字节
+        });
+        if (!assetResult.ok) return assetResult;
+
+        // 资产上传完成，累加进度
+        const def = assetDefs.find((a) => a.kind === target.kind);
+        if (def) {
+          bytesUploaded += def.sizeBytes;
+          onProgress?.({
+            bytesUploaded,
+            totalBytes,
+            currentAssetKind: target.kind,
+          });
+        }
+
+        uploadedAssets.push({
+          kind: target.kind,
+          sha256: assetDefs.find((a) => a.kind === target.kind)!.sha256,
+          sizeBytes: assetDefs.find((a) => a.kind === target.kind)!.sizeBytes,
+        });
+      }
+
+      // 4. complete
+      const completeResult = await repo.completeUpload(sessionId, { uploadedAssets });
+      if (!completeResult.ok) return completeResult;
+
+      return {
+        ok: true,
+        value: { recordingId, status: completeResult.value.status },
+      };
+    },
+
+    // ── 状态轮询 ──────────────────────────────────────────
+    async pollUntilReady(
+      recordingId: string,
+      options?: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal },
+    ): Promise<CloudResult<CloudRecordingDetail>> {
+      const intervalMs = options?.intervalMs ?? 3000;
+      const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
+      const signal = options?.signal;
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() < deadline) {
+        if (signal?.aborted) {
+          return {
+            ok: false,
+            error: { code: "network-error", message: "poll cancelled" },
+          };
+        }
+
+        const result = await repo.get(recordingId);
+        if (!result.ok) return result;
+
+        const { status } = result.value;
+        if (status === "ready") {
+          return result;
+        }
+        if (status === "failed") {
+          return result;
+        }
+
+        // 等待下一个轮询间隔
+        await sleep(Math.min(intervalMs, deadline - Date.now()));
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: "network-error",
+          message: `poll timed out after ${timeoutMs}ms for recording ${recordingId}`,
+        },
+      };
+    },
+
     // ── owner token 管理 ──────────────────────────────────
     getOwnerToken(): string {
       const existing = readOwnerToken();
@@ -255,6 +389,97 @@ function formatError(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
   if (typeof err === "string") return err;
   return "unknown error";
+}
+
+// ─────────────────────────────────────────────────────────────
+// RecordingPackageV1 资产序列化
+// ─────────────────────────────────────────────────────────────
+
+type AssetDef = {
+  kind: RecordingAssetKind;
+  blob: Blob;
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+};
+
+async function buildPackageAssetDefs(
+  pkg: RecordingPackageV1,
+  blobs: { media?: Blob; thumbnail?: Blob },
+): Promise<AssetDef[]> {
+  const defs: AssetDef[] = [];
+
+  // manifest
+  const manifestStr = canonicalStringify({
+    packageId: pkg.manifest.packageId,
+    schemaVersion: pkg.manifest.schemaVersion,
+    status: pkg.manifest.status,
+    createdAt: pkg.manifest.createdAt,
+    completedAt: pkg.manifest.completedAt,
+    checksums: pkg.manifest.checksums,
+  });
+  defs.push(await buildJsonAsset("manifest", manifestStr));
+
+  // meta
+  defs.push(await buildJsonAsset("meta", canonicalStringify(pkg.meta)));
+
+  // events
+  defs.push(await buildJsonAsset("events", canonicalStringify(pkg.events)));
+
+  // snapshots
+  defs.push(await buildJsonAsset("snapshots", canonicalStringify(pkg.snapshots)));
+
+  // indexes（可选）
+  if (pkg.indexes) {
+    defs.push(await buildJsonAsset("indexes", canonicalStringify(pkg.indexes)));
+  }
+
+  // media（二进制，由调用方提供）
+  if (blobs.media) {
+    const sha256 = await sha256Blob(blobs.media);
+    defs.push({
+      kind: "media",
+      blob: blobs.media,
+      sha256,
+      sizeBytes: blobs.media.size,
+      mimeType: blobs.media.type || pkg.media?.mimeType || "video/webm",
+    });
+  }
+
+  // thumbnail（二进制，可选）
+  if (blobs.thumbnail) {
+    const sha256 = await sha256Blob(blobs.thumbnail);
+    defs.push({
+      kind: "thumbnail",
+      blob: blobs.thumbnail,
+      sha256,
+      sizeBytes: blobs.thumbnail.size,
+      mimeType: blobs.thumbnail.type || "image/webp",
+    });
+  }
+
+  return defs;
+}
+
+async function buildJsonAsset(kind: RecordingAssetKind, json: string): Promise<AssetDef> {
+  const sha256 = await sha256Hex(json);
+  const blob = new Blob([json], { type: "application/json" });
+  return { kind, blob, sha256, sizeBytes: blob.size, mimeType: "application/json" };
+}
+
+async function sha256Blob(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(buffer));
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ─────────────────────────────────────────────────────────────
+// 工具
+// ─────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 // ─────────────────────────────────────────────────────────────

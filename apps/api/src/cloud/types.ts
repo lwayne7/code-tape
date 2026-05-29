@@ -165,27 +165,3 @@ export type UploadSessionRecord = {
   createdAt: string;
   completedAt: string | null;
 };
-
-// 录制详情响应（GET /api/recordings/:id）
-export type CloudRecordingDetailResponse = {
-  recording: CloudRecordingRecord;
-  assets: Array<
-    Pick<CloudRecordingAssetRecord, "kind" | "sizeBytes" | "mimeType" | "validatedAt">
-  >;
-};
-
-// 录制列表响应（GET /api/recordings）
-export type ListRecordingsResponse = {
-  items: Array<{
-    id: string;
-    title: string;
-    createdAt: string;
-    durationMs: number;
-    initialLanguage: string;
-    hasAudio: boolean;
-    hasCamera: boolean;
-    thumbnailUrl: string | null;
-    visibility: "private" | "unlisted";
-  }>;
-  nextCursor: string | null;
-};

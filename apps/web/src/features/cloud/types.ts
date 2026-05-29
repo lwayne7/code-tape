@@ -174,8 +174,27 @@ export type CloudRecordingRepository = {
     input: CompleteUploadSessionRequest,
   ): Promise<CloudResult<CompleteUploadSessionResponse>>;
 
+  /**
+   * 一步完成完整上传流程：序列化 RecordingPackageV1 JSON 资产 → create session →
+   * PUT 各资产 → complete。调用方只需提供 package 和二进制 blob。
+   */
+  uploadPackage(
+    pkg: import("@code-tape/recording-schema").RecordingPackageV1,
+    blobs: { media?: Blob; thumbnail?: Blob },
+    options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void },
+  ): Promise<CloudResult<{ recordingId: string; status: string }>>;
+
   /** 查询录制详情与当前状态（uploading/processing/ready/failed） */
   get(recordingId: string): Promise<CloudResult<CloudRecordingDetail>>;
+
+  /**
+   * 轮询录制状态直到 ready / failed / timeout。
+   * 默认每 3 秒轮询一次，最长等待 10 分钟。
+   */
+  pollUntilReady(
+    recordingId: string,
+    options?: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<CloudResult<CloudRecordingDetail>>;
 
   /** 查询当前 owner 的 ready 录制列表 */
   list(): Promise<CloudResult<CloudRecordingListItem[]>>;

@@ -82,6 +82,79 @@ function makeBlob(content = "test content", type = "application/json"): Blob {
   return new Blob([content], { type });
 }
 
+/** 构造最小 RecordingPackageV1 用于 uploadPackage 测试 */
+function makeMinimalPackage(opts: { hasMedia: boolean }): import("@code-tape/recording-schema").RecordingPackageV1 {
+  return {
+    schemaVersion: "0.1.0",
+    manifest: {
+      packageId: "pkg-test-1",
+      schemaVersion: "0.1.0",
+      status: "complete",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      completedAt: "2026-05-29T00:05:00.000Z",
+      checksums: {
+        eventsSha256: "aa".repeat(32),
+        snapshotsSha256: "bb".repeat(32),
+      },
+    },
+    meta: {
+      id: "meta-1",
+      title: "Test Package",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      durationMs: 5000,
+      appVersion: "1.0.0",
+      ownerId: null,
+      creatorInfo: { displayName: "tester", source: "local" },
+      initialLanguage: "javascript",
+      initialFontSize: 14,
+      initialTheme: "dark",
+      mediaCapability: {
+        audio: opts.hasMedia ? "available" : "not-found",
+        camera: opts.hasMedia ? "available" : "not-found",
+        selectedAudioDeviceId: null,
+        selectedCameraDeviceId: null,
+      },
+    },
+    events: [{
+      id: "e-1",
+      seq: 1,
+      timestampMs: 100,
+      source: "editor",
+      track: "main",
+      type: "content-change",
+      payload: {
+        fileId: "main",
+        version: 1,
+        code: "console.log(1)",
+        contentHash: "h1",
+        language: "javascript",
+        changeReason: "input",
+        changeCount: 1,
+        flushedBy: "debounce",
+      },
+    }],
+    snapshots: [{
+      id: "snap-1",
+      timestampMs: 0,
+      eventSeq: 1,
+      state: {
+        editor: {
+          code: "console.log(1)",
+          language: "javascript",
+          cursor: null,
+          selection: null,
+          scrollTop: 0,
+          scrollLeft: 0,
+        },
+        status: "idle",
+      },
+    }],
+    media: opts.hasMedia
+      ? { blobId: "media-1", mimeType: "video/webm", durationMs: 5000, sizeBytes: 100, timelineOffsetMs: 0, hasAudio: true, hasCamera: true }
+      : null,
+  } as unknown as import("@code-tape/recording-schema").RecordingPackageV1;
+}
+
 /** 构造一份 CloudRecordingDetail 测试数据 */
 function makeDetail(overrides: Partial<CloudRecordingDetail> = {}): CloudRecordingDetail {
   return {
@@ -626,5 +699,133 @@ describe("CloudRecordingRepository", () => {
       expect(result.value.uploadTargets).toHaveLength(4);
       expect(result.value.uploadTargets.find((t) => t.kind === "media")).toBeUndefined();
     });
+  });
+
+  // ───────────────────────────────────────────────────────
+  // uploadPackage（一步上传完整 RecordingPackageV1）
+  // ───────────────────────────────────────────────────────
+
+  describe("uploadPackage", () => {
+    it("使用 RecordingPackageV1 完整上传（含媒体）并返回 recordingId", async () => {
+      const repo = setupRepo();
+      const mediaBlob = new Blob(["fake-webm-data"], { type: "video/webm" });
+
+      // 1. create session
+      mockFetch(201, makeSessionResponse());
+
+      // 2. upload assets（每资产一个 XHR mock）
+      const mockXhrs: MockXhr[] = [];
+      for (let i = 0; i < 5; i++) {
+        const { xhr, instance } = createMockXhr();
+        mockXhrs.push(xhr);
+        vi.spyOn(globalThis, "XMLHttpRequest").mockImplementationOnce(() => instance);
+      }
+
+      // 3. complete
+      mockFetch(200, { recordingId: "rec_1", status: "processing" });
+
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      const result = await repo.uploadPackage(pkg, { media: mediaBlob });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.recordingId).toBe("rec_1");
+      expect(result.value.status).toBe("processing");
+    });
+
+    it("无媒体录制包也能成功上传", async () => {
+      const repo = setupRepo();
+
+      mockFetch(201, makeSessionResponse({
+        uploadTargets: [
+          makeUploadTarget("manifest"),
+          makeUploadTarget("meta"),
+          makeUploadTarget("events"),
+          makeUploadTarget("snapshots"),
+        ],
+      }));
+
+      for (let i = 0; i < 4; i++) {
+        const { instance } = createMockXhr();
+        vi.spyOn(globalThis, "XMLHttpRequest").mockImplementationOnce(() => instance);
+      }
+
+      mockFetch(200, { recordingId: "rec_1", status: "processing" });
+
+      const pkg = makeMinimalPackage({ hasMedia: false });
+      const result = await repo.uploadPackage(pkg, {});
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.status).toBe("processing");
+    });
+
+    it("create session 失败时透传错误", async () => {
+      const repo = setupRepo();
+      mockFetch(422, { error: { code: "unsupported-schema", message: "bad schema" } });
+
+      const pkg = makeMinimalPackage({ hasMedia: false });
+      const result = await repo.uploadPackage(pkg, {});
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("unsupported-schema");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────
+  // pollUntilReady（状态轮询）
+  // ───────────────────────────────────────────────────────
+
+  describe("pollUntilReady", () => {
+    it("processing 多次后变为 ready 时返回", async () => {
+      const repo = setupRepo();
+
+      // 前两次返回 processing，第三次返回 ready
+      mockFetch(200, makeDetail({ status: "processing" }));
+      mockFetch(200, makeDetail({ status: "processing" }));
+      mockFetch(200, makeDetail({ status: "ready", eventCount: 10 }));
+
+      const result = await repo.pollUntilReady("rec_1", { intervalMs: 10 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.status).toBe("ready");
+    }, 5000);
+
+    it("变为 failed 时立即返回", async () => {
+      const repo = setupRepo();
+      mockFetch(200, makeDetail({ status: "failed", failureCode: "checksum-mismatch" }));
+
+      const result = await repo.pollUntilReady("rec_1", { intervalMs: 10 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.status).toBe("failed");
+      expect(result.value.failureCode).toBe("checksum-mismatch");
+    }, 5000);
+
+    it("get 调用失败时立即返回错误", async () => {
+      const repo = setupRepo();
+      mockFetch(404, { error: { code: "not-found", message: "not found" } });
+
+      const result = await repo.pollUntilReady("rec_1", { intervalMs: 10 });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("not-found");
+    }, 5000);
+
+    it("超时后返回 timeout 错误", async () => {
+      const repo = setupRepo();
+
+      // 一直返回 processing（足够多次以覆盖 timeoutMs 内的所有轮询）
+      for (let i = 0; i < 20; i++) {
+        mockFetch(200, makeDetail({ status: "processing" }));
+      }
+
+      const result = await repo.pollUntilReady("rec_1", { intervalMs: 10, timeoutMs: 50 });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("network-error");
+      expect(result.error.message).toContain("timed out");
+    }, 5000);
   });
 });
