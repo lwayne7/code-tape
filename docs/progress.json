@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T17:43:47Z",
+  "updatedAt": "2026-05-29T17:46:48Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         168,
-        169
+        169,
+        171
       ],
       "completedIssues": [
         11,
@@ -870,6 +871,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T17:22:26Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "171": {
+      "number": 171,
+      "title": "[P1+ WebRTC] 候选人媒体会话与 SDP/ICE 信令接线",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T17:46:48Z",
       "closedAt": null,
       "mergedPr": null
     }
