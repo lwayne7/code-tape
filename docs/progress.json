@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T21:40:01Z",
+  "updatedAt": "2026-05-29T21:43:08Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        189
+        189,
+        190
       ],
       "completedIssues": [
         11,
@@ -1018,6 +1019,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T21:34:30Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "190": {
+      "number": 190,
+      "title": "修复线上生成字幕的 Transformers stale chunk 恢复",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T21:43:08Z",
       "closedAt": null,
       "mergedPr": null
     }
