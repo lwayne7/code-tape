@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T22:55:44Z",
+  "updatedAt": "2026-05-29T23:08:03Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        174
+        174,
+        196
       ],
       "completedIssues": [
         11,
@@ -1050,6 +1051,20 @@
       "claimedAt": "2026-05-29T22:14:48Z",
       "closedAt": "2026-05-29T22:55:44Z",
       "mergedPr": 194
+    },
+    "196": {
+      "number": 196,
+      "title": "[P1+ AI] 中长字幕轨按 60 段窗口分块后处理",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T23:08:03Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
