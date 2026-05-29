@@ -11,6 +11,7 @@ import { createMemoryMetadataRepository } from "../memoryMetadataRepository.js";
 import { createMemoryObjectStorage } from "../memoryObjectStorage.js";
 import { processNextRecordingValidationJob } from "../validationWorker.js";
 import {
+  MAX_RECORDING_MEDIA_SIZE_BYTES,
   MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
   type CreateUploadSessionRequest,
 } from "../types.js";
@@ -362,6 +363,95 @@ test("createUploadSession rejects upload session with total size exceeding limit
   if (created.ok) return;
   assert.equal(created.error.code, "quota-exceeded");
   assert.match(created.error.message, /total asset size exceeds budget limit/);
+});
+
+test("validation worker rejects existing media object exceeding the media size limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const mediaBytes = new Uint8Array(100);
+  const mediaBlob = new Blob([mediaBytes], { type: "video/webm" });
+  const pkg = await makePackage({ mediaSha256: await sha256Blob(mediaBlob) });
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg, { mediaBytes }),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg, { mediaBytes });
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg, { mediaBytes }),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const originalGetObject = objectStorage.getObject.bind(objectStorage);
+  objectStorage.getObject = async (key: string) => {
+    const object = await originalGetObject(key);
+    return object && key.includes("media")
+      ? { ...object, sizeBytes: MAX_RECORDING_MEDIA_SIZE_BYTES + 1 }
+      : object;
+  };
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "quota-exceeded");
+  assert.match(job.recording.failureMessage ?? "", /media size exceeds budget limit/);
+});
+
+test("validation worker rejects existing assets exceeding the total size limit", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const thumbnailBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0x80, 0x57, 0x45]);
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg, { thumbnailBytes }),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg, { thumbnailBytes });
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: {
+      uploadedAssets: await makeUploadedAssets(pkg, { thumbnailBytes }),
+    },
+  });
+  assert.equal(completed.ok, true);
+
+  const assets = await metadata.listAssets(created.value.recordingId);
+  const thumbnailAsset = assets.find((assetRecord) => assetRecord.kind === "thumbnail");
+  assert.ok(thumbnailAsset);
+  await metadata.updateAsset({
+    ...thumbnailAsset,
+    sizeBytes: MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+  });
+
+  const originalGetObject = objectStorage.getObject.bind(objectStorage);
+  objectStorage.getObject = async (key: string) => {
+    const object = await originalGetObject(key);
+    return object && key.includes("thumbnail")
+      ? { ...object, sizeBytes: MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES }
+      : object;
+  };
+
+  const job = await processNextRecordingValidationJob({ metadata, objectStorage });
+  assert.equal(job.ok, false);
+  if (job.ok || !("recording" in job)) return;
+  assert.equal(job.recording.status, "failed");
+  assert.equal(job.recording.failureCode, "quota-exceeded");
+  assert.match(job.recording.failureMessage ?? "", /total asset size exceeds budget limit/);
 });
 
 test("validation worker allows missing optional media asset and degrades gracefully", async () => {
