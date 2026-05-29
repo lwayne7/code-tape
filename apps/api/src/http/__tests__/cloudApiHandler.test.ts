@@ -1536,9 +1536,9 @@ test("DELETE /api/recordings/:recordingId is idempotent on soft_deleted recordin
   assert.ok(body.deletedAt);
 });
 
-test("DELETE /api/recordings/:recordingId handles soft_deleted with null deletedAt", async () => {
+test("DELETE /api/recordings/:recordingId handles soft_deleted with null deletedAt and persists it", async () => {
   const metadata = createMemoryMetadataRepository();
-  // Seed a soft_deleted recording, then manually set deletedAt to null
+  // Seed a soft_deleted recording, then manually set deletedAt to null (dirty data)
   await seedRecording(metadata, { id: "rec-null-deleted", ownerId: "owner-1", status: "soft_deleted" });
   const recording = await metadata.getRecording("rec-null-deleted");
   await metadata.updateRecording({ ...recording!, deletedAt: null });
@@ -1548,20 +1548,33 @@ test("DELETE /api/recordings/:recordingId handles soft_deleted with null deleted
     createRequestId: () => "req-null-deleted",
   });
 
-  const response = await handler(
+  // First DELETE: should generate and persist a deletedAt
+  const response1 = await handler(
     new Request("http://localhost/api/recordings/rec-null-deleted", {
       method: "DELETE",
       headers: { "x-owner-token": "owner-1" },
     }),
   );
-  const body = (await response.json()) as { id: string; status: string; deletedAt: string };
+  const body1 = (await response1.json()) as { id: string; status: string; deletedAt: string };
+  assert.equal(response1.status, 200);
+  assert.equal(body1.status, "soft_deleted");
+  assert.ok(body1.deletedAt);
+  assert.equal(typeof body1.deletedAt, "string");
 
-  // Should return success with a valid deletedAt even if it was null
-  assert.equal(response.status, 200);
-  assert.equal(body.id, "rec-null-deleted");
-  assert.equal(body.status, "soft_deleted");
-  assert.ok(body.deletedAt);
-  assert.equal(typeof body.deletedAt, "string");
+  // Verify metadata was actually persisted
+  const persisted = await metadata.getRecording("rec-null-deleted");
+  assert.equal(persisted!.deletedAt, body1.deletedAt);
+
+  // Second DELETE: should return the same persisted deletedAt, not a new one
+  const response2 = await handler(
+    new Request("http://localhost/api/recordings/rec-null-deleted", {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body2 = (await response2.json()) as { id: string; status: string; deletedAt: string };
+  assert.equal(response2.status, 200);
+  assert.equal(body2.deletedAt, body1.deletedAt, "repeated DELETE must return the same persisted deletedAt");
 });
 
 test("DELETE /api/recordings/:recordingId repeated delete preserves deletedAt and does not mutate state", async () => {

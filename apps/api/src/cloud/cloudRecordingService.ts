@@ -265,14 +265,24 @@ export function createCloudRecordingService(deps: {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
-      // Idempotent: if already soft_deleted by this owner, return current state without mutation.
+      // Idempotent: if already soft_deleted by this owner, return current state.
+      // If deletedAt is missing (dirty data), generate and persist it now.
       if (recording.status === "soft_deleted") {
+        if (recording.deletedAt === null) {
+          const deletedAt = now().toISOString();
+          const repaired: CloudRecordingRecord = { ...recording, deletedAt };
+          await deps.metadata.updateRecording(repaired);
+          return {
+            ok: true,
+            value: { id: recording.id, status: "soft_deleted" as const, deletedAt },
+          };
+        }
         return {
           ok: true,
           value: {
             id: recording.id,
             status: "soft_deleted" as const,
-            deletedAt: recording.deletedAt ?? now().toISOString(),
+            deletedAt: recording.deletedAt,
           },
         };
       }
