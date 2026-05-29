@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T19:43:54Z",
+  "updatedAt": "2026-05-29T19:49:31Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        178
+        178,
+        183
       ],
       "completedIssues": [
         11,
@@ -961,6 +962,20 @@
       "claimedAt": "2026-05-29T19:26:12Z",
       "closedAt": "2026-05-29T19:43:54Z",
       "mergedPr": 182
+    },
+    "183": {
+      "number": 183,
+      "title": "[P1+ WebRTC] 候选人 InterviewSyncPublisher 接入录制事件流",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T19:49:31Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
