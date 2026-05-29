@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T11:48:16Z",
+  "updatedAt": "2026-05-29T11:51:59Z",
   "students": {
     "ceilf6": {
       "activeIssue": 135,
@@ -41,7 +41,8 @@
       "totalScore": 41,
       "activeIssues": [
         135,
-        133
+        133,
+        141
       ]
     },
     "MINTPIPERAS": {
@@ -650,6 +651,20 @@
       "claimedAt": "2026-05-29T11:26:28Z",
       "closedAt": "2026-05-29T11:48:16Z",
       "mergedPr": 140
+    },
+    "141": {
+      "number": 141,
+      "title": "[P1+ WebRTC] 面试官只读工作台状态核心",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T11:51:59Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
