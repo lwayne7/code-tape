@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T11:16:24Z",
+  "updatedAt": "2026-05-29T11:26:28Z",
   "students": {
     "ceilf6": {
       "activeIssue": 126,
@@ -40,7 +40,8 @@
       "activeIssues": [
         126,
         135,
-        133
+        133,
+        139
       ]
     },
     "MINTPIPERAS": {
@@ -633,6 +634,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T11:15:57Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "139": {
+      "number": 139,
+      "title": "[P1+ WebRTC] RTCDataChannel 实时事件同步核心",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T11:26:28Z",
       "closedAt": null,
       "mergedPr": null
     }
