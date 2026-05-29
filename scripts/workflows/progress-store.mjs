@@ -28,13 +28,17 @@ export function createEmptyProgress() {
 }
 
 export function ensureProgressShape(progress) {
-  return {
+  const shaped = {
     version: progress?.version ?? 1,
     updatedAt: progress?.updatedAt ?? null,
     students: progress?.students ?? {},
     issues: progress?.issues ?? {},
     ledger: progress?.ledger ?? [],
   };
+  for (const [username, student] of Object.entries(shaped.students)) {
+    shaped.students[username] = ensureStudentShape(student);
+  }
+  return shaped;
 }
 
 export function ensureStudent(progress, username) {
@@ -218,8 +222,7 @@ export function roundScore(value) {
 
 function createEmptyStudent() {
   return {
-    activeIssue: null,
-    activeIssues: [],
+    activeIssue: [],
     completedIssues: [],
     reviewedIssues: [],
     bugPenalties: [],
@@ -244,37 +247,34 @@ function ensureStudentShape(student) {
   student.reviewScore ??= 0;
   student.penaltyScore ??= 0;
   student.totalScore ??= 0;
-  student.activeIssue ??= null;
-  ensureActiveIssues(student);
+  student.activeIssue = ensureActiveIssues(student);
+  delete student.activeIssues;
   return student;
 }
 
 function ensureActiveIssues(student) {
-  if (!Array.isArray(student.activeIssues)) {
-    student.activeIssues = [];
+  const activeIssues = [];
+  if (Array.isArray(student.activeIssue)) {
+    for (const issue of student.activeIssue) pushUnique(activeIssues, issue);
+  } else if (student.activeIssue !== null && student.activeIssue !== undefined) {
+    pushUnique(activeIssues, student.activeIssue);
   }
-  if (student.activeIssue !== null && !student.activeIssues.includes(student.activeIssue)) {
-    student.activeIssues.unshift(student.activeIssue);
+  if (Array.isArray(student.activeIssues)) {
+    for (const issue of student.activeIssues) pushUnique(activeIssues, issue);
   }
-  if (student.activeIssue === null && student.activeIssues.length > 0) {
-    student.activeIssue = student.activeIssues[0];
-  }
-  return student.activeIssues;
+  return activeIssues.sort((a, b) => a - b);
 }
 
 function recordActiveIssue(student, issueNumber) {
   const activeIssues = ensureActiveIssues(student);
   pushUnique(activeIssues, issueNumber);
-  if (student.activeIssue === null) {
-    student.activeIssue = issueNumber;
-  }
+  student.activeIssue = activeIssues.sort((a, b) => a - b);
+  delete student.activeIssues;
 }
 
 function clearActiveIssue(student, issueNumber) {
-  student.activeIssues = ensureActiveIssues(student).filter((activeIssue) => activeIssue !== issueNumber);
-  if (student.activeIssue === issueNumber || !student.activeIssues.includes(student.activeIssue)) {
-    student.activeIssue = student.activeIssues[0] ?? null;
-  }
+  student.activeIssue = ensureActiveIssues(student).filter((activeIssue) => activeIssue !== issueNumber);
+  delete student.activeIssues;
 }
 
 function applyPenalty(student, issue, delta) {

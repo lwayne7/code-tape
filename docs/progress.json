@@ -3,7 +3,10 @@
   "updatedAt": "2026-05-29T11:59:03Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 135,
+      "activeIssue": [
+        135,
+        141
+      ],
       "completedIssues": [
         11,
         10,
@@ -40,14 +43,10 @@
       "developmentScore": 39.75,
       "reviewScore": 5.75,
       "penaltyScore": 0,
-      "totalScore": 45.5,
-      "activeIssues": [
-        135,
-        141
-      ]
+      "totalScore": 45.5
     },
     "MINTPIPERAS": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         9,
         60,
@@ -71,7 +70,7 @@
       "totalScore": 14.75
     },
     "Suxian2001": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         5,
         79,
@@ -95,7 +94,7 @@
       "totalScore": 11.75
     },
     "yangchloeeeee": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         4,
         7,
@@ -119,7 +118,7 @@
       "totalScore": 17.5
     },
     "JunMang01": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         6,
         59
@@ -132,7 +131,7 @@
       "totalScore": 3
     },
     "cecilyw": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         58
       ],
@@ -144,7 +143,7 @@
       "totalScore": 2.25
     },
     "lwayne7": {
-      "activeIssue": null,
+      "activeIssue": [],
       "completedIssues": [
         97,
         119
@@ -154,8 +153,7 @@
       "developmentScore": 3.75,
       "reviewScore": 0,
       "penaltyScore": 0,
-      "totalScore": 3.75,
-      "activeIssues": []
+      "totalScore": 3.75
     }
   },
   "issues": {

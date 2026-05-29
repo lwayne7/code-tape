@@ -72,8 +72,8 @@ test('claimIssue records multiple active issues for the same assignee', () => {
 
   const claimed = claimIssue(progress, issue, 'alice', '2026-05-22T10:00:00.000Z');
 
-  assert.equal(claimed.students.alice.activeIssue, 12);
-  assert.deepEqual(claimed.students.alice.activeIssues, [12]);
+  assert.deepEqual(claimed.students.alice.activeIssue, [12]);
+  assert.equal('activeIssues' in claimed.students.alice, false);
   assert.equal(claimed.issues['12'].status, 'claimed');
   assert.equal(claimed.issues['12'].assignee, 'alice');
 
@@ -84,8 +84,8 @@ test('claimIssue records multiple active issues for the same assignee', () => {
     '2026-05-22T10:01:00.000Z',
   );
 
-  assert.equal(secondClaim.students.alice.activeIssue, 12);
-  assert.deepEqual(secondClaim.students.alice.activeIssues, [12, 13]);
+  assert.deepEqual(secondClaim.students.alice.activeIssue, [12, 13]);
+  assert.equal('activeIssues' in secondClaim.students.alice, false);
   assert.equal(secondClaim.issues['13'].status, 'claimed');
   assert.equal(secondClaim.issues['13'].assignee, 'alice');
 });
@@ -121,8 +121,33 @@ test('claimIssue migrates legacy activeIssue when claiming another issue', () =>
     '2026-05-22T10:01:00.000Z',
   );
 
-  assert.equal(claimed.students.alice.activeIssue, 12);
-  assert.deepEqual(claimed.students.alice.activeIssues, [12, 13]);
+  assert.deepEqual(claimed.students.alice.activeIssue, [12, 13]);
+  assert.equal('activeIssues' in claimed.students.alice, false);
+});
+
+test('claimIssue migrates legacy activeIssues array to activeIssue', () => {
+  const progress = createEmptyProgress();
+  progress.students.alice = {
+    activeIssue: null,
+    activeIssues: [12],
+    completedIssues: [],
+    reviewedIssues: [],
+    bugPenalties: [],
+    developmentScore: 0,
+    reviewScore: 0,
+    penaltyScore: 0,
+    totalScore: 0,
+  };
+
+  const claimed = claimIssue(
+    progress,
+    { number: 13, title: '实现章节跳转', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T10:01:00.000Z',
+  );
+
+  assert.deepEqual(claimed.students.alice.activeIssue, [12, 13]);
+  assert.equal('activeIssues' in claimed.students.alice, false);
 });
 
 test('claimIssue validates GitHub issue status and supports repair reruns', () => {
@@ -167,7 +192,7 @@ test('claimIssue validates GitHub issue status and supports repair reruns', () =
     '2026-05-22T10:00:00.000Z',
   );
 
-  assert.equal(repaired.students.alice.activeIssue, 12);
+  assert.deepEqual(repaired.students.alice.activeIssue, [12]);
   assert.equal(repaired.issues['12'].assignee, 'alice');
   assert.deepEqual(
     claimIssue(
@@ -808,7 +833,7 @@ test('feature scoring writes idempotent ledger and clears active issue', () => {
   });
 
   assert.equal(rerun.ledger.length, 1);
-  assert.equal(rerun.students.alice.activeIssue, null);
+  assert.deepEqual(rerun.students.alice.activeIssue, []);
   assert.equal(rerun.students.alice.developmentScore, 3.75);
   assert.equal(rerun.students.bob.reviewScore, 1.25);
   assert.equal(rerun.students.alice.totalScore, 3.75);
@@ -837,8 +862,8 @@ test('feature scoring supports maintainer-only merge without reviewer', () => {
     createdAt: '2026-05-22T12:00:00.000Z',
   });
 
-  assert.equal(scored.students.alice.activeIssue, 13);
-  assert.deepEqual(scored.students.alice.activeIssues, [13]);
+  assert.deepEqual(scored.students.alice.activeIssue, [13]);
+  assert.equal('activeIssues' in scored.students.alice, false);
   assert.equal(scored.students.alice.developmentScore, 3.75);
   assert.equal(scored.students.null, undefined);
   assert.equal(scored.ledger[0].reviewer, null);
@@ -882,7 +907,7 @@ test('bug fix scoring penalizes original owner and rewards fix owner', () => {
   assert.equal(scored.students.bob.penaltyScore, -2.5);
   assert.equal(scored.students.carol.developmentScore, 3.75);
   assert.equal(scored.students.dave.reviewScore, 1.25);
-  assert.equal(scored.students.carol.activeIssue, null);
+  assert.deepEqual(scored.students.carol.activeIssue, []);
 });
 
 test('bug fix scoring supports source and fix PRs without reviewers', () => {
@@ -967,7 +992,7 @@ test('renderProgressMarkdown includes manual development bonus ledger entries', 
   const progress = createEmptyProgress();
   progress.updatedAt = '2026-05-23T14:25:58Z';
   progress.students.alice = {
-    activeIssue: null,
+    activeIssue: [],
     completedIssues: [],
     reviewedIssues: [],
     bugPenalties: [],
