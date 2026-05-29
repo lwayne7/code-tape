@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T01:59:36Z",
+  "updatedAt": "2026-05-29T02:00:34Z",
   "students": {
     "ceilf6": {
       "activeIssue": 120,
@@ -37,7 +37,7 @@
       "totalScore": 33.5
     },
     "MINTPIPERAS": {
-      "activeIssue": null,
+      "activeIssue": 117,
       "completedIssues": [
         9,
         60,
@@ -535,6 +535,20 @@
       "claimedAt": "2026-05-28T07:49:02Z",
       "closedAt": "2026-05-28T09:03:34Z",
       "mergedPr": 109
+    },
+    "117": {
+      "number": 117,
+      "title": "[P1] CloudRecordingRepository 上传与状态轮询",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "MINTPIPERAS",
+      "claimedAt": "2026-05-29T02:00:34Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "118": {
       "number": 118,
