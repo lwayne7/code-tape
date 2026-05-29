@@ -15,6 +15,10 @@ export type MetadataRepository = {
   ): Promise<UploadSessionRecord | null>;
   getSession(sessionId: string): Promise<UploadSessionRecord | null>;
   getRecording(recordingId: string): Promise<CloudRecordingRecord | null>;
+  listRecordingsByOwner(input: {
+    ownerId: string;
+    statuses?: CloudRecordingRecord["status"][];
+  }): Promise<CloudRecordingRecord[]>;
   listAssets(recordingId: string): Promise<CloudRecordingAssetRecord[]>;
   // Atomically writes recording/assets/session with a unique owner + idempotencyKey boundary.
   createUpload(input: {

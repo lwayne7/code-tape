@@ -41,6 +41,40 @@ export function createCloudApiHandler(deps: {
   return async (request: Request): Promise<Response> => {
     const requestId = createRequestId();
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/api/recordings") {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const result = await deps.service.listRecordings({ ownerId });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value.recordings, 200, requestId);
+    }
+
+    const recordingDetailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
+    if (request.method === "GET" && recordingDetailMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const recordingId = safeDecodePathSegment(recordingDetailMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
+      const result = await deps.service.getRecording({
+        ownerId,
+        recordingId: recordingId.value,
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/recordings/upload-sessions") {
       const ownerId = readOwnerToken(request);
       if (!ownerId) {
@@ -226,6 +260,17 @@ function isPositiveSafeInteger(value: unknown): value is number {
 function readOwnerToken(request: Request): string | null {
   const token = request.headers.get("x-owner-token")?.trim();
   return token ? token : null;
+}
+
+function safeDecodePathSegment(segment: string): CloudResult<string> {
+  try {
+    return { ok: true, value: decodeURIComponent(segment) };
+  } catch {
+    return {
+      ok: false,
+      error: { code: "bad-request", message: "recordingId path segment is malformed" },
+    };
+  }
 }
 
 function jsonResponse(body: unknown, status: number, requestId: string): Response {

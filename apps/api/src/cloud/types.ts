@@ -97,6 +97,30 @@ export type CompleteUploadSessionResponse = {
   status: "processing" | "ready" | "failed";
 };
 
+export type CloudRecordingListItem = {
+  id: string;
+  title: string;
+  durationMs: number;
+  createdAt: string;
+  updatedAt: string;
+  initialLanguage: RecordingLanguage;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  status: RecordingStatus;
+};
+
+export type CloudRecordingDetail = CloudRecordingListItem & {
+  localPackageId: string;
+  schemaVersion: RecordingSchemaVersion;
+  visibility: "private" | "unlisted";
+  completedAt: string | null;
+  totalSizeBytes: number;
+  eventCount: number | null;
+  snapshotCount: number | null;
+  failureCode: CloudApiErrorCode | null;
+  failureMessage: string | null;
+};
+
 export type CloudRecordingRecord = {
   id: string;
   ownerId: string;

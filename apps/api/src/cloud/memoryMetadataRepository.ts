@@ -31,6 +31,17 @@ export function createMemoryMetadataRepository(): MetadataRepository {
       const recording = recordings.get(recordingId);
       return recording ? { ...recording } : null;
     },
+    async listRecordingsByOwner(input: {
+      ownerId: string;
+      statuses?: CloudRecordingRecord["status"][];
+    }): Promise<CloudRecordingRecord[]> {
+      const allowedStatuses = input.statuses ? new Set(input.statuses) : null;
+      return Array.from(recordings.values())
+        .filter((recording) => recording.ownerId === input.ownerId)
+        .filter((recording) => !allowedStatuses || allowedStatuses.has(recording.status))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .map((recording) => ({ ...recording }));
+    },
     async listAssets(recordingId: string): Promise<CloudRecordingAssetRecord[]> {
       return (assetsByRecording.get(recordingId) ?? []).map((asset) => ({ ...asset }));
     },
