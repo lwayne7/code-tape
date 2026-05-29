@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T07:02:56Z",
+  "updatedAt": "2026-05-29T08:04:13.009Z",
   "students": {
     "ceilf6": {
-      "activeIssue": 120,
+      "activeIssue": 126,
       "completedIssues": [
         11,
         10,
@@ -580,17 +580,17 @@
       "closedAt": null,
       "mergedPr": null
     },
-    "120": {
-      "number": 120,
-      "title": "[Epic] P1+ WebRTC 实时面试模式总控",
-      "score": 1,
+    "126": {
+      "number": 126,
+      "title": "[P1+ WebRTC] 面试房间与 WebSocket 信令",
+      "score": 5,
       "stack": [
-        "react",
-        "typescript"
+        "typescript",
+        "node"
       ],
       "status": "claimed",
       "assignee": "ceilf6",
-      "claimedAt": "2026-05-29T01:48:46Z",
+      "claimedAt": "2026-05-29T08:04:13.009Z",
       "closedAt": null,
       "mergedPr": null
     }
