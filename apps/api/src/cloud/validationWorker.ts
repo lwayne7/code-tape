@@ -38,10 +38,9 @@ export async function processNextRecordingValidationJob(deps: {
   const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
 
   const fetchedObjects = new Map<string, StoredObject>();
-  const checksumFailure = await findObjectChecksumFailure(deps.objectStorage, assets, fetchedObjects);
-  if (checksumFailure) {
-    const code = checksumFailure.includes("exceeds budget") ? "quota-exceeded" : "checksum-mismatch";
-    return failRecording(deps.metadata, recording, now, code, checksumFailure);
+  const objectFailure = await findObjectValidationFailure(deps.objectStorage, assets, fetchedObjects);
+  if (objectFailure) {
+    return failRecording(deps.metadata, recording, now, objectFailure.code, objectFailure.message);
   }
 
   let integrity: Awaited<ReturnType<typeof verifyRecordingPackageIntegrity>>;
@@ -158,11 +157,16 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function findObjectChecksumFailure(
+type ObjectValidationFailure = {
+  code: CloudApiErrorCode;
+  message: string;
+};
+
+async function findObjectValidationFailure(
   objectStorage: ObjectStorage,
   assets: CloudRecordingAssetRecord[],
   fetchedObjects: Map<string, StoredObject>,
-): Promise<string | null> {
+): Promise<ObjectValidationFailure | null> {
   let totalAssetSize = 0;
   for (const asset of assets) {
     const object = await objectStorage.getObject(asset.objectKey);
@@ -170,20 +174,30 @@ async function findObjectChecksumFailure(
       if (isOptionalAssetKind(asset.kind)) {
         continue;
       }
-      return `missing object: ${asset.kind}`;
+      return { code: "checksum-mismatch", message: `missing object: ${asset.kind}` };
     }
     if (asset.kind === "media" && object.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
-      return `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${object.sizeBytes} bytes`;
+      return {
+        code: "quota-exceeded",
+        message: `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${object.sizeBytes} bytes`,
+      };
     }
-    if (object.sizeBytes !== asset.sizeBytes) return `size mismatch: ${asset.kind}`;
+    if (object.sizeBytes !== asset.sizeBytes) {
+      return { code: "checksum-mismatch", message: `size mismatch: ${asset.kind}` };
+    }
     totalAssetSize += object.sizeBytes;
     if (totalAssetSize > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
-      return `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalAssetSize} bytes`;
+      return {
+        code: "quota-exceeded",
+        message: `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalAssetSize} bytes`,
+      };
     }
     const sha256 = isBinaryAssetKind(asset.kind)
       ? await sha256Blob(new Blob([toArrayBuffer(object.body)], { type: object.contentType }))
       : await sha256Hex(new TextDecoder().decode(object.body));
-    if (sha256 !== asset.sha256) return `checksum mismatch: ${asset.kind}`;
+    if (sha256 !== asset.sha256) {
+      return { code: "checksum-mismatch", message: `checksum mismatch: ${asset.kind}` };
+    }
 
     fetchedObjects.set(asset.objectKey, object);
   }
