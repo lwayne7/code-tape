@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T13:46:48Z",
+  "updatedAt": "2026-05-29T14:00:05Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         135,
-        147
+        147,
+        149
       ],
       "completedIssues": [
         11,
@@ -701,6 +702,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T13:46:48Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "149": {
+      "number": 149,
+      "title": "[P1+ WebRTC] 面试官只读工作台 UI 接线",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T14:00:05Z",
       "closedAt": null,
       "mergedPr": null
     }
