@@ -4,17 +4,33 @@ import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash"
 import { RECORDING_SCHEMA_VERSION, type RecordingPackageV1 } from "@code-tape/recording-schema";
 import { createCloudRecordingService } from "../../cloud/cloudRecordingService.js";
 import { createMemoryMetadataRepository } from "../../cloud/memoryMetadataRepository.js";
+import { createLocalDevObjectStorage } from "../../cloud/localDevObjectStorage.js";
 import { createMemoryObjectStorage } from "../../cloud/memoryObjectStorage.js";
+import { createApiHandler } from "../createApiHandler.js";
 import { createCloudApiHandler } from "../cloudApiHandler.js";
+import { createLocalDevObjectStorageHandler } from "../localDevObjectStorageHandler.js";
+
+function createTestApiHandler(
+  objectStorage: ReturnType<typeof createMemoryObjectStorage> | ReturnType<typeof createLocalDevObjectStorage>,
+  createRequestId: () => string,
+) {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage,
+  });
+  const cloud = createCloudApiHandler({ service, createRequestId });
+  if ("claimPendingUploadTarget" in objectStorage) {
+    return createApiHandler({
+      cloud,
+      objectStorage: createLocalDevObjectStorageHandler(objectStorage),
+    });
+  }
+  return cloud;
+}
 
 test("POST /api/recordings/upload-sessions returns upload targets with request id", async () => {
-  const handler = createCloudApiHandler({
-    service: createCloudRecordingService({
-      metadata: createMemoryMetadataRepository(),
-      objectStorage: createMemoryObjectStorage(),
-    }),
-    createRequestId: () => "req-test-1",
-  });
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  const handler = createTestApiHandler(objectStorage, () => "req-test-1");
 
   const response = await handler(
     new Request("http://localhost/api/recordings/upload-sessions", {
@@ -28,13 +44,14 @@ test("POST /api/recordings/upload-sessions returns upload targets with request i
   );
   const body = (await response.json()) as {
     sessionId: string;
-    uploadTargets: Array<{ method: string }>;
+    uploadTargets: Array<{ method: string; url: string }>;
   };
 
   assert.equal(response.status, 201);
   assert.equal(response.headers.get("x-request-id"), "req-test-1");
   assert.ok(body.sessionId);
   assert.equal(body.uploadTargets[0]?.method, "PUT");
+  assert.match(body.uploadTargets[0]?.url ?? "", /^http:\/\/localhost\/dev\/object-storage\/uploads\//u);
 });
 
 test("cloud API returns the unified error shape when owner token is missing", async () => {
