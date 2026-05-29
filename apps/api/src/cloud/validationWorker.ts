@@ -137,6 +137,12 @@ export async function processNextRecordingValidationJob(deps: {
   );
 
   const hasMedia = !!mediaBlob;
+  // Re-read recording to check if it was soft-deleted during validation
+  const freshRecording = await deps.metadata.getRecording(recording.id);
+  if (freshRecording?.status === "soft_deleted") {
+    // Recording was deleted during validation — don't revive it
+    return { ok: false, recording: freshRecording };
+  }
   const ready: CloudRecordingRecord = {
     ...recording,
     status: "ready",
@@ -237,6 +243,11 @@ async function failRecording(
   code: CloudApiErrorCode,
   message: string,
 ): Promise<ValidationWorkerResult> {
+  // Re-read recording to check if it was soft-deleted during validation
+  const freshRecording = await metadata.getRecording(recording.id);
+  if (freshRecording?.status === "soft_deleted") {
+    return { ok: false, recording: freshRecording };
+  }
   const failedAt = now().toISOString();
   const failed: CloudRecordingRecord = {
     ...recording,

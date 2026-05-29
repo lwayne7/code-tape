@@ -1998,6 +1998,63 @@ test("DELETE /api/recordings/:recordingId does not affect other owners' recordin
   assert.equal(detailResponse.status, 200);
 });
 
+test("DELETE uploading recording then POST complete returns 404 and does not revive", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const handler = createCloudApiHandler({
+    service,
+    createRequestId: () => "req-delete-then-complete",
+  });
+  const pkg = await makePackage();
+
+  // Create upload session
+  const createResp = await handler(
+    new Request("http://localhost/api/recordings/upload-sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify(await makeCreateSessionRequest(pkg)),
+    }),
+  );
+  const createBody = (await createResp.json()) as { sessionId: string; recordingId: string };
+  assert.equal(createResp.status, 201);
+
+  // Delete the uploading recording
+  const deleteResp = await handler(
+    new Request(`http://localhost/api/recordings/${createBody.recordingId}`, {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  assert.equal(deleteResp.status, 200);
+
+  // Now try to complete — should fail with 404 and not revive the recording
+  const completeResp = await handler(
+    new Request(
+      `http://localhost/api/recordings/upload-sessions/${createBody.sessionId}/complete`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+        body: await makeCompleteBody(pkg),
+      },
+    ),
+  );
+  assert.equal(completeResp.status, 404);
+
+  // Verify recording is still soft_deleted
+  const detailResp = await handler(
+    new Request(`http://localhost/api/recordings/${createBody.recordingId}`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  assert.equal(detailResp.status, 404);
+
+  // Also verify via metadata directly
+  const recording = await metadata.getRecording(createBody.recordingId);
+  assert.equal(recording?.status, "soft_deleted");
+});
+
 async function makeCompleteBody(pkg: RecordingPackageV1): Promise<string> {
   const req = await makeCreateSessionRequest(pkg);
   return JSON.stringify({

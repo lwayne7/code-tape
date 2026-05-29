@@ -839,6 +839,116 @@ test("validation worker excludes missing optional assets from total asset size b
   assert.equal(job.recording.status, "ready");
 });
 
+test("validation worker does not revive soft_deleted recording to ready", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  // Wrap metadata to inject soft-delete after findNextProcessingRecording
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        // Simulate race: user deletes the recording while worker is processing
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: new Date().toISOString(),
+        });
+      }
+      return result;
+    },
+  };
+
+  // Validation worker should NOT revive the recording to "ready"
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+
+  // Verify metadata is still soft_deleted (not overwritten to ready)
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
+test("validation worker does not revive soft_deleted recording to failed on validation error", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  // Don't upload assets — validation will fail
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  // Wrap metadata to inject soft-delete after findNextProcessingRecording
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        // Simulate race: user deletes the recording while worker is processing
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: new Date().toISOString(),
+        });
+      }
+      return result;
+    },
+  };
+
+  // Validation worker should NOT revive the recording to "failed"
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+
+  // Verify metadata is still soft_deleted (not overwritten to failed)
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
 
 async function makePackage(input: { mediaSha256?: string } = {}): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];

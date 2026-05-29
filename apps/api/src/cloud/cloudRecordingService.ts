@@ -181,14 +181,18 @@ export function createCloudRecordingService(deps: {
       if (session.ownerId !== ownerId) {
         return { ok: false, error: { code: "forbidden", message: "upload session owner mismatch" } };
       }
+      // Guard: if recording was soft-deleted, refuse to complete/revive it
+      const currentRecording = await deps.metadata.getRecording(session.recordingId);
+      if (currentRecording?.status === "soft_deleted") {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
       if (session.status === "completed") {
-        const recording = await deps.metadata.getRecording(session.recordingId);
-        if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
+        if (!currentRecording || currentRecording.ownerId !== ownerId || !isOwnerVisibleStatus(currentRecording.status)) {
           return { ok: false, error: { code: "not-found", message: "recording not found" } };
         }
         const status =
-          recording.status === "ready" || recording.status === "failed"
-            ? recording.status
+          currentRecording.status === "ready" || currentRecording.status === "failed"
+            ? currentRecording.status
             : "processing";
         return { ok: true, value: { recordingId: session.recordingId, status } };
       }
