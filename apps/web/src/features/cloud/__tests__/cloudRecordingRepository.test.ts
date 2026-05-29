@@ -13,6 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RecordingPackageV1 } from "@code-tape/recording-schema";
 import type {
   CloudRecordingRepository,
   CreateUploadSessionRequest,
@@ -82,8 +83,17 @@ function makeBlob(content = "test content", type = "application/json"): Blob {
   return new Blob([content], { type });
 }
 
+function readBlobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("failed to read blob"));
+    reader.readAsText(blob);
+  });
+}
+
 /** 构造最小 RecordingPackageV1 用于 uploadPackage 测试 */
-function makeMinimalPackage(opts: { hasMedia: boolean }): import("@code-tape/recording-schema").RecordingPackageV1 {
+function makeMinimalPackage(opts: { hasMedia: boolean }): RecordingPackageV1 {
   return {
     schemaVersion: "0.1.0",
     manifest: {
@@ -152,7 +162,7 @@ function makeMinimalPackage(opts: { hasMedia: boolean }): import("@code-tape/rec
     media: opts.hasMedia
       ? { blobId: "media-1", mimeType: "video/webm", durationMs: 5000, sizeBytes: 100, timelineOffsetMs: 0, hasAudio: true, hasCamera: true }
       : null,
-  } as unknown as import("@code-tape/recording-schema").RecordingPackageV1;
+  } as unknown as RecordingPackageV1;
 }
 
 /** 构造一份 CloudRecordingDetail 测试数据 */
@@ -316,6 +326,17 @@ describe("CloudRecordingRepository", () => {
       const second = repo.getOwnerToken();
       expect(second).toBe(first);
       expect(first).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it("已持久化 token 为非 hex 脏值时忽略并重新生成合法 token", () => {
+      localStorage.setItem("code-tape-cloud-owner-token", "z".repeat(64));
+
+      const repo = setupRepo();
+      const token = repo.getOwnerToken();
+
+      expect(token).toMatch(/^[a-f0-9]{64}$/);
+      expect(token).not.toBe("z".repeat(64));
+      expect(localStorage.getItem("code-tape-cloud-owner-token")).toBe(token);
     });
 
     it("不同 repository 实例共享同一持久化 token", () => {
@@ -922,6 +943,45 @@ describe("CloudRecordingRepository", () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
       expect(result.error.code).toBe("unsupported-schema");
+    });
+
+    it("上传的 manifest 资产直接来自 pkg.manifest，不裁剪可选字段", async () => {
+      const repo = setupRepo();
+      const mediaBlob = new Blob(["fake-webm-data"], { type: "video/webm" });
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      (pkg.manifest as unknown as Record<string, unknown>).futureOptional = {
+        chapterCount: 2,
+      };
+
+      mockFetch(201, makeSessionResponse());
+
+      const mockXhrs: MockXhr[] = [];
+      for (let i = 0; i < 5; i++) {
+        const { xhr, instance } = createMockXhr();
+        mockXhrs.push(xhr);
+        vi.spyOn(globalThis, "XMLHttpRequest").mockImplementationOnce(() => instance);
+      }
+
+      mockFetch(200, { recordingId: "rec_1", status: "processing" });
+
+      const result = await repo.uploadPackage(pkg, { media: mediaBlob });
+
+      expect(result.ok).toBe(true);
+      const uploadedJsonAssets = await Promise.all(
+        mockXhrs.map(async (xhr) => {
+          const blob = xhr.send.mock.calls[0]?.[0] as Blob;
+          const text = await readBlobText(blob);
+          try {
+            return JSON.parse(text) as Record<string, unknown>;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const uploadedManifest = uploadedJsonAssets.find(
+        (asset) => asset?.packageId === pkg.manifest.packageId,
+      );
+      expect(uploadedManifest).toEqual(pkg.manifest);
     });
   });
 

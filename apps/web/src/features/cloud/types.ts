@@ -5,7 +5,11 @@
  * 中的契约保持一致。前端不直接依赖 @code-tape/api，因此在此处复刻所需类型。
  */
 
-import type { RecordingLanguage, RecordingSchemaVersion } from "@code-tape/recording-schema";
+import type {
+  RecordingLanguage,
+  RecordingPackageV1,
+  RecordingSchemaVersion,
+} from "@code-tape/recording-schema";
 
 // ─────────────────────────────────────────────────────────────
 // 资产种类（与后端 RECORDING_ASSET_KINDS 一致）
@@ -180,7 +184,7 @@ export type CloudRecordingRepository = {
    * PUT 各资产 → complete。调用方只需提供 package 和二进制 blob。
    */
   uploadPackage(
-    pkg: import("@code-tape/recording-schema").RecordingPackageV1,
+    pkg: RecordingPackageV1,
     blobs: { media?: Blob; thumbnail?: Blob },
     options?: { idempotencyKey?: string; onProgress?: (progress: UploadProgress) => void; timeoutMs?: number },
   ): Promise<CloudResult<{ recordingId: string; status: string }>>;

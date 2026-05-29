@@ -46,6 +46,8 @@ const OWNER_TOKEN_KEY = "code-tape-cloud-owner-token";
 /** owner token 随机字符串长度（32 字节 hex = 64 字符） */
 const OWNER_TOKEN_BYTES = 32;
 
+const OWNER_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
+
 /** 默认 API 基础路径（空串表示同源） */
 const DEFAULT_API_BASE = "";
 
@@ -440,14 +442,7 @@ async function buildPackageAssetDefs(
   const defs: AssetDef[] = [];
 
   // manifest
-  const manifestStr = canonicalStringify({
-    packageId: pkg.manifest.packageId,
-    schemaVersion: pkg.manifest.schemaVersion,
-    status: pkg.manifest.status,
-    createdAt: pkg.manifest.createdAt,
-    completedAt: pkg.manifest.completedAt,
-    checksums: pkg.manifest.checksums,
-  });
+  const manifestStr = canonicalStringify(pkg.manifest);
   defs.push(await buildJsonAsset("manifest", manifestStr));
 
   // meta
@@ -579,8 +574,8 @@ function readOwnerToken(): string | null {
   try {
     if (typeof localStorage !== "undefined") {
       const token = localStorage.getItem(OWNER_TOKEN_KEY);
-      if (token && token.length === OWNER_TOKEN_BYTES * 2) {
-        return token;
+      if (token && OWNER_TOKEN_PATTERN.test(token)) {
+        return token.toLowerCase();
       }
     }
   } catch {
