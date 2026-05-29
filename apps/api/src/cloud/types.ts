@@ -121,6 +121,21 @@ export type CloudRecordingDetail = CloudRecordingListItem & {
   failureMessage: string | null;
 };
 
+export type CloudPlaybackDescriptor = {
+  id: string;
+  title: string;
+  durationMs: number;
+  schemaVersion: RecordingSchemaVersion;
+  manifestUrl: string;
+  metaUrl: string;
+  eventsUrl: string;
+  snapshotsUrl: string;
+  indexesUrl: string | null;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  expiresAt: string;
+};
+
 export type CloudRecordingRecord = {
   id: string;
   ownerId: string;
