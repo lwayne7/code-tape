@@ -83,8 +83,7 @@ export function createMemoryMetadataRepository(): MetadataRepository {
         completedAt: input.completedAt,
       });
       const recording = recordings.get(session.recordingId);
-      if (recording && recording.status !== "soft_deleted") {
-        // Don't overwrite soft_deleted status — preserve the deletion
+      if (recording?.status === "uploading") {
         recordings.set(recording.id, {
           ...recording,
           status: "processing",

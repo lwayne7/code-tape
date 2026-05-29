@@ -544,6 +544,174 @@ test("completeUpload returns not-found when delete wins the mark-complete race",
   assert.equal(recording?.deletedAt, "2026-05-27T00:02:00.000Z");
 });
 
+for (const terminalStatus of ["purging", "deleted"] as const) {
+  test(`completeUpload does not revive ${terminalStatus} when terminal transition wins the mark-complete race`, async () => {
+    const metadata = createMemoryMetadataRepository();
+    const objectStorage = createMemoryObjectStorage();
+    let terminalBeforeMark = false;
+    const wrappedMetadata = {
+      ...metadata,
+      async markUploadCompleted(input: Parameters<typeof metadata.markUploadCompleted>[0]) {
+        if (terminalBeforeMark) {
+          const session = await metadata.getSession(input.sessionId);
+          assert.ok(session);
+          const recording = await metadata.getRecording(session.recordingId);
+          assert.ok(recording);
+          await metadata.updateRecording({
+            ...recording,
+            status: terminalStatus,
+            deletedAt: "2026-05-27T00:02:00.000Z",
+            updatedAt: "2026-05-27T00:02:00.000Z",
+          });
+        }
+        await metadata.markUploadCompleted(input);
+      },
+    };
+    const service = createCloudRecordingService({
+      metadata: wrappedMetadata,
+      objectStorage,
+    });
+    const pkg = await makePackage();
+    const request = await makeCreateSessionRequest(pkg);
+    const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    terminalBeforeMark = true;
+    const completed = await service.completeUpload({
+      ownerId: "owner-1",
+      sessionId: created.value.sessionId,
+      input: { uploadedAssets: request.assets },
+    });
+    const recording = await metadata.getRecording(created.value.recordingId);
+
+    assert.equal(completed.ok, false);
+    if (completed.ok) return;
+    assert.equal(completed.error.code, "not-found");
+    assert.equal(recording?.status, terminalStatus);
+  });
+}
+
+test("rename preserves validation result when validation wins the rename write race", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const baseService = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await baseService.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const completed = await baseService.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: request.assets },
+  });
+  assert.equal(completed.ok, true);
+
+  let validationBeforeWrite = true;
+  const markReady = async () => {
+    if (!validationBeforeWrite) return;
+    validationBeforeWrite = false;
+    const current = await metadata.getRecording(created.value.recordingId);
+    assert.ok(current);
+    await metadata.updateRecording({
+      ...current,
+      status: "ready",
+      completedAt: "2026-05-27T00:03:00.000Z",
+      updatedAt: "2026-05-27T00:03:00.000Z",
+      eventCount: 7,
+      snapshotCount: 3,
+      hasAudio: false,
+      hasCamera: false,
+      failureCode: null,
+      failureMessage: null,
+    });
+  };
+  const wrappedMetadata = {
+    ...metadata,
+    async updateRecording(recording: Parameters<typeof metadata.updateRecording>[0]) {
+      await markReady();
+      await metadata.updateRecording(recording);
+    },
+    async updateRecordingIfStatus(input: Parameters<typeof metadata.updateRecordingIfStatus>[0]) {
+      await markReady();
+      return metadata.updateRecordingIfStatus(input);
+    },
+  };
+  const service = createCloudRecordingService({
+    metadata: wrappedMetadata,
+    objectStorage,
+    now: () => new Date("2026-05-27T00:04:00.000Z"),
+  });
+
+  const renamed = await service.renameRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+    input: { title: "Renamed after validation" },
+  });
+  const recording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(renamed.ok, true);
+  assert.equal(recording?.status, "ready");
+  assert.equal(recording?.title, "Renamed after validation");
+  assert.equal(recording?.completedAt, "2026-05-27T00:03:00.000Z");
+  assert.equal(recording?.eventCount, 7);
+  assert.equal(recording?.snapshotCount, 3);
+});
+
+for (const terminalStatus of ["purging", "deleted"] as const) {
+  test(`delete does not revive ${terminalStatus} when terminal transition wins the delete write race`, async () => {
+    const metadata = createMemoryMetadataRepository();
+    const objectStorage = createMemoryObjectStorage();
+    const service = createCloudRecordingService({ metadata, objectStorage });
+    const pkg = await makePackage();
+    const request = await makeCreateSessionRequest(pkg);
+    const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    let terminalBeforeWrite = true;
+    const markTerminal = async () => {
+      if (!terminalBeforeWrite) return;
+      terminalBeforeWrite = false;
+      const current = await metadata.getRecording(created.value.recordingId);
+      assert.ok(current);
+      await metadata.updateRecording({
+        ...current,
+        status: terminalStatus,
+        deletedAt: "2026-05-27T00:05:00.000Z",
+        updatedAt: "2026-05-27T00:05:00.000Z",
+      });
+    };
+    const wrappedMetadata = {
+      ...metadata,
+      async updateRecording(recording: Parameters<typeof metadata.updateRecording>[0]) {
+        await markTerminal();
+        await metadata.updateRecording(recording);
+      },
+      async updateRecordingIfStatus(input: Parameters<typeof metadata.updateRecordingIfStatus>[0]) {
+        await markTerminal();
+        return metadata.updateRecordingIfStatus(input);
+      },
+    };
+    const deletingService = createCloudRecordingService({
+      metadata: wrappedMetadata,
+      objectStorage,
+    });
+
+    const deleted = await deletingService.deleteRecording({
+      ownerId: "owner-1",
+      recordingId: created.value.recordingId,
+    });
+    const recording = await metadata.getRecording(created.value.recordingId);
+
+    assert.equal(deleted.ok, false);
+    if (deleted.ok) return;
+    assert.equal(deleted.error.code, "not-found");
+    assert.equal(recording?.status, terminalStatus);
+  });
+}
+
 async function makePackage(): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];
   const snapshots: RecordingPackageV1["snapshots"] = [];

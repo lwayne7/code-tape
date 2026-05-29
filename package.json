@@ -37,8 +37,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.1"
   }
 }

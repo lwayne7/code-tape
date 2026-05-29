@@ -267,12 +267,18 @@ export function createCloudRecordingService(deps: {
       }
 
       const updatedAt = now().toISOString();
-      const renamed: CloudRecordingRecord = {
-        ...recording,
-        title: input.title.trim(),
-        updatedAt,
-      };
-      await deps.metadata.updateRecording(renamed);
+      const renamed = await updateOwnerVisibleRecordingPatch({
+        metadata: deps.metadata,
+        ownerId,
+        recording,
+        patch: {
+          title: input.title.trim(),
+          updatedAt,
+        },
+      });
+      if (!renamed) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
       return {
         ok: true,
         value: { id: renamed.id, title: renamed.title, updatedAt },
@@ -289,8 +295,11 @@ export function createCloudRecordingService(deps: {
       if (recording.status === "soft_deleted") {
         const deletedAt = recording.deletedAt ?? now().toISOString();
         if (recording.deletedAt == null) {
-          const repaired: CloudRecordingRecord = { ...recording, deletedAt };
-          await deps.metadata.updateRecording(repaired);
+          await deps.metadata.updateRecordingIfStatus({
+            recordingId,
+            expectedStatus: "soft_deleted",
+            patch: { deletedAt },
+          });
         }
         return {
           ok: true,
@@ -308,17 +317,47 @@ export function createCloudRecordingService(deps: {
       }
 
       const deletedAt = now().toISOString();
-      const deleted: CloudRecordingRecord = {
-        ...recording,
-        status: "soft_deleted",
-        deletedAt,
-        updatedAt: deletedAt,
-      };
-      await deps.metadata.updateRecording(deleted);
-      return {
-        ok: true,
-        value: { id: deleted.id, status: "soft_deleted" as const, deletedAt },
-      };
+      let current = recording;
+      while (true) {
+        const write = await deps.metadata.updateRecordingIfStatus({
+          recordingId: current.id,
+          expectedStatus: current.status,
+          patch: {
+            status: "soft_deleted",
+            deletedAt,
+            updatedAt: deletedAt,
+          },
+        });
+        if (write.status === "updated") {
+          return {
+            ok: true,
+            value: { id: write.recording.id, status: "soft_deleted" as const, deletedAt },
+          };
+        }
+
+        const latest = write.current;
+        if (!latest || latest.ownerId !== ownerId) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
+        if (latest.status === "soft_deleted") {
+          const latestDeletedAt = latest.deletedAt ?? deletedAt;
+          if (latest.deletedAt == null) {
+            await deps.metadata.updateRecordingIfStatus({
+              recordingId,
+              expectedStatus: "soft_deleted",
+              patch: { deletedAt: latestDeletedAt },
+            });
+          }
+          return {
+            ok: true,
+            value: { id: latest.id, status: "soft_deleted" as const, deletedAt: latestDeletedAt },
+          };
+        }
+        if (!isOwnerVisibleStatus(latest.status)) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
+        current = latest;
+      }
     },
     async getPlaybackDescriptor({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
@@ -410,6 +449,29 @@ function toAssetSummary(asset: CloudRecordingAssetRecord) {
 
 function isOwnerVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
   return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
+}
+
+async function updateOwnerVisibleRecordingPatch(input: {
+  metadata: MetadataRepository;
+  ownerId: string;
+  recording: CloudRecordingRecord;
+  patch: Partial<Omit<CloudRecordingRecord, "id">>;
+}): Promise<CloudRecordingRecord | null> {
+  let current = input.recording;
+  while (true) {
+    const write = await input.metadata.updateRecordingIfStatus({
+      recordingId: current.id,
+      expectedStatus: current.status,
+      patch: input.patch,
+    });
+    if (write.status === "updated") return write.recording;
+
+    const latest = write.current;
+    if (!latest || latest.ownerId !== input.ownerId || !isOwnerVisibleStatus(latest.status)) {
+      return null;
+    }
+    current = latest;
+  }
 }
 
 async function resolveExistingUploadSession(input: {
