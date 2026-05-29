@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T19:55:25Z",
+  "updatedAt": "2026-05-29T20:13:49Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        183
+        183,
+        184
       ],
       "completedIssues": [
         11,
@@ -974,6 +975,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T19:49:31Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "184": {
+      "number": 184,
+      "title": "[Bug] 生成字幕直接加载 Transformers chunk 失败时未触发恢复",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T20:13:49Z",
       "closedAt": null,
       "mergedPr": null
     }
