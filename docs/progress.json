@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T01:57:04Z",
+  "updatedAt": "2026-05-29T01:59:36Z",
   "students": {
     "ceilf6": {
       "activeIssue": 120,
@@ -83,7 +83,7 @@
       "totalScore": 11
     },
     "yangchloeeeee": {
-      "activeIssue": null,
+      "activeIssue": 118,
       "completedIssues": [
         4,
         7,
@@ -535,6 +535,20 @@
       "claimedAt": "2026-05-28T07:49:02Z",
       "closedAt": "2026-05-28T09:03:34Z",
       "mergedPr": 109
+    },
+    "118": {
+      "number": 118,
+      "title": "[P1] 云端播放描述 API",
+      "score": 3,
+      "stack": [
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "yangchloeeeee",
+      "claimedAt": "2026-05-29T01:59:36Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "119": {
       "number": 119,
