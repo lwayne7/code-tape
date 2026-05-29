@@ -1,9 +1,16 @@
 import { RECORDING_SCHEMA_VERSION, type RecordingLanguage } from "@code-tape/recording-schema";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
-import { RECORDING_ASSET_KINDS } from "./types.js";
+import {
+  RECORDING_ASSET_KINDS,
+  MAX_RECORDING_DURATION_MS,
+  MAX_RECORDING_MEDIA_SIZE_BYTES,
+  MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES,
+} from "./types.js";
 import type {
   CloudApiError,
+  CloudRecordingDetail,
+  CloudRecordingListItem,
   CloudRecordingAssetRecord,
   CloudRecordingRecord,
   CloudResult,
@@ -38,6 +45,13 @@ export type CloudRecordingService = {
     sessionId: string;
     input: CompleteUploadSessionRequest;
   }): Promise<CloudResult<CompleteUploadSessionResponse>>;
+  listRecordings(input: {
+    ownerId: string;
+  }): Promise<CloudResult<{ recordings: CloudRecordingListItem[] }>>;
+  getRecording(input: {
+    ownerId: string;
+    recordingId: string;
+  }): Promise<CloudResult<CloudRecordingDetail>>;
 };
 
 export function createCloudRecordingService(deps: {
@@ -174,7 +188,59 @@ export function createCloudRecordingService(deps: {
       });
       return { ok: true, value: { recordingId: session.recordingId, status: "processing" } };
     },
+    async listRecordings({ ownerId }) {
+      const recordings = await deps.metadata.listRecordingsByOwner({
+        ownerId,
+        statuses: ["ready"],
+      });
+      return {
+        ok: true,
+        value: {
+          recordings: recordings.map(toListItem),
+        },
+      };
+    },
+    async getRecording({ ownerId, recordingId }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isDetailVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+      return { ok: true, value: toDetail(recording) };
+    },
   };
+}
+
+function toListItem(recording: CloudRecordingRecord): CloudRecordingListItem {
+  return {
+    id: recording.id,
+    title: recording.title,
+    durationMs: recording.durationMs,
+    createdAt: recording.createdAt,
+    updatedAt: recording.updatedAt,
+    initialLanguage: recording.initialLanguage,
+    hasAudio: recording.hasAudio,
+    hasCamera: recording.hasCamera,
+    status: recording.status,
+  };
+}
+
+function toDetail(recording: CloudRecordingRecord): CloudRecordingDetail {
+  return {
+    ...toListItem(recording),
+    localPackageId: recording.localPackageId,
+    schemaVersion: recording.schemaVersion,
+    visibility: recording.visibility,
+    completedAt: recording.completedAt,
+    totalSizeBytes: recording.totalSizeBytes,
+    eventCount: recording.eventCount,
+    snapshotCount: recording.snapshotCount,
+    failureCode: recording.failureCode,
+    failureMessage: recording.failureMessage,
+  };
+}
+
+function isDetailVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
+  return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
 }
 
 async function resolveExistingUploadSession(input: {
@@ -228,6 +294,12 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
       message: "durationMs must be a non-negative safe integer",
     };
   }
+  if (input.durationMs > MAX_RECORDING_DURATION_MS) {
+    return {
+      code: "quota-exceeded",
+      message: `duration exceeds budget limit of ${MAX_RECORDING_DURATION_MS / 60000} minutes: ${input.durationMs}ms`,
+    };
+  }
   if (!RECORDING_LANGUAGE_SET.has(input.initialLanguage)) {
     return {
       code: "invalid-manifest",
@@ -249,8 +321,24 @@ function validateCreateUploadSessionInput(input: CreateUploadSessionRequest): Cl
     if (!Number.isSafeInteger(asset.sizeBytes) || asset.sizeBytes <= 0) {
       return { code: "invalid-manifest", message: `invalid asset size: ${asset.kind}` };
     }
+    if (asset.kind === "media" && asset.sizeBytes > MAX_RECORDING_MEDIA_SIZE_BYTES) {
+      return {
+        code: "quota-exceeded",
+        message: `media size exceeds budget limit of ${MAX_RECORDING_MEDIA_SIZE_BYTES / (1024 * 1024)}MB: ${asset.sizeBytes} bytes`,
+      };
+    }
     if (asset.mimeType.trim().length < 1) {
       return { code: "invalid-manifest", message: `invalid asset mime type: ${asset.kind}` };
+    }
+  }
+  let totalSizeBytes = 0;
+  for (const asset of input.assets) {
+    totalSizeBytes += asset.sizeBytes;
+    if (totalSizeBytes > MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES) {
+      return {
+        code: "quota-exceeded",
+        message: `total asset size exceeds budget limit of ${MAX_RECORDING_TOTAL_ASSET_SIZE_BYTES / (1024 * 1024)}MB: ${totalSizeBytes} bytes`,
+      };
     }
   }
   const kinds = new Set(input.assets.map((asset) => asset.kind));

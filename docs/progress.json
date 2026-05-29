@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-28T09:03:34Z",
+  "updatedAt": "2026-05-29T01:59:36Z",
   "students": {
     "ceilf6": {
-      "activeIssue": null,
+      "activeIssue": 120,
       "completedIssues": [
         11,
         10,
@@ -26,13 +26,15 @@
         7,
         57,
         59,
-        77
+        77,
+        95,
+        97
       ],
       "bugPenalties": [],
       "developmentScore": 29.25,
-      "reviewScore": 3.25,
+      "reviewScore": 4.25,
       "penaltyScore": 0,
-      "totalScore": 32.5
+      "totalScore": 33.5
     },
     "MINTPIPERAS": {
       "activeIssue": null,
@@ -48,19 +50,21 @@
         6,
         79,
         78,
-        98
+        98,
+        96
       ],
       "bugPenalties": [],
       "developmentScore": 7.75,
-      "reviewScore": 4.25,
+      "reviewScore": 4.75,
       "penaltyScore": 0,
-      "totalScore": 12
+      "totalScore": 12.5
     },
     "Suxian2001": {
-      "activeIssue": 96,
+      "activeIssue": null,
       "completedIssues": [
         5,
-        79
+        79,
+        96
       ],
       "reviewedIssues": [
         60,
@@ -73,19 +77,20 @@
         110
       ],
       "bugPenalties": [],
-      "developmentScore": 4,
+      "developmentScore": 5.5,
       "reviewScore": 5.5,
       "penaltyScore": 0,
-      "totalScore": 9.5
+      "totalScore": 11
     },
     "yangchloeeeee": {
-      "activeIssue": 95,
+      "activeIssue": 118,
       "completedIssues": [
         4,
         7,
         57,
         66,
-        77
+        77,
+        95
       ],
       "reviewedIssues": [
         10,
@@ -95,10 +100,10 @@
         107
       ],
       "bugPenalties": [],
-      "developmentScore": 9.25,
+      "developmentScore": 10.75,
       "reviewScore": 4.5,
       "penaltyScore": 0,
-      "totalScore": 13.75
+      "totalScore": 15.25
     },
     "JunMang01": {
       "activeIssue": null,
@@ -126,14 +131,16 @@
       "totalScore": 2.25
     },
     "lwayne7": {
-      "activeIssue": 97,
-      "completedIssues": [],
+      "activeIssue": 119,
+      "completedIssues": [
+        97
+      ],
       "reviewedIssues": [],
       "bugPenalties": [],
-      "developmentScore": 0,
+      "developmentScore": 1.5,
       "reviewScore": 0,
       "penaltyScore": 0,
-      "totalScore": 0
+      "totalScore": 1.5
     }
   },
   "issues": {
@@ -461,11 +468,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "yangchloeeeee",
       "claimedAt": "2026-05-28T01:38:08Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T01:05:57Z",
+      "mergedPr": 105
     },
     "96": {
       "number": 96,
@@ -475,11 +482,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "Suxian2001",
       "claimedAt": "2026-05-28T01:54:23Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T00:42:27Z",
+      "mergedPr": 113
     },
     "97": {
       "number": 97,
@@ -489,11 +496,11 @@
         "typescript",
         "node"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "lwayne7",
       "claimedAt": "2026-05-28T01:38:32Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T01:40:45Z",
+      "mergedPr": 101
     },
     "98": {
       "number": 98,
@@ -528,6 +535,48 @@
       "claimedAt": "2026-05-28T07:49:02Z",
       "closedAt": "2026-05-28T09:03:34Z",
       "mergedPr": 109
+    },
+    "118": {
+      "number": 118,
+      "title": "[P1] 云端播放描述 API",
+      "score": 3,
+      "stack": [
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "yangchloeeeee",
+      "claimedAt": "2026-05-29T01:59:36Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "119": {
+      "number": 119,
+      "title": "[P1] 云端录制重命名与软删除 API",
+      "score": 3,
+      "stack": [
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "lwayne7",
+      "claimedAt": "2026-05-29T01:57:04Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "120": {
+      "number": 120,
+      "title": "[Epic] P1+ WebRTC 实时面试模式总控",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T01:48:46Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
@@ -896,6 +945,42 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0.5,
       "createdAt": "2026-05-28T09:03:34Z"
+    },
+    {
+      "id": "pr-113-merge",
+      "type": "feature_merge",
+      "issue": 96,
+      "pr": 113,
+      "score": 2,
+      "developer": "Suxian2001",
+      "reviewer": "MINTPIPERAS",
+      "developerDelta": 1.5,
+      "reviewerDelta": 0.5,
+      "createdAt": "2026-05-29T00:42:27Z"
+    },
+    {
+      "id": "pr-105-merge",
+      "type": "feature_merge",
+      "issue": 95,
+      "pr": 105,
+      "score": 2,
+      "developer": "yangchloeeeee",
+      "reviewer": "ceilf6",
+      "developerDelta": 1.5,
+      "reviewerDelta": 0.5,
+      "createdAt": "2026-05-29T01:05:57Z"
+    },
+    {
+      "id": "pr-101-merge",
+      "type": "feature_merge",
+      "issue": 97,
+      "pr": 101,
+      "score": 2,
+      "developer": "lwayne7",
+      "reviewer": "ceilf6",
+      "developerDelta": 1.5,
+      "reviewerDelta": 0.5,
+      "createdAt": "2026-05-29T01:40:45Z"
     }
   ]
 }
