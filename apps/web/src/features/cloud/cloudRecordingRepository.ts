@@ -200,7 +200,18 @@ export function createCloudRecordingRepository(
       const idempotencyKey = options?.idempotencyKey ?? pkg.manifest.packageId;
 
       // 1. 序列化 JSON 资产并计算 sha256 / size
-      const assetDefs = await buildPackageAssetDefs(pkg, blobs);
+      let assetDefs: Awaited<ReturnType<typeof buildPackageAssetDefs>>;
+      try {
+        assetDefs = await buildPackageAssetDefs(pkg, blobs);
+      } catch (err) {
+        return {
+          ok: false,
+          error: {
+            code: "network-error",
+            message: `prepare upload assets failed: ${formatError(err)}`,
+          },
+        };
+      }
 
       // 2. 创建上传会话
       const sessionInput: CreateUploadSessionRequest = {

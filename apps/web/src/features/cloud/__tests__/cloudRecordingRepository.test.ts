@@ -893,6 +893,25 @@ describe("CloudRecordingRepository", () => {
       expect(lastEvent.bytesUploaded).toBe(globalTotal);
     }, 15000);
 
+    it("crypto.subtle.digest 失败时返回 CloudResult 错误而非 reject", async () => {
+      const repo = setupRepo();
+      const mediaBlob = new Blob(["fake-webm-data"], { type: "video/webm" });
+
+      mockFetch(201, makeSessionResponse());
+
+      // mock crypto.subtle.digest 失败
+      vi.spyOn(globalThis.crypto.subtle, "digest").mockRejectedValueOnce(new Error("crypto unavailable"));
+
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      const result = await repo.uploadPackage(pkg, { media: mediaBlob });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("network-error");
+      expect(result.error.message).toContain("prepare upload assets failed");
+      expect(result.error.message).toContain("crypto unavailable");
+    });
+
     it("create session 失败时透传错误", async () => {
       const repo = setupRepo();
       mockFetch(422, { error: { code: "unsupported-schema", message: "bad schema" } });
