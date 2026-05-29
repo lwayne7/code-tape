@@ -315,11 +315,11 @@ def tokenize_training_record(record: dict, tokenizer, max_seq_length: int) -> di
     assistant_content = messages[2]["content"]
     prompt_text = tokenizer.apply_chat_template(prompt_messages, add_generation_prompt=True, tokenize=False)
     full_text = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
-    if not full_text.startswith(prompt_text):
-        raise ValueError("training prompt is not a prefix of the full assistant record")
     assistant_start = full_text.find(assistant_content, len(prompt_text))
     if assistant_start < 0:
-        raise ValueError("assistant content is not present after the training prompt")
+        assistant_start = full_text.rfind(assistant_content)
+    if assistant_start < 0:
+        raise ValueError("assistant content is not present in the full assistant record")
     assistant_end = assistant_start + len(assistant_content)
 
     full_tokens = tokenize_with_offsets(tokenizer, full_text)

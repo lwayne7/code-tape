@@ -207,6 +207,54 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(pipeline).toHaveBeenCalledTimes(1);
   });
 
+  it("deduplicates loose title fallback chapters that reference the same subtitle id", async () => {
+    const pipeline = vi.fn(async () => [
+      {
+        generated_text:
+          '{"segments":[],"titles":[{"id":"subtitle-1","text":"first title"},{"id":"subtitle-1","text":"duplicate title"},{"id":"subtitle-2","text":"second title"}]}',
+      },
+    ]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).resolves.toEqual({
+      segments: [],
+      chapters: [
+        { title: "片段 1", startMs: 0, endMs: 1_000 },
+        { title: "片段 2", startMs: 1_000, endMs: 3_000 },
+      ],
+    });
+  });
+
+  it("uses generic fallback chapter titles for non-technical subtitle content", async () => {
+    const pipeline = vi
+      .fn()
+      .mockResolvedValueOnce([{ generated_text: '{"segments":[{"id":"subtitle-1","text":"今天我们来做红烧肉"}]' }])
+      .mockResolvedValueOnce([{ generated_text: "Still not JSON" }]);
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(
+      postProcessor.process({
+        track: {
+          ...makeTrack(),
+          segments: [
+            { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "今天我们来做红烧肉" },
+            { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "先把五花肉切块" },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      segments: [],
+      chapters: [
+        { title: "片段 1", startMs: 0, endMs: 1_000 },
+        { title: "片段 2", startMs: 1_000, endMs: 3_000 },
+      ],
+    });
+  });
+
   it("parses Transformers.js chat message arrays nested inside generated_text", async () => {
     const pipeline = vi.fn(async () => [
       {

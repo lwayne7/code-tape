@@ -491,6 +491,48 @@ test('LoRA training keeps tokens that overlap the assistant JSON start boundary'
   assert.deepEqual(JSON.parse(result.stdout), { boundaryId: 2, boundaryLabel: 2 });
 });
 
+test('LoRA training locates assistant JSON when prompt and full chat templates differ at the boundary', () => {
+  const python = [
+    'import importlib.util',
+    'spec = importlib.util.spec_from_file_location("train_lora", "ml/subtitle-postprocessor/train_lora.py")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'PROMPT = "<s>system\\ns</s><u>payload</u><a>\\n"',
+    'FULL_PREFIX = "<s>system\\ns</s><u>payload</u><a>"',
+    'ASSISTANT = "{\\"segments\\":[],\\"chapters\\":[]}"',
+    'FULL = FULL_PREFIX + ASSISTANT + "</a>"',
+    'class BoundaryDriftTokenizer:',
+    '    def __init__(self):',
+    '        self.id_to_text = {}',
+    '    def apply_chat_template(self, messages, add_generation_prompt=False, tokenize=False):',
+    '        return PROMPT if add_generation_prompt else FULL',
+    '    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):',
+    '        ids = []',
+    '        offsets = []',
+    '        for index, char in enumerate(text, start=1):',
+    '            ids.append(index)',
+    '            offsets.append((index - 1, index))',
+    '            self.id_to_text[index] = char',
+    '        if return_offsets_mapping:',
+    '            return {"input_ids": ids, "offset_mapping": offsets}',
+    '        return {"input_ids": ids}',
+    '    def decode(self, ids):',
+    '        return "".join(self.id_to_text[token_id] for token_id in ids)',
+    'tokenizer = BoundaryDriftTokenizer()',
+    'record={"messages":[{"role":"system","content":"s"},{"role":"user","content":"payload"},{"role":"assistant","content":ASSISTANT}]}',
+    'tokens = module.tokenize_training_record(record, tokenizer, 256)',
+    'assistant_ids = [token_id for token_id, label in zip(tokens["input_ids"], tokens["labels"]) if label != -100]',
+    'print(tokenizer.decode(assistant_ids))',
+  ].join('\n');
+  const result = spawnSync('python3', ['-c', python], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '{"segments":[],"chapters":[]}');
+});
+
 test('evaluates subtitle SFT records for JSON, chapter, and glossary quality', () => {
   const result = spawnSync(
     'node',

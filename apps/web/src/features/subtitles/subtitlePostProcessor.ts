@@ -502,24 +502,30 @@ function readLooseCorrectionChapters(
 
   if (!Array.isArray(value.titles)) return [];
   const timelineById = new Map(track.segments.map((segment) => [segment.id, segment]));
-  return value.titles.flatMap((title, index) => {
-    if (!isPlainObject(title)) return [];
+  const seenSegmentIds = new Set<string>();
+  const chapters: NonNullable<SubtitleCorrectionResult["chapters"]> = [];
+  for (const title of value.titles) {
+    if (!isPlainObject(title)) continue;
     if (typeof title.title === "string" && typeof title.startMs === "number") {
       try {
-        return [normalizeChapter(title, index)];
+        chapters.push(normalizeChapter(title, chapters.length));
       } catch {
-        return [];
+        // Keep recovering other loose chapter entries.
       }
+      continue;
     }
-    if (typeof title.id !== "string" || typeof title.text !== "string") return [];
+    if (typeof title.id !== "string" || typeof title.text !== "string") continue;
+    if (seenSegmentIds.has(title.id)) continue;
     const segment = timelineById.get(title.id);
-    if (!segment) return [];
-    return [{
-      title: fallbackChapterTitle(index),
+    if (!segment) continue;
+    seenSegmentIds.add(title.id);
+    chapters.push({
+      title: fallbackChapterTitle(chapters.length),
       startMs: segment.startMs,
       endMs: segment.endMs,
-    }];
-  });
+    });
+  }
+  return chapters;
 }
 
 function buildFallbackChapters(
