@@ -1587,6 +1587,28 @@ test("PATCH /api/recordings/:recordingId rejects extra fields in body", async ()
   assert.equal(body.error.code, "bad-request");
 });
 
+test("PATCH /api/recordings/:recordingId rejects empty body without title", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-empty-body",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-token": "owner-1" },
+      body: JSON.stringify({}),
+    }),
+  );
+  const body = (await response.json()) as { error: { code: string; message: string } };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "bad-request");
+  assert.equal(body.error.message, "title is required");
+});
+
 test("PATCH /api/recordings/:recordingId reports unknown fields with a specific error", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });

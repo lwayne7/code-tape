@@ -143,15 +143,16 @@ export async function processNextRecordingValidationJob(deps: {
     // Recording was deleted or transitioned to a terminal state during validation — don't revive it
     return { ok: false, recording: freshRecording ?? recording };
   }
+  // Use fresh recording's metadata (title, etc.) to preserve concurrent renames
   const ready: CloudRecordingRecord = {
-    ...recording,
+    ...freshRecording,
     status: "ready",
     completedAt,
     updatedAt: completedAt,
     eventCount: integrity.package.events.length,
     snapshotCount: integrity.package.snapshots.length,
-    hasAudio: hasMedia ? recording.hasAudio : false,
-    hasCamera: hasMedia ? recording.hasCamera : false,
+    hasAudio: hasMedia ? freshRecording.hasAudio : false,
+    hasCamera: hasMedia ? freshRecording.hasCamera : false,
     failureCode: null,
     failureMessage: null,
   };
@@ -255,8 +256,9 @@ async function failRecording(
     return { ok: false, recording: freshRecording ?? recording };
   }
   const failedAt = now().toISOString();
+  // Use fresh recording's metadata (title, etc.) to preserve concurrent renames
   const failed: CloudRecordingRecord = {
-    ...recording,
+    ...freshRecording,
     status: "failed",
     updatedAt: failedAt,
     failureCode: code,
