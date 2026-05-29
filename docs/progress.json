@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T12:34:16Z",
+  "updatedAt": "2026-05-29T12:44:57Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
@@ -25,7 +25,8 @@
         126,
         139,
         133,
-        141
+        141,
+        142
       ],
       "reviewedIssues": [
         4,
@@ -41,10 +42,10 @@
         119
       ],
       "bugPenalties": [],
-      "developmentScore": 41.25,
+      "developmentScore": 42.75,
       "reviewScore": 5.75,
       "penaltyScore": 0,
-      "totalScore": 47
+      "totalScore": 48.5
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -668,6 +669,12 @@
       "closedAt": "2026-05-29T12:29:51Z",
       "mergedPr": 143
     },
+    "142": {
+      "number": 142,
+      "status": "closed",
+      "closedAt": "2026-05-29T12:44:57Z",
+      "mergedPr": 144
+    },
     "146": {
       "number": 146,
       "title": "[P1+ WebRTC] 双向音视频通话基础核心",
@@ -1181,6 +1188,18 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T12:29:51Z"
+    },
+    {
+      "id": "pr-144-merge",
+      "type": "feature_merge",
+      "issue": 142,
+      "pr": 144,
+      "score": 2,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 1.5,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T12:44:57Z"
     }
   ]
 }
