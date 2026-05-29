@@ -1198,10 +1198,19 @@ test("POST .../complete session 非 open 且非 completed 返回 409 conflict", 
 test("PATCH /api/recordings/:recordingId renames a ready recording for the owner", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready", ownerId: "owner-1", status: "ready" });
+  const objectStorage = createMemoryObjectStorage();
   const handler = createCloudApiHandler({
-    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    service: createCloudRecordingService({ metadata, objectStorage }),
     createRequestId: () => "req-rename",
   });
+
+  // Seed an object in storage to verify rename doesn't touch it
+  await objectStorage.putObject({
+    key: "recordings/rec-ready/package/meta.json",
+    body: new TextEncoder().encode(JSON.stringify({ title: "Old Title" })),
+    contentType: "application/json",
+  });
+  const objectBefore = await objectStorage.getObject("recordings/rec-ready/package/meta.json");
 
   const response = await handler(
     new Request("http://localhost/api/recordings/rec-ready", {
@@ -1226,6 +1235,10 @@ test("PATCH /api/recordings/:recordingId renames a ready recording for the owner
   );
   const detailBody = (await detailResponse.json()) as { recording: { title: string } };
   assert.equal(detailBody.recording.title, "New Title");
+
+  // Verify object storage was NOT modified (metadata-only update)
+  const objectAfter = await objectStorage.getObject("recordings/rec-ready/package/meta.json");
+  assert.deepEqual(objectAfter, objectBefore, "rename must not rewrite object storage");
 });
 
 test("PATCH /api/recordings/:recordingId trims whitespace from title", async () => {
