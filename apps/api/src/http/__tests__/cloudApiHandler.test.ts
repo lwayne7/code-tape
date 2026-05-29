@@ -12,6 +12,15 @@ import { createLocalDevObjectStorageHandler } from "../localDevObjectStorageHand
 import type { MetadataRepository } from "../../cloud/metadataRepository.js";
 import type { CloudRecordingAssetRecord, CloudRecordingRecord, RecordingAssetKind, RecordingStatus } from "../../cloud/types.js";
 
+const NON_PLAYABLE_RECORDING_STATUSES = [
+  "uploading",
+  "processing",
+  "failed",
+  "soft_deleted",
+  "purging",
+  "deleted",
+] as const satisfies readonly Exclude<RecordingStatus, "ready">[];
+
 function createTestApiHandler(
   objectStorage: ReturnType<typeof createMemoryObjectStorage> | ReturnType<typeof createLocalDevObjectStorage>,
   createRequestId: () => string,
@@ -333,22 +342,28 @@ test("GET /api/recordings/:recordingId/playback returns 404 for non-ready or own
     hasAudio: false,
     hasCamera: false,
   }, ["manifest", "meta", "events", "snapshots"]);
-  await seedRecordingWithAssets(metadata, {
-    id: "rec-processing-playback",
-    ownerId: "owner-1",
-    status: "processing",
-    hasAudio: false,
-    hasCamera: false,
-  }, ["manifest", "meta", "events", "snapshots"]);
+  for (const status of NON_PLAYABLE_RECORDING_STATUSES) {
+    await seedRecordingWithAssets(metadata, {
+      id: `rec-${status}-playback`,
+      ownerId: "owner-1",
+      status,
+      hasAudio: false,
+      hasCamera: false,
+    }, ["manifest", "meta", "events", "snapshots"]);
+  }
   const handler = createCloudApiHandler({
     service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
     createRequestId: () => "req-playback-not-found",
   });
 
-  for (const path of [
+  const notFoundPlaybackPaths = [
     "http://localhost/api/recordings/rec-owner-2-playback/playback",
-    "http://localhost/api/recordings/rec-processing-playback/playback",
-  ]) {
+    ...NON_PLAYABLE_RECORDING_STATUSES.map(
+      (status) => `http://localhost/api/recordings/rec-${status}-playback/playback`,
+    ),
+  ];
+
+  for (const path of notFoundPlaybackPaths) {
     const response = await handler(
       new Request(path, {
         method: "GET",
@@ -392,6 +407,28 @@ test("GET /api/recordings/:recordingId/playback returns null for optional media/
   assert.equal(body.indexesUrl, null);
   assert.equal(body.mediaUrl, null);
   assert.equal(body.thumbnailUrl, null);
+});
+
+test("GET /api/recordings/:recordingId/playback requires owner token", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-playback-owner-token",
+  });
+
+  const response = await handler(new Request("http://localhost/api/recordings/rec-1/playback", { method: "GET" }));
+  const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(body, {
+    error: {
+      code: "unauthorized",
+      message: "missing owner token",
+      requestId: "req-playback-owner-token",
+    },
+  });
 });
 
 test("GET /api/recordings/:recordingId requires owner token", async () => {

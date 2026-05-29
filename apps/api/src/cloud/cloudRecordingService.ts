@@ -229,13 +229,9 @@ export function createCloudRecordingService(deps: {
         };
       }
 
-      if (!deps.objectStorage.getAssetUrl) {
-        throw new Error("object storage must support getAssetUrl for playback descriptor generation");
-      }
-
       const getUrl = (kind: RecordingAssetKind): string | null => {
         const asset = assetsByKind.get(kind);
-        return asset ? deps.objectStorage.getAssetUrl!(asset.objectKey) : null;
+        return asset ? deps.objectStorage.getAssetUrl(asset.objectKey) : null;
       };
 
       return {
