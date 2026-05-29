@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createInterviewMediaSession,
+  type InterviewDataChannelEvent,
   type InterviewEventsDataChannel,
   type InterviewMediaSessionDependencies,
   type InterviewPeerConnection,
@@ -49,6 +50,8 @@ class FakeDataChannel implements InterviewEventsDataChannel {
   onclose: (() => void) | null = null;
   closeCalls = 0;
 
+  constructor(readonly label = "events") {}
+
   send(): void {}
 
   open(): void {
@@ -72,6 +75,7 @@ class FakePeerConnection implements InterviewPeerConnection {
   onicecandidate: ((event: { candidate: RTCIceCandidate | RTCIceCandidateInit | null }) => void) | null =
     null;
   ontrack: ((event: { track: MediaStreamTrack; streams: MediaStream[] }) => void) | null = null;
+  ondatachannel: ((event: InterviewDataChannelEvent) => void) | null = null;
   onconnectionstatechange: (() => void) | null = null;
   oniceconnectionstatechange: (() => void) | null = null;
   onsignalingstatechange: (() => void) | null = null;
@@ -89,7 +93,7 @@ class FakePeerConnection implements InterviewPeerConnection {
   }
 
   createDataChannel(label: string, options?: RTCDataChannelInit): InterviewEventsDataChannel {
-    const channel = new FakeDataChannel();
+    const channel = new FakeDataChannel(label);
     this.createdDataChannels.push({ label, options, channel });
     return channel;
   }
@@ -125,6 +129,12 @@ class FakePeerConnection implements InterviewPeerConnection {
 
   emitRemoteTrack(track: MediaStreamTrack, stream?: MediaStream): void {
     this.ontrack?.({ track, streams: stream ? [stream] : [] });
+  }
+
+  emitDataChannel(label: string): FakeDataChannel {
+    const channel = new FakeDataChannel(label);
+    this.ondatachannel?.({ channel });
+    return channel;
   }
 
   setConnectionState(state: RTCPeerConnectionState): void {
@@ -237,6 +247,35 @@ describe("InterviewMediaSession", () => {
     expect(session.getState().eventsDataChannelState).toBe("open");
   });
 
+  it("receives a remote events data channel and exposes its lifecycle state", () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    const observedStates: Array<ReturnType<typeof session.getState>["eventsDataChannelState"]> = [];
+    session.subscribe((state) => {
+      observedStates.push(state.eventsDataChannelState);
+    });
+
+    const channel = peer.emitDataChannel("events");
+
+    expect(session.getState().eventsDataChannelState).toBe("connecting");
+
+    channel.open();
+    channel.close();
+
+    expect(session.getState().eventsDataChannelState).toBe("closed");
+    expect(observedStates).toEqual(["connecting", "open", "closed"]);
+  });
+
+  it("ignores remote data channels that are not the events channel", () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+
+    const channel = peer.emitDataChannel("presence");
+    channel.open();
+
+    expect(session.getState().eventsDataChannelState).toBe("not-created");
+  });
+
   it("queues local ICE candidates for the signaling layer and clears them after drain", () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });
@@ -303,6 +342,18 @@ describe("InterviewMediaSession", () => {
     const closed = session.close();
 
     expect(peer.createdDataChannels[0].channel.closeCalls).toBe(1);
+    expect(closed.eventsDataChannelState).toBe("closed");
+    expect(session.getState().eventsDataChannelState).toBe("closed");
+  });
+
+  it("closes a received remote events data channel when closed", () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    const channel = peer.emitDataChannel("events");
+
+    const closed = session.close();
+
+    expect(channel.closeCalls).toBe(1);
     expect(closed.eventsDataChannelState).toBe("closed");
     expect(session.getState().eventsDataChannelState).toBe("closed");
   });

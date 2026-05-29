@@ -978,6 +978,7 @@ function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
   const localStream = {} as MediaStream;
   const remoteStream = {} as MediaStream;
   const eventsDataChannel: InterviewEventsDataChannel = {
+    label: "events",
     readyState: "connecting",
     onopen: null,
     onclose: null,
