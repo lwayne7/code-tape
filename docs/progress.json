@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T21:31:11Z",
+  "updatedAt": "2026-05-29T21:34:30Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         174,
-        187
+        187,
+        189
       ],
       "completedIssues": [
         11,
@@ -1003,6 +1004,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T20:37:48Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "189": {
+      "number": 189,
+      "title": "[P1+ WebRTC] 面试官 DataChannel 接收与只读工作台接线",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T21:34:30Z",
       "closedAt": null,
       "mergedPr": null
     }
