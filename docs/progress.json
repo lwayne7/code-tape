@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:51:19Z",
+  "updatedAt": "2026-05-29T15:53:54Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         157,
-        158
+        158,
+        162
       ],
       "completedIssues": [
         11,
@@ -790,6 +791,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:38:41Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "162": {
+      "number": 162,
+      "title": "[P1+ WebRTC] 候选人房间创建与信令状态接线",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T15:53:54Z",
       "closedAt": null,
       "mergedPr": null
     }
