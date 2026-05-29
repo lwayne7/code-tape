@@ -9,11 +9,11 @@ export const DEFAULT_POSTPROCESSOR_MODEL =
   "ceilf6/code-tape-subtitle-postprocessor-onnx";
 const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
-const BASE_MAX_NEW_TOKENS = 384;
+const BASE_MAX_NEW_TOKENS = 256;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
-const MAX_DYNAMIC_NEW_TOKENS = 3_072;
-const NEW_TOKENS_PER_SEGMENT = 16;
-const CHAPTER_OUTPUT_TOKEN_RESERVE = 256;
+const MAX_DYNAMIC_NEW_TOKENS = 1_024;
+const NEW_TOKENS_PER_SEGMENT = 6;
+const CHAPTER_OUTPUT_TOKEN_RESERVE = 192;
 const MAX_REPAIR_OUTPUT_CHARS = 1_000;
 const SMOLLM_CHAT_TEMPLATE = `{% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system
 You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>

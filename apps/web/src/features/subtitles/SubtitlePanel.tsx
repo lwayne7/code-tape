@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import { SubtitleChapterList } from "./SubtitleChapterList";
 import { applySubtitleCorrection } from "./subtitleCorrection";
 import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
-import { createHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessor";
+import { createWorkerBackedHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessorWorkerClient";
 import { createSubtitleStore } from "./subtitleStore";
 import { createHuggingFaceSubtitleTranscriber } from "./subtitleTranscriber";
 import type {
@@ -53,7 +53,7 @@ export function SubtitlePanel({
   const postProcessor = useMemo(
     () =>
       injectedPostProcessor === undefined
-        ? createHuggingFaceSubtitlePostProcessor({
+        ? createWorkerBackedHuggingFaceSubtitlePostProcessor({
             model: resolveSubtitlePostProcessorModel(),
           })
         : injectedPostProcessor,

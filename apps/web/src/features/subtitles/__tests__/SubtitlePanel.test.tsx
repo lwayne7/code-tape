@@ -163,6 +163,70 @@ describe("SubtitlePanel", () => {
     ]);
   });
 
+  it("keeps subtitle seeking available while local LLM post-processing is pending", async () => {
+    const originalTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [
+        { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+        { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
+      ],
+    };
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(originalTrack, [
+      { id: "chapter-1", title: "已有章节", startMs: 0, endMs: 3_000 },
+    ]);
+    const postProcessing = createDeferred<{
+      segments: Array<{ id: string; text: string }>;
+      chapters: Array<{ title: string; startMs: number; endMs?: number }>;
+    }>();
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(() => postProcessing.promise),
+    };
+    const onSeek = vi.fn();
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={500}
+        onSeek={onSeek}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: "render result" }));
+    fireEvent.click(screen.getByRole("button", { name: /已有章节/ }));
+
+    expect(onSeek).toHaveBeenCalledWith(1_000);
+    expect(onSeek).toHaveBeenCalledWith(0);
+
+    await act(async () => {
+      postProcessing.resolve({
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [{ title: "代码实现", startMs: 1_000, endMs: 3_000 }],
+      });
+      await flushPromises();
+    });
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+  });
+
   it("keeps ASR subtitles when local LLM post-processing fails", async () => {
     const transcriber: SubtitleTranscriber = {
       transcribe: vi.fn(async () => ({

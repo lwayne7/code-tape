@@ -20,6 +20,8 @@
 5. 训练 student：使用小型 instruct 模型做 LoRA，评估 JSON 合法率、术语准确率、稀疏 segment 合法性和章节边界误差。
 6. 发布公开模型：将 adapter 或合并后的模型发布到 Hugging Face，再导出 Transformers.js 兼容 ONNX。
 
+seed 样本和 distilled SFT 样本不能只覆盖少数 happy path。当前仓库用测试约束两类 corpus 都至少 30 条，并要求覆盖 React、TypeScript、Vite、Playwright、Vitest、Web Worker、WebGPU/WASM、IndexedDB、repo-guard、SubtitlePanel 和章节生成等 code-tape 场景，避免小模型只学到固定样例格式。
+
 ## 本地命令
 
 先注入密钥到当前 shell。不要写入 `.env`、文档或脚本：
