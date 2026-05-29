@@ -839,6 +839,475 @@ test("validation worker excludes missing optional assets from total asset size b
   assert.equal(job.recording.status, "ready");
 });
 
+test("validation worker does not revive soft_deleted recording to ready", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  // Wrap metadata to inject soft-delete after findNextProcessingRecording
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        // Simulate race: user deletes the recording while worker is processing
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: new Date().toISOString(),
+        });
+      }
+      return result;
+    },
+  };
+
+  // Validation worker should NOT revive the recording to "ready"
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+
+  // Verify metadata is still soft_deleted (not overwritten to ready)
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
+test("validation worker does not revive soft_deleted recording to failed on validation error", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  // Don't upload assets — validation will fail
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  // Wrap metadata to inject soft-delete after findNextProcessingRecording
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        // Simulate race: user deletes the recording while worker is processing
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: new Date().toISOString(),
+        });
+      }
+      return result;
+    },
+  };
+
+  // Validation worker should NOT revive the recording to "failed"
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+
+  // Verify metadata is still soft_deleted (not overwritten to failed)
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
+test("validation worker preserves a concurrent processing rename when marking ready", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        await metadata.updateRecording({
+          ...result,
+          title: "Renamed while processing",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      return result;
+    },
+  };
+
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+  assert.equal(job.recording.title, "Renamed while processing");
+  assert.equal(afterJob?.title, "Renamed while processing");
+});
+
+test("validation worker preserves a concurrent processing rename when marking failed", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  let findCalled = false;
+  const wrappedMetadata = {
+    ...metadata,
+    async findNextProcessingRecording() {
+      const result = await metadata.findNextProcessingRecording();
+      if (result && !findCalled) {
+        findCalled = true;
+        await metadata.updateRecording({
+          ...result,
+          title: "Renamed before failure",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      return result;
+    },
+  };
+
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "failed");
+    assert.equal(job.recording.title, "Renamed before failure");
+  }
+  assert.equal(afterJob?.title, "Renamed before failure");
+});
+
+test("validation worker does not revive soft_deleted recording when delete wins the final ready write", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  let deleteOnFreshRead = true;
+  const wrappedMetadata = {
+    ...metadata,
+    async getRecording(recordingId: string) {
+      const result = await metadata.getRecording(recordingId);
+      if (deleteOnFreshRead && result?.status === "processing") {
+        deleteOnFreshRead = false;
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: "2026-05-27T00:02:00.000Z",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      return result;
+    },
+  };
+
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
+test("validation worker does not revive soft_deleted recording when delete wins the final failed write", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  let deleteOnFreshRead = true;
+  const wrappedMetadata = {
+    ...metadata,
+    async getRecording(recordingId: string) {
+      const result = await metadata.getRecording(recordingId);
+      if (deleteOnFreshRead && result?.status === "processing") {
+        deleteOnFreshRead = false;
+        await metadata.updateRecording({
+          ...result,
+          status: "soft_deleted",
+          deletedAt: "2026-05-27T00:02:00.000Z",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      return result;
+    },
+  };
+
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(job.ok, false);
+  assert.ok("recording" in job, "expected recording in job result");
+  if ("recording" in job) {
+    assert.equal(job.recording.status, "soft_deleted");
+  }
+  assert.equal(afterJob?.status, "soft_deleted");
+});
+
+test("validation worker preserves a rename that wins the final ready write race", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({ metadata, objectStorage });
+  const pkg = await makePackage();
+  const created = await service.createUploadSession({
+    ownerId: "owner-1",
+    input: await makeCreateSessionRequest(pkg),
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+  const completed = await service.completeUpload({
+    ownerId: "owner-1",
+    sessionId: created.value.sessionId,
+    input: { uploadedAssets: await makeUploadedAssets(pkg) },
+  });
+  assert.equal(completed.ok, true);
+
+  let renameOnFreshRead = true;
+  const wrappedMetadata = {
+    ...metadata,
+    async getRecording(recordingId: string) {
+      const result = await metadata.getRecording(recordingId);
+      if (renameOnFreshRead && result?.status === "processing") {
+        renameOnFreshRead = false;
+        await metadata.updateRecording({
+          ...result,
+          title: "Final race rename",
+          updatedAt: "2026-05-27T00:02:00.000Z",
+        });
+      }
+      return result;
+    },
+  };
+
+  const job = await processNextRecordingValidationJob({
+    metadata: wrappedMetadata,
+    objectStorage,
+  });
+  const afterJob = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(job.ok, true);
+  if (!job.ok) return;
+  assert.equal(job.recording.status, "ready");
+  assert.equal(job.recording.title, "Final race rename");
+  assert.equal(afterJob?.title, "Final race rename");
+});
+
+for (const terminalStatus of ["purging", "deleted"] as const) {
+  test(`validation worker does not revive ${terminalStatus} recording to ready`, async () => {
+    const metadata = createMemoryMetadataRepository();
+    const objectStorage = createMemoryObjectStorage();
+    const service = createCloudRecordingService({ metadata, objectStorage });
+    const pkg = await makePackage();
+    const created = await service.createUploadSession({
+      ownerId: "owner-1",
+      input: await makeCreateSessionRequest(pkg),
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    await uploadPackageAssets(objectStorage, created.value.uploadTargets, pkg);
+
+    const completed = await service.completeUpload({
+      ownerId: "owner-1",
+      sessionId: created.value.sessionId,
+      input: { uploadedAssets: await makeUploadedAssets(pkg) },
+    });
+    assert.equal(completed.ok, true);
+
+    let findCalled = false;
+    const wrappedMetadata = {
+      ...metadata,
+      async findNextProcessingRecording() {
+        const result = await metadata.findNextProcessingRecording();
+        if (result && !findCalled) {
+          findCalled = true;
+          await metadata.updateRecording({
+            ...result,
+            status: terminalStatus,
+            deletedAt: "2026-05-27T00:02:00.000Z",
+            updatedAt: "2026-05-27T00:02:00.000Z",
+          });
+        }
+        return result;
+      },
+    };
+
+    const job = await processNextRecordingValidationJob({
+      metadata: wrappedMetadata,
+      objectStorage,
+    });
+    const afterJob = await metadata.getRecording(created.value.recordingId);
+
+    assert.equal(job.ok, false);
+    assert.ok("recording" in job, "expected recording in job result");
+    if ("recording" in job) {
+      assert.equal(job.recording.status, terminalStatus);
+    }
+    assert.equal(afterJob?.status, terminalStatus);
+  });
+
+  test(`validation worker does not revive ${terminalStatus} recording to failed on validation error`, async () => {
+    const metadata = createMemoryMetadataRepository();
+    const objectStorage = createMemoryObjectStorage();
+    const service = createCloudRecordingService({ metadata, objectStorage });
+    const pkg = await makePackage();
+    const created = await service.createUploadSession({
+      ownerId: "owner-1",
+      input: await makeCreateSessionRequest(pkg),
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const completed = await service.completeUpload({
+      ownerId: "owner-1",
+      sessionId: created.value.sessionId,
+      input: { uploadedAssets: await makeUploadedAssets(pkg) },
+    });
+    assert.equal(completed.ok, true);
+
+    let findCalled = false;
+    const wrappedMetadata = {
+      ...metadata,
+      async findNextProcessingRecording() {
+        const result = await metadata.findNextProcessingRecording();
+        if (result && !findCalled) {
+          findCalled = true;
+          await metadata.updateRecording({
+            ...result,
+            status: terminalStatus,
+            deletedAt: "2026-05-27T00:02:00.000Z",
+            updatedAt: "2026-05-27T00:02:00.000Z",
+          });
+        }
+        return result;
+      },
+    };
+
+    const job = await processNextRecordingValidationJob({
+      metadata: wrappedMetadata,
+      objectStorage,
+    });
+    const afterJob = await metadata.getRecording(created.value.recordingId);
+
+    assert.equal(job.ok, false);
+    assert.ok("recording" in job, "expected recording in job result");
+    if ("recording" in job) {
+      assert.equal(job.recording.status, terminalStatus);
+    }
+    assert.equal(afterJob?.status, terminalStatus);
+  });
+}
+
 
 async function makePackage(input: { mediaSha256?: string } = {}): Promise<RecordingPackageV1> {
   const events: RecordingPackageV1["events"] = [];

@@ -20,8 +20,11 @@ import type {
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  DeleteRecordingResponse,
   ListRecordingsResponse,
   RecordingAssetKind,
+  RenameRecordingRequest,
+  RenameRecordingResponse,
   UploadSessionRecord,
   UploadTarget,
 } from "./types.js";
@@ -59,6 +62,15 @@ export type CloudRecordingService = {
     ownerId: string;
     recordingId: string;
   }): Promise<CloudResult<CloudRecordingDetailResponse>>;
+  renameRecording(input: {
+    ownerId: string;
+    recordingId: string;
+    input: RenameRecordingRequest;
+  }): Promise<CloudResult<RenameRecordingResponse>>;
+  deleteRecording(input: {
+    ownerId: string;
+    recordingId: string;
+  }): Promise<CloudResult<DeleteRecordingResponse>>;
   getPlaybackDescriptor(input: {
     ownerId: string;
     recordingId: string;
@@ -108,6 +120,7 @@ export function createCloudRecordingService(deps: {
         createdAt,
         updatedAt: createdAt,
         completedAt: null,
+        deletedAt: null,
         durationMs: input.durationMs,
         initialLanguage: input.initialLanguage,
         hasAudio: input.hasAudio,
@@ -168,12 +181,13 @@ export function createCloudRecordingService(deps: {
       if (session.ownerId !== ownerId) {
         return { ok: false, error: { code: "forbidden", message: "upload session owner mismatch" } };
       }
+      const recording = await deps.metadata.getRecording(session.recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
       if (session.status === "completed") {
-        const recording = await deps.metadata.getRecording(session.recordingId);
         const status =
-          recording?.status === "ready" || recording?.status === "failed"
-            ? recording.status
-            : "processing";
+          recording.status === "ready" || recording.status === "failed" ? recording.status : "processing";
         return { ok: true, value: { recordingId: session.recordingId, status } };
       }
       if (session.status !== "open") {
@@ -197,7 +211,19 @@ export function createCloudRecordingService(deps: {
         completedAt,
         uploadedAssetKinds: input.uploadedAssets.map((asset) => asset.kind),
       });
-      return { ok: true, value: { recordingId: session.recordingId, status: "processing" } };
+      const completedRecording = await deps.metadata.getRecording(session.recordingId);
+      if (
+        !completedRecording ||
+        completedRecording.ownerId !== ownerId ||
+        !isOwnerVisibleStatus(completedRecording.status)
+      ) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+      const status =
+        completedRecording.status === "ready" || completedRecording.status === "failed"
+          ? completedRecording.status
+          : "processing";
+      return { ok: true, value: { recordingId: session.recordingId, status } };
     },
     async listRecordings({ ownerId, cursor, limit }) {
       const recordings = await deps.metadata.listRecordingsByOwner({
@@ -219,7 +245,7 @@ export function createCloudRecordingService(deps: {
     },
     async getRecording({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
-      if (!recording || recording.ownerId !== ownerId || !isDetailVisibleStatus(recording.status)) {
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
       const assets = await deps.metadata.listAssets(recordingId);
@@ -230,6 +256,110 @@ export function createCloudRecordingService(deps: {
           assets: assets.map(toAssetSummary),
         },
       };
+    },
+    async renameRecording({ ownerId, recordingId, input }) {
+      const invalid = validateRenameTitle(input.title);
+      if (invalid) return { ok: false, error: invalid };
+
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || !isOwnerVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      const updatedAt = now().toISOString();
+      const renamed = await updateOwnerVisibleRecordingPatch({
+        metadata: deps.metadata,
+        ownerId,
+        recording,
+        patch: {
+          title: input.title.trim(),
+          updatedAt,
+        },
+      });
+      if (!renamed) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+      return {
+        ok: true,
+        value: { id: renamed.id, title: renamed.title, updatedAt },
+      };
+    },
+    async deleteRecording({ ownerId, recordingId }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      // Idempotent: if already soft_deleted by this owner, return current state.
+      // If deletedAt is missing (dirty data), generate and persist it now.
+      if (recording.status === "soft_deleted") {
+        const deletedAt = await ensureSoftDeleteTimestamp({
+          metadata: deps.metadata,
+          ownerId,
+          recording,
+          fallbackDeletedAt: now().toISOString(),
+        });
+        if (!deletedAt) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
+        return {
+          ok: true,
+          value: {
+            id: recording.id,
+            status: "soft_deleted" as const,
+            deletedAt,
+          },
+        };
+      }
+
+      // Non-visible terminal states (purging/deleted) are not accessible to the owner.
+      if (!isOwnerVisibleStatus(recording.status)) {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      const deletedAt = now().toISOString();
+      let current = recording;
+      while (true) {
+        const write = await deps.metadata.updateRecordingIfStatus({
+          recordingId: current.id,
+          expectedStatus: current.status,
+          patch: {
+            status: "soft_deleted",
+            deletedAt,
+            updatedAt: deletedAt,
+          },
+        });
+        if (write.status === "updated") {
+          return {
+            ok: true,
+            value: { id: write.recording.id, status: "soft_deleted" as const, deletedAt },
+          };
+        }
+
+        const latest = write.current;
+        if (!latest || latest.ownerId !== ownerId) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
+        if (latest.status === "soft_deleted") {
+          const latestDeletedAt = await ensureSoftDeleteTimestamp({
+            metadata: deps.metadata,
+            ownerId,
+            recording: latest,
+            fallbackDeletedAt: deletedAt,
+          });
+          if (!latestDeletedAt) {
+            return { ok: false, error: { code: "not-found", message: "recording not found" } };
+          }
+          return {
+            ok: true,
+            value: { id: latest.id, status: "soft_deleted" as const, deletedAt: latestDeletedAt },
+          };
+        }
+        if (!isOwnerVisibleStatus(latest.status)) {
+          return { ok: false, error: { code: "not-found", message: "recording not found" } };
+        }
+        current = latest;
+      }
     },
     async getPlaybackDescriptor({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
@@ -319,8 +449,57 @@ function toAssetSummary(asset: CloudRecordingAssetRecord) {
   };
 }
 
-function isDetailVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
+function isOwnerVisibleStatus(status: CloudRecordingRecord["status"]): boolean {
   return status === "uploading" || status === "processing" || status === "ready" || status === "failed";
+}
+
+async function updateOwnerVisibleRecordingPatch(input: {
+  metadata: MetadataRepository;
+  ownerId: string;
+  recording: CloudRecordingRecord;
+  patch: Partial<Omit<CloudRecordingRecord, "id">>;
+}): Promise<CloudRecordingRecord | null> {
+  let current = input.recording;
+  while (true) {
+    const write = await input.metadata.updateRecordingIfStatus({
+      recordingId: current.id,
+      expectedStatus: current.status,
+      patch: input.patch,
+    });
+    if (write.status === "updated") return write.recording;
+
+    const latest = write.current;
+    if (!latest || latest.ownerId !== input.ownerId || !isOwnerVisibleStatus(latest.status)) {
+      return null;
+    }
+    current = latest;
+  }
+}
+
+async function ensureSoftDeleteTimestamp(input: {
+  metadata: MetadataRepository;
+  ownerId: string;
+  recording: CloudRecordingRecord;
+  fallbackDeletedAt: string;
+}): Promise<string | null> {
+  let current = input.recording;
+  while (current.deletedAt == null) {
+    const write = await input.metadata.updateRecordingIfStatus({
+      recordingId: current.id,
+      expectedStatus: "soft_deleted",
+      patch: { deletedAt: input.fallbackDeletedAt },
+    });
+    if (write.status === "updated") {
+      return write.recording.deletedAt;
+    }
+
+    const latest = write.current;
+    if (!latest || latest.ownerId !== input.ownerId || latest.status !== "soft_deleted") {
+      return null;
+    }
+    current = latest;
+  }
+  return current.deletedAt;
 }
 
 async function resolveExistingUploadSession(input: {
@@ -445,6 +624,23 @@ function validateBoundedText(value: string, field: string): CloudApiError | null
     return {
       code: "invalid-manifest",
       message: `${field} must be 1 to ${MAX_UPLOAD_SCALAR_LENGTH} characters`,
+    };
+  }
+  return null;
+}
+
+const MAX_RECORDING_TITLE_LENGTH = 80;
+
+function validateRenameTitle(title: unknown): CloudApiError | null {
+  if (typeof title !== "string") {
+    return { code: "bad-request", message: "title must be a string" };
+  }
+  const trimmed = title.trim();
+  const titleLength = Array.from(trimmed).length;
+  if (titleLength < 1 || titleLength > MAX_RECORDING_TITLE_LENGTH) {
+    return {
+      code: "bad-request",
+      message: `title must be 1 to ${MAX_RECORDING_TITLE_LENGTH} characters`,
     };
   }
   return null;

@@ -8,6 +8,16 @@ export type CreateUploadWriteResult =
   | { status: "created" }
   | { status: "idempotency-key-exists"; existingSession: UploadSessionRecord };
 
+export type UpdateRecordingIfStatusResult =
+  | { status: "updated"; recording: CloudRecordingRecord }
+  | { status: "status-mismatch"; current: CloudRecordingRecord | null };
+
+export type UpdateRecordingIfStatusInput = {
+  recordingId: string;
+  expectedStatus: CloudRecordingRecord["status"];
+  patch: Partial<Omit<CloudRecordingRecord, "id">>;
+};
+
 export type MetadataRepository = {
   findSessionByOwnerAndIdempotencyKey(
     ownerId: string,
@@ -33,5 +43,8 @@ export type MetadataRepository = {
   }): Promise<void>;
   findNextProcessingRecording(): Promise<CloudRecordingRecord | null>;
   updateRecording(recording: CloudRecordingRecord): Promise<void>;
+  updateRecordingIfStatus(
+    input: UpdateRecordingIfStatusInput,
+  ): Promise<UpdateRecordingIfStatusResult>;
   updateAsset(asset: CloudRecordingAssetRecord): Promise<void>;
 };

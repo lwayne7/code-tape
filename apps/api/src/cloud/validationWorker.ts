@@ -137,20 +137,30 @@ export async function processNextRecordingValidationJob(deps: {
   );
 
   const hasMedia = !!mediaBlob;
-  const ready: CloudRecordingRecord = {
-    ...recording,
+  const freshRecording = await deps.metadata.getRecording(recording.id);
+  if (!isCurrentProcessingRecording(freshRecording, recording)) {
+    return { ok: false, recording: freshRecording ?? recording };
+  }
+  const readyPatch = {
     status: "ready",
     completedAt,
     updatedAt: completedAt,
     eventCount: integrity.package.events.length,
     snapshotCount: integrity.package.snapshots.length,
-    hasAudio: hasMedia ? recording.hasAudio : false,
-    hasCamera: hasMedia ? recording.hasCamera : false,
+    hasAudio: hasMedia ? freshRecording.hasAudio : false,
+    hasCamera: hasMedia ? freshRecording.hasCamera : false,
     failureCode: null,
     failureMessage: null,
-  };
-  await deps.metadata.updateRecording(ready);
-  return { ok: true, recording: ready };
+  } satisfies Partial<CloudRecordingRecord>;
+  const write = await deps.metadata.updateRecordingIfStatus({
+    recordingId: freshRecording.id,
+    expectedStatus: "processing",
+    patch: readyPatch,
+  });
+  if (write.status === "status-mismatch") {
+    return { ok: false, recording: write.current ?? freshRecording };
+  }
+  return { ok: true, recording: write.recording };
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -230,6 +240,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "invalid recording package";
 }
 
+function isCurrentProcessingRecording(
+  freshRecording: CloudRecordingRecord | null,
+  queuedRecording: CloudRecordingRecord,
+): freshRecording is CloudRecordingRecord {
+  return (
+    !!freshRecording &&
+    freshRecording.id === queuedRecording.id &&
+    freshRecording.ownerId === queuedRecording.ownerId &&
+    freshRecording.status === "processing"
+  );
+}
+
 async function failRecording(
   metadata: MetadataRepository,
   recording: CloudRecordingRecord,
@@ -237,14 +259,24 @@ async function failRecording(
   code: CloudApiErrorCode,
   message: string,
 ): Promise<ValidationWorkerResult> {
+  const freshRecording = await metadata.getRecording(recording.id);
+  if (!isCurrentProcessingRecording(freshRecording, recording)) {
+    return { ok: false, recording: freshRecording ?? recording };
+  }
   const failedAt = now().toISOString();
-  const failed: CloudRecordingRecord = {
-    ...recording,
+  const failedPatch = {
     status: "failed",
     updatedAt: failedAt,
     failureCode: code,
     failureMessage: message,
-  };
-  await metadata.updateRecording(failed);
-  return { ok: false, recording: failed };
+  } satisfies Partial<CloudRecordingRecord>;
+  const write = await metadata.updateRecordingIfStatus({
+    recordingId: freshRecording.id,
+    expectedStatus: "processing",
+    patch: failedPatch,
+  });
+  if (write.status === "status-mismatch") {
+    return { ok: false, recording: write.current ?? freshRecording };
+  }
+  return { ok: false, recording: write.recording };
 }

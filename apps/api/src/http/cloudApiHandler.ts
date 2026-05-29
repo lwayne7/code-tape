@@ -7,6 +7,7 @@ import type {
   CompleteUploadSessionRequest,
   CreateUploadSessionRequest,
   RecordingAssetKind,
+  RenameRecordingRequest,
 } from "../cloud/types.js";
 
 export type CloudApiHandler = (request: Request) => Promise<Response>;
@@ -98,6 +99,51 @@ export function createCloudApiHandler(deps: {
       return jsonResponse(result.value, 200, requestId);
     }
 
+    if (request.method === "PATCH" && recordingDetailMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const recordingId = safeDecodePathSegment(recordingDetailMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
+      const parsed = await readJsonObject(request);
+      if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
+      const input = parseRenameRecordingRequest(parsed.value);
+      if (!input.ok) return jsonError({ ...input.error, requestId }, requestId);
+      const result = await deps.service.renameRecording({
+        ownerId,
+        recordingId: recordingId.value,
+        input: input.value,
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
+    if (request.method === "DELETE" && recordingDetailMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const recordingId = safeDecodePathSegment(recordingDetailMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
+      const result = await deps.service.deleteRecording({
+        ownerId,
+        recordingId: recordingId.value,
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/recordings/upload-sessions") {
       const ownerId = readOwnerToken(request);
       if (!ownerId) {
@@ -159,8 +205,8 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function badRequestError(): CloudApiError {
-  return { code: "bad-request", message: "request body must be a valid JSON object" };
+function badRequestError(message = "request body must be a valid JSON object"): CloudApiError {
+  return { code: "bad-request", message };
 }
 
 function parseListRecordingsQuery(
@@ -289,6 +335,25 @@ function parseCompleteUploadSessionRequest(
     ok: true,
     value: { uploadedAssets },
   };
+}
+
+const RENAME_TOP_KEYS = new Set(["title"]);
+
+function parseRenameRecordingRequest(
+  value: Record<string, unknown>,
+): CloudResult<RenameRecordingRequest> {
+  for (const key of Object.keys(value)) {
+    if (!RENAME_TOP_KEYS.has(key)) {
+      return { ok: false, error: badRequestError(`unknown field: ${key}`) };
+    }
+  }
+  if (!("title" in value)) {
+    return { ok: false, error: badRequestError("title is required") };
+  }
+  if (!isString(value.title)) {
+    return { ok: false, error: badRequestError("title must be a string") };
+  }
+  return { ok: true, value: { title: value.title } };
 }
 
 function isRecordingAssetKind(value: string): value is RecordingAssetKind {

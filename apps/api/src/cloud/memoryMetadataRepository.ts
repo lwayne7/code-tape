@@ -77,19 +77,18 @@ export function createMemoryMetadataRepository(): MetadataRepository {
     }): Promise<void> {
       const session = sessions.get(input.sessionId);
       if (!session) return;
+      const recording = recordings.get(session.recordingId);
+      if (recording?.status !== "uploading") return;
       sessions.set(input.sessionId, {
         ...session,
         status: "completed",
         completedAt: input.completedAt,
       });
-      const recording = recordings.get(session.recordingId);
-      if (recording) {
-        recordings.set(recording.id, {
-          ...recording,
-          status: "processing",
-          updatedAt: input.completedAt,
-        });
-      }
+      recordings.set(recording.id, {
+        ...recording,
+        status: "processing",
+        updatedAt: input.completedAt,
+      });
       const assets = assetsByRecording.get(session.recordingId) ?? [];
       assetsByRecording.set(
         session.recordingId,
@@ -108,6 +107,21 @@ export function createMemoryMetadataRepository(): MetadataRepository {
     },
     async updateRecording(recording: CloudRecordingRecord): Promise<void> {
       recordings.set(recording.id, { ...recording });
+    },
+    async updateRecordingIfStatus(input) {
+      const current = recordings.get(input.recordingId);
+      if (!current || current.status !== input.expectedStatus) {
+        return {
+          status: "status-mismatch" as const,
+          current: current ? { ...current } : null,
+        };
+      }
+      const updated = { ...current, ...input.patch, id: current.id };
+      recordings.set(current.id, updated);
+      return {
+        status: "updated" as const,
+        recording: { ...updated },
+      };
     },
     async updateAsset(asset: CloudRecordingAssetRecord): Promise<void> {
       const assets = assetsByRecording.get(asset.recordingId) ?? [];
