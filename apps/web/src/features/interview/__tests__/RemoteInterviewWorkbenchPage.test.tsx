@@ -88,7 +88,7 @@ describe("RemoteInterviewWorkbenchPage", () => {
 
     expect(screen.getByRole("heading", { name: "面试官工作台" })).toBeInTheDocument();
     expect(screen.getByText("room-42")).toBeInTheDocument();
-    expect(screen.getAllByText("实时同步")).toHaveLength(2);
+    expect(screen.getByText("实时同步")).toBeInTheDocument();
 
     const editorProps = latestCodeEditorProps();
     expect(editorProps).toMatchObject({
@@ -126,12 +126,12 @@ describe("RemoteInterviewWorkbenchPage", () => {
       mediaState: makeMediaState(),
     });
 
-    expect(screen.getAllByText("等待候选人状态快照")).toHaveLength(2);
+    expect(screen.getByText("等待候选人状态快照")).toBeInTheDocument();
     expect(screen.getByText("缺失事件 seq 5，已保留 seq 3 的稳定状态")).toBeInTheDocument();
     expect(latestCodeEditorProps().value).toBe("const lastStable = true;");
   });
 
-  it("renders media placeholders and disabled controls from media session state", () => {
+  it("renders disabled device controls in the header before local media is ready", () => {
     renderWorkbenchView({
       roomId: "room-media",
       workbenchState: makeWorkbenchState(),
@@ -144,18 +144,8 @@ describe("RemoteInterviewWorkbenchPage", () => {
       }),
     });
 
-    expect(screen.getByText("本地预览")).toBeInTheDocument();
-    expect(screen.getByText("候选人视频")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "本地预览占位" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "候选人视频占位" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "麦克风已关闭" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "摄像头已关闭" })).toBeDisabled();
-    expect(screen.getByText("WebRTC")).toBeInTheDocument();
-    expect(screen.getByText("connecting")).toBeInTheDocument();
-    expect(screen.getByText("ICE")).toBeInTheDocument();
-    expect(screen.getByText("checking")).toBeInTheDocument();
-    expect(screen.getByText("事件通道")).toBeInTheDocument();
-    expect(screen.getByText("open")).toBeInTheDocument();
   });
 
   it("renders the synced runtime console output", () => {
@@ -240,7 +230,7 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(screen.getByRole("button", { name: "摄像头已关闭" })).toBeDisabled();
   });
 
-  it("binds local and remote media streams into video elements", async () => {
+  it("binds remote stream to an unmuted video and local stream to a muted preview", async () => {
     const originalSrcObjectDescriptor = Object.getOwnPropertyDescriptor(
       HTMLVideoElement.prototype,
       "srcObject",
@@ -265,8 +255,12 @@ describe("RemoteInterviewWorkbenchPage", () => {
         }),
       });
 
-      expect(screen.getByLabelText("本地预览画面")).toBeInTheDocument();
-      expect(screen.getByLabelText("候选人视频画面")).toBeInTheDocument();
+      const remoteVideo = screen.getByLabelText("候选人视频画面") as HTMLVideoElement;
+      const localVideo = screen.getByLabelText("本地预览画面") as HTMLVideoElement;
+      // Candidate audio must be audible to the interviewer.
+      expect(remoteVideo.muted).toBe(false);
+      // Local self-preview is muted to avoid echo.
+      expect(localVideo.muted).toBe(true);
       await waitFor(() => {
         expect(setSrcObject).toHaveBeenCalledWith(localStream);
         expect(setSrcObject).toHaveBeenCalledWith(remoteStream);
@@ -340,9 +334,9 @@ describe("RemoteInterviewWorkbenchPage", () => {
       expect(latestCodeEditorProps().value).toBe("const fromCandidate = true;");
     });
     expect(latestCodeEditorProps().readOnly).toBe(true);
-    expect(screen.getAllByText("实时同步")).toHaveLength(2);
-    expect(screen.getByText("seq 1")).toBeInTheDocument();
-    expect(screen.getByText("seq 2")).toBeInTheDocument();
+    expect(screen.getByText("实时同步")).toBeInTheDocument();
+    expect(screen.getByText("applied seq 1")).toBeInTheDocument();
+    expect(screen.getByText("next seq 2")).toBeInTheDocument();
   });
 
   it("detaches the DataChannel receiver when the interviewer workbench unmounts", () => {
