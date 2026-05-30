@@ -287,6 +287,69 @@ describe("CandidateInterviewPage", () => {
     expect(snapshotCall.state.editor.code).toBe("const v = 50;");
   });
 
+  it("publishes a snapshot when the interviewer sends a snapshot-request", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(contentEvent(1, "const answer = 1;"));
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      media.eventsDataChannel.onmessage?.({
+        data: JSON.stringify({
+          kind: "snapshot-request",
+          roomId: "room-created",
+          sessionId: "interviewer",
+          messageId: "req-1",
+          sentAt: 1_780_000_000_000,
+          reason: "gap-timeout",
+          expectedSeq: 1,
+          lastAppliedSeq: 0,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      const snapshots = vi
+        .mocked(media.eventsDataChannel.send)
+        .mock.calls.map(([data]) => JSON.parse(data))
+        .filter((message) => message.kind === "state-snapshot");
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].snapshotSeq).toBe(1);
+      expect(snapshots[0].state.editor.code).toBe("const answer = 1;");
+    });
+  });
+
   it("waits for the candidate events DataChannel to open before subscribing and backfills queued events", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();

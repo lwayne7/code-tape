@@ -22,6 +22,7 @@ import {
   type InterviewMediaSessionState,
 } from "./interviewMediaSession";
 import { createInterviewRealtimeReceiver } from "./interviewRealtimeReceiver";
+import { buildSnapshotRequestMessage } from "./interviewSync";
 import {
   createInterviewRoomClient,
   type InterviewRoomClient,
@@ -134,6 +135,7 @@ function RemoteInterviewWorkbenchRoom({
     initialConnectionState(joinCode, joinCodeInvalid),
   );
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  const lastRequestedGapRef = useRef<string | null>(null);
 
   useEffect(() => workbench.subscribe(setWorkbenchState), [workbench]);
   useEffect(() => {
@@ -201,6 +203,32 @@ function RemoteInterviewWorkbenchRoom({
       onCandidateLeft: () => setSessionEpoch((epoch) => epoch + 1),
     });
   }, [createSignalingClient, joinCode, joinCodeInvalid, mediaSession, roomClient, roomId]);
+  useEffect(() => {
+    if (!mediaSession) return;
+    const need = workbenchState.snapshotRequestNeeded;
+    if (!need) {
+      lastRequestedGapRef.current = null;
+      return;
+    }
+    const channel = mediaSession.getEventsDataChannel();
+    if (!channel || channel.readyState !== "open") return;
+    const gapKey = `${need.expectedSeq}:${need.lastAppliedSeq}`;
+    if (lastRequestedGapRef.current === gapKey) return;
+    const request = buildSnapshotRequestMessage({
+      roomId,
+      sessionId: roomId,
+      reason: "gap-timeout",
+      expectedSeq: need.expectedSeq,
+      lastAppliedSeq: need.lastAppliedSeq,
+    });
+    try {
+      channel.send(JSON.stringify(request));
+      lastRequestedGapRef.current = gapKey;
+    } catch {
+      // Channel went away between the readyState check and send; the next
+      // workbench update will retry while the gap persists.
+    }
+  }, [mediaSession, roomId, workbenchState.snapshotRequestNeeded]);
 
   return (
     <RemoteInterviewWorkbenchView

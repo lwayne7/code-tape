@@ -20,7 +20,11 @@ import {
   type InterviewMediaSession,
   type InterviewMediaSessionState,
 } from "./interviewMediaSession";
-import { createInterviewSyncPublisher } from "./interviewSync";
+import {
+  createInterviewSyncPublisher,
+  parseSnapshotRequestMessage,
+  type InterviewSyncPublisher,
+} from "./interviewSync";
 import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
 import {
   createInterviewRoomClient,
@@ -155,11 +159,22 @@ function useCandidateInterviewRoomSession({
   const subscribedRealtimePublisherContextRef = useRef<CandidateRealtimePublisherContext | null>(null);
   const subscribedRecorderEventBusRef = useRef<RecorderEventBusSubscription | null>(null);
   const publishedRealtimeEventIdsRef = useRef<Set<string>>(new Set());
+  const realtimePublisherRef = useRef<InterviewSyncPublisher | null>(null);
+  const snapshotRequestChannelRef = useRef<InterviewEventsDataChannel | null>(null);
+  const handleSnapshotRequestMessageRef = useRef<
+    ((event: { data: unknown }) => void) | null
+  >(null);
   const stopRealtimePublisher = useCallback(() => {
     unsubscribeRealtimePublisherRef.current?.();
     unsubscribeRealtimePublisherRef.current = null;
     subscribedRealtimePublisherContextRef.current = null;
     subscribedRecorderEventBusRef.current = null;
+    const channel = snapshotRequestChannelRef.current;
+    if (channel && channel.onmessage === handleSnapshotRequestMessageRef.current) {
+      channel.onmessage = null;
+    }
+    snapshotRequestChannelRef.current = null;
+    realtimePublisherRef.current = null;
   }, []);
   const refreshRealtimePublisher = useCallback(() => {
     const bus = recorderEventBusRef.current;
@@ -175,12 +190,14 @@ function useCandidateInterviewRoomSession({
       return;
     }
     stopRealtimePublisher();
-    unsubscribeRealtimePublisherRef.current = createInterviewSyncPublisher({
+    const publisher = createInterviewSyncPublisher({
       channel: context.channel,
       roomId: context.roomId,
       sessionId: context.sessionId,
       snapshotState: INITIAL_REMOTE_INTERVIEW_STABLE_STATE,
-    }).subscribeTo(bus, {
+    });
+    realtimePublisherRef.current = publisher;
+    unsubscribeRealtimePublisherRef.current = publisher.subscribeTo(bus, {
       includeBacklog: true,
       shouldPublishEvent: (event) => !publishedRealtimeEventIdsRef.current.has(event.id),
       onPublishResult: (event, result) => {
@@ -189,6 +206,14 @@ function useCandidateInterviewRoomSession({
         }
       },
     });
+    const handleSnapshotRequest = (event: { data: unknown }) => {
+      const request = parseSnapshotRequestMessage(event.data);
+      if (!request || request.roomId !== context.roomId) return;
+      realtimePublisherRef.current?.publishSnapshot();
+    };
+    handleSnapshotRequestMessageRef.current = handleSnapshotRequest;
+    context.channel.onmessage = handleSnapshotRequest;
+    snapshotRequestChannelRef.current = context.channel;
     subscribedRecorderEventBusRef.current = bus;
     subscribedRealtimePublisherContextRef.current = context;
   }, [stopRealtimePublisher]);

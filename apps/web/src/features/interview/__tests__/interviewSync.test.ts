@@ -9,6 +9,8 @@ import {
 import {
   createInterviewSyncPublisher,
   createRemoteTimelineBuffer,
+  buildSnapshotRequestMessage,
+  parseSnapshotRequestMessage,
   type InterviewRealtimeDataChannel,
 } from "../interviewSync";
 import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "../remoteInterviewInitialState";
@@ -457,3 +459,60 @@ function snapshotMessage(snapshotSeq: number) {
     state: {} as ReplayStableState,
   };
 }
+
+describe("snapshot-request message helpers", () => {
+  it("builds a snapshot-request with injected id and time", () => {
+    const message = buildSnapshotRequestMessage({
+      roomId: "room-1",
+      sessionId: "session-1",
+      reason: "gap-timeout",
+      expectedSeq: 5,
+      lastAppliedSeq: 3,
+      messageIdProvider: () => "req-1",
+      nowProvider: () => 9999,
+    });
+
+    expect(message).toEqual({
+      kind: "snapshot-request",
+      roomId: "room-1",
+      sessionId: "session-1",
+      messageId: "req-1",
+      sentAt: 9999,
+      reason: "gap-timeout",
+      expectedSeq: 5,
+      lastAppliedSeq: 3,
+    });
+  });
+
+  it("round-trips through parseSnapshotRequestMessage", () => {
+    const message = buildSnapshotRequestMessage({
+      roomId: "room-1",
+      sessionId: "session-1",
+      reason: "gap-timeout",
+      expectedSeq: 5,
+      lastAppliedSeq: 3,
+    });
+
+    expect(parseSnapshotRequestMessage(JSON.stringify(message))).toEqual(message);
+  });
+
+  it("rejects non-string, malformed, and wrong-kind payloads", () => {
+    expect(parseSnapshotRequestMessage({ kind: "snapshot-request" })).toBeNull();
+    expect(parseSnapshotRequestMessage("not json")).toBeNull();
+    expect(parseSnapshotRequestMessage(JSON.stringify({ kind: "recording-event" }))).toBeNull();
+    expect(
+      parseSnapshotRequestMessage(
+        JSON.stringify({
+          kind: "snapshot-request",
+          roomId: "room-1",
+          sessionId: "session-1",
+          messageId: "req-1",
+          sentAt: 1,
+          reason: "bogus",
+          expectedSeq: 1,
+          lastAppliedSeq: 0,
+        }),
+      ),
+    ).toBeNull();
+  });
+});

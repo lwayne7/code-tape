@@ -569,6 +569,53 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     expect(latestCodeEditorProps().readOnly).toBe(true);
   });
 
+  it("sends a snapshot-request over the events channel when a seq gap appears", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    let channel!: TestEventsDataChannel;
+    act(() => {
+      channel = media.attachEventsDataChannel();
+      // seq 2 arrives while expecting seq 1 -> buffer reports a gap.
+      channel.emit(JSON.stringify(recordingMessage(contentEvent(2, "const gapped = true;"))));
+    });
+
+    await waitFor(() => {
+      const requests = vi
+        .mocked(channel.send)
+        .mock.calls.map(([data]) => JSON.parse(data))
+        .filter((message) => message.kind === "snapshot-request");
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        roomId: "room-live",
+        reason: "gap-timeout",
+        expectedSeq: 1,
+        lastAppliedSeq: 0,
+      });
+    });
+
+    // The same unchanged gap must not trigger a duplicate request.
+    act(() => {
+      channel.emit(JSON.stringify(recordingMessage(contentEvent(3, "const stillGapped = true;"))));
+    });
+    const requestCount = vi
+      .mocked(channel.send)
+      .mock.calls.map(([data]) => JSON.parse(data))
+      .filter((message) => message.kind === "snapshot-request").length;
+    expect(requestCount).toBe(1);
+  });
+
   it("ignores cross-room and non-candidate media messages", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();

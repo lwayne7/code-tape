@@ -336,6 +336,80 @@ function contentHashFor(event: RecordingEvent): Pick<InterviewRecordingEventMess
   return { contentHash: event.payload.contentHash };
 }
 
+export type BuildSnapshotRequestInput = {
+  roomId: string;
+  sessionId: string;
+  reason: InterviewSnapshotRequestMessage["reason"];
+  expectedSeq: number;
+  lastAppliedSeq: number;
+  messageIdProvider?: () => string;
+  nowProvider?: () => number;
+};
+
+export function buildSnapshotRequestMessage(
+  input: BuildSnapshotRequestInput,
+): InterviewSnapshotRequestMessage {
+  return {
+    kind: "snapshot-request",
+    roomId: input.roomId,
+    sessionId: input.sessionId,
+    messageId: (input.messageIdProvider ?? createMessageId)(),
+    sentAt: (input.nowProvider ?? (() => Date.now()))(),
+    reason: input.reason,
+    expectedSeq: input.expectedSeq,
+    lastAppliedSeq: input.lastAppliedSeq,
+  };
+}
+
+export function parseSnapshotRequestMessage(data: unknown): InterviewSnapshotRequestMessage | null {
+  if (typeof data !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (parsed as { kind?: unknown }).kind !== "snapshot-request"
+  ) {
+    return null;
+  }
+  const value = parsed as Record<string, unknown>;
+  if (
+    typeof value.roomId !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.messageId !== "string" ||
+    !isFiniteNumber(value.sentAt) ||
+    !isSnapshotRequestReason(value.reason) ||
+    !isFiniteNumber(value.expectedSeq) ||
+    !isFiniteNumber(value.lastAppliedSeq)
+  ) {
+    return null;
+  }
+  return {
+    kind: "snapshot-request",
+    roomId: value.roomId,
+    sessionId: value.sessionId,
+    messageId: value.messageId,
+    sentAt: value.sentAt,
+    reason: value.reason,
+    expectedSeq: value.expectedSeq,
+    lastAppliedSeq: value.lastAppliedSeq,
+  };
+}
+
+function isSnapshotRequestReason(
+  value: unknown,
+): value is InterviewSnapshotRequestMessage["reason"] {
+  return value === "gap-timeout" || value === "hash-mismatch" || value === "manual-reconnect";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function createMessageId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
