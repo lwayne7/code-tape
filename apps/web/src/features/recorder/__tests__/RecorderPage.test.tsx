@@ -461,6 +461,105 @@ describe("RecorderPage", () => {
     expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
   });
 
+  it("automatically runs changed code after the editor is idle", async () => {
+    vi.useFakeTimers();
+    try {
+      const { RecorderPage } = await import("../RecorderPage");
+      recorderPageMock.editorValue.current = "console.log('first-auto-run');";
+
+      render(<RecorderPage />);
+      expect(recorderPageMock.codeEditorProps?.onChange).toBeTypeOf("function");
+
+      act(() => {
+        recorderPageMock.codeEditorProps?.onChange?.();
+        vi.advanceTimersByTime(1_999);
+      });
+
+      expect(recorderPageMock.trigger).not.toHaveBeenCalled();
+
+      recorderPageMock.editorValue.current = "console.log('second-auto-run');";
+      act(() => {
+        recorderPageMock.codeEditorProps?.onChange?.();
+        vi.advanceTimersByTime(1_999);
+      });
+
+      expect(recorderPageMock.trigger).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await flushAsyncWork();
+      });
+
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+        language: "javascript",
+        source: "console.log('second-auto-run');",
+      });
+      expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a pending automatic run when code is run manually", async () => {
+    vi.useFakeTimers();
+    try {
+      const { RecorderPage } = await import("../RecorderPage");
+      recorderPageMock.editorValue.current = "console.log('manual-run');";
+
+      render(<RecorderPage />);
+      expect(recorderPageMock.codeEditorProps?.onChange).toBeTypeOf("function");
+
+      act(() => {
+        recorderPageMock.codeEditorProps?.onChange?.();
+        vi.advanceTimersByTime(1_000);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "运行代码" }));
+        await flushAsyncWork();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(recorderPageMock.trigger).toHaveBeenCalledTimes(1);
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+        language: "javascript",
+        source: "console.log('manual-run');",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not automatically run after recording is paused", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    recorderPageMock.editorValue.current = "console.log('paused-auto-run');";
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream));
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        recorderPageMock.codeEditorProps?.onChange?.();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "暂停录制" }));
+        await flushAsyncWork();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+
+      expect(recorderPageMock.trigger).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requests browser media permissions from the setup toolbar and refreshes devices", async () => {
     recorderPageMock.devices.requestPermission.mockResolvedValue("granted");
     const { RecorderPage } = await import("../RecorderPage");

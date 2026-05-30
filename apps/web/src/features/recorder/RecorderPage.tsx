@@ -62,6 +62,7 @@ const INITIAL_RUNTIME_STATE: RecorderRuntimeState = {
 
 const APP_VERSION = "0.0.0";
 const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20] as const;
+const AUTO_RUN_IDLE_MS = 2_000;
 const IDLE_CLEANUP_GRACE_MS = 50;
 const LIVE_DURATION_REFRESH_MS = 1000;
 
@@ -97,6 +98,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   const startInFlightRef = useRef(false);
   const startTokenRef = useRef(0);
   const stopTokenRef = useRef(0);
+  const autoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resourcesCleanedUpRef = useRef(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
@@ -232,6 +234,12 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   useEffect(() => {
     return onEventBusReady?.(stack.bus) ?? undefined;
   }, [onEventBusReady, stack.bus]);
+
+  useEffect(() => {
+    return () => {
+      if (autoRunTimerRef.current) clearTimeout(autoRunTimerRef.current);
+    };
+  }, []);
 
   const loadDevices = useCallback((options: { force?: boolean } = {}) => {
     if (deviceLoadPromiseRef.current && !options.force) return deviceLoadPromiseRef.current;
@@ -470,6 +478,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     }
   };
   const handleStop = async () => {
+    clearAutoRunTimer();
     const stopToken = (stopTokenRef.current += 1);
     try {
       const pkg = await stack.controller.stop("user");
@@ -504,6 +513,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   };
   const handlePause = () => {
     if (stack.controller.state.status !== "recording") return;
+    clearAutoRunTimer();
     const recorder = mediaRecorderRef.current;
     stack.controller.pause();
     try {
@@ -533,8 +543,20 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
       }
     });
   };
-  const handleRun = async () => {
-    if (stack.controller.state.status === "paused") return;
+  const clearAutoRunTimer = () => {
+    if (!autoRunTimerRef.current) return;
+    clearTimeout(autoRunTimerRef.current);
+    autoRunTimerRef.current = null;
+  };
+
+  const isRuntimeRunLocked = () => {
+    const status = stack.controller.state.status;
+    return status === "paused" || status === "requestingPermission" || status === "stopping" || status === "processing";
+  };
+
+  const handleRun = async (options: { clearPendingAutoRun?: boolean } = {}) => {
+    if (options.clearPendingAutoRun ?? true) clearAutoRunTimer();
+    if (isRuntimeRunLocked()) return;
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
     stack.editorProducer.flushPending();
@@ -576,6 +598,14 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
         errorMessage: err instanceof Error ? err.message : String(err),
       });
     }
+  };
+
+  const scheduleAutoRun = () => {
+    clearAutoRunTimer();
+    autoRunTimerRef.current = setTimeout(() => {
+      autoRunTimerRef.current = null;
+      void handleRun({ clearPendingAutoRun: false });
+    }, AUTO_RUN_IDLE_MS);
   };
 
   const handleLanguageChange = (next: RecordingLanguage) => {
@@ -645,6 +675,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
             fontSize={editorFontSize}
             theme={theme.resolved}
             readOnly={controllerState.status === "paused"}
+            onChange={scheduleAutoRun}
             onCommand={(command) => {
               if (command === "run") void handleRun();
             }}

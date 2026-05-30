@@ -43,6 +43,7 @@ const monacoMock = vi.hoisted(() => {
     disposed = false;
     commands: Array<{ keybinding: number; handler: () => void }> = [];
     keyboardListeners: Array<(event: MockKeyboardEvent) => void> = [];
+    contentChangeListeners: Array<() => void> = [];
     updateOptions = vi.fn((nextOptions: Record<string, unknown>) => {
       Object.assign(this.options, nextOptions);
     });
@@ -69,6 +70,14 @@ const monacoMock = vi.hoisted(() => {
         },
       };
     });
+    onDidChangeModelContent = vi.fn((listener: () => void) => {
+      this.contentChangeListeners.push(listener);
+      return {
+        dispose: () => {
+          this.contentChangeListeners = this.contentChangeListeners.filter((candidate) => candidate !== listener);
+        },
+      };
+    });
 
     constructor(
       public host: HTMLElement,
@@ -81,6 +90,10 @@ const monacoMock = vi.hoisted(() => {
 
     dispose() {
       this.disposed = true;
+    }
+
+    emitContentChange() {
+      this.contentChangeListeners.forEach((listener) => listener());
     }
   }
 
@@ -231,6 +244,40 @@ describe("CodeEditor", () => {
     );
     expect(ref.current?.getEditor()).toBe(monacoMock.editors[0]);
     expect(onMount).toHaveBeenCalledWith(monacoMock.editors[0]);
+  });
+
+  it("notifies when Monaco model content changes", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const onChange = vi.fn();
+    const nextOnChange = vi.fn();
+    const { rerender } = render(
+      <CodeEditor
+        language="javascript"
+        initialValue="console.log('first');"
+        fontSize={14}
+        theme="dark"
+        onChange={onChange}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    editor.emitContentChange();
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <CodeEditor
+        language="javascript"
+        initialValue="console.log('first');"
+        fontSize={14}
+        theme="dark"
+        onChange={nextOnChange}
+      />,
+    );
+    editor.emitContentChange();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(nextOnChange).toHaveBeenCalledTimes(1);
   });
 
   it("updates language, font size, and theme without rewriting initialValue", async () => {

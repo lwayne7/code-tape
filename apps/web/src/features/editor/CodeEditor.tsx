@@ -23,6 +23,7 @@ export type CodeEditorProps = {
   scrollTop?: number;
   scrollLeft?: number;
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
+  onChange?(): void;
   onCommand?(command: CodeEditorCommand): void;
 };
 
@@ -150,6 +151,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollTop,
     scrollLeft,
     onMount,
+    onChange,
     onCommand,
   },
   ref,
@@ -173,6 +175,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollLeft,
   });
   const onMountRef = useRef(onMount);
+  const onChangeRef = useRef(onChange);
   const onCommandRef = useRef(onCommand);
   const [loadError, setLoadError] = useState<unknown>(null);
 
@@ -188,6 +191,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     scrollLeft,
   };
   onMountRef.current = onMount;
+  onChangeRef.current = onChange;
   onCommandRef.current = onCommand;
 
   useImperativeHandle(
@@ -229,10 +233,14 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         monacoRef.current = monaco;
         modelRef.current = model;
         editorRef.current = editor;
+        const contentChangeDisposable = editor.onDidChangeModelContent(() => {
+          onChangeRef.current?.();
+        });
         registerEditorCommands(monaco, editor, (command) => onCommandRef.current?.(command));
         applyControlledEditorState(editor, currentProps);
         pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
         onMountRef.current?.(editor);
+        editor.onDidDispose?.(() => contentChangeDisposable.dispose());
       })
       .catch((error: unknown) => {
         if (!cancelled) {
