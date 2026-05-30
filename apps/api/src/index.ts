@@ -22,6 +22,7 @@ export { createInterviewRoomService } from "./interview/interviewRoomService.js"
 export { createMemoryInterviewRoomRepository } from "./interview/memoryInterviewRoomRepository.js";
 export { createInterviewSignalingServer } from "./signaling/interviewSignalingServer.js";
 export { createInterviewWebSocketUpgradeHandler } from "./signaling/interviewWebSocketUpgradeHandler.js";
+export { createDemoRequestHandler, createDemoRuntime } from "./demo/demoServer.js";
 export type * from "./cloud/types.js";
 export type * from "./interview/types.js";
 export type * from "./signaling/signalingMessages.js";

@@ -6,6 +6,7 @@
   "scripts": {
     "prebuild": "npm run build -w @code-tape/recording-schema",
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/demo/server.js",
     "test": "npm run build && node scripts/run-dist-tests.mjs"
   },
   "dependencies": {

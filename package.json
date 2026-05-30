@@ -28,6 +28,8 @@
     "subtitle:train:help": "python3 ml/subtitle-postprocessor/train_lora.py --help",
     "dev": "npm run dev -w apps/web -- --host 127.0.0.1",
     "dev:web": "npm run dev -w apps/web -- --host 127.0.0.1",
+    "demo:build": "npm run build",
+    "demo:start": "node apps/api/dist/demo/server.js",
     "build": "npm run build:schema && npm run build:api && npm run build -w apps/web",
     "build:schema": "npm run build -w @code-tape/recording-schema",
     "build:api": "npm run build -w apps/api",
