@@ -20,7 +20,7 @@
  * - 对 P0 本地保存/回放主链路的任何修改
  */
 
-import type { RecordingPackageV1 } from "@code-tape/recording-schema";
+import { sha256Blob, type RecordingPackageV1 } from "@code-tape/recording-schema";
 import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash";
 import type {
   CloudRecordingRepository,
@@ -607,13 +607,6 @@ async function buildJsonAsset(kind: RecordingAssetKind, json: string): Promise<A
   const sha256 = await sha256Hex(json);
   const blob = new Blob([json], { type: "application/json" });
   return { kind, blob, sha256, sizeBytes: blob.size, mimeType: "application/json" };
-}
-
-async function sha256Blob(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer();
-  const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(buffer));
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ─────────────────────────────────────────────────────────────

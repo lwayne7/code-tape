@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RecordingPackageV1 } from "@code-tape/recording-schema";
+import { sha256Blob, type RecordingPackageV1 } from "@code-tape/recording-schema";
 import type {
   CloudRecordingRepository,
   CreateUploadSessionRequest,
@@ -1054,6 +1054,40 @@ describe("CloudRecordingRepository", () => {
       if (!result.ok) throw new Error("expected ok");
       expect(result.value.recordingId).toBe("rec_1");
       expect(result.value.status).toBe("processing");
+    });
+
+    it("上传媒体资产时复用包 manifest 的媒体 checksum 语义", async () => {
+      const repo = setupRepo();
+      const mediaBlob = new Blob(["fake-webm-data"], { type: "video/webm" });
+      const expectedMediaSha256 = await sha256Blob(mediaBlob);
+      const pkg = makeMinimalPackage({ hasMedia: true });
+      pkg.manifest.checksums.mediaSha256 = expectedMediaSha256;
+
+      mockFetch(201, makeSessionResponse());
+
+      for (let i = 0; i < 5; i++) {
+        const { instance } = createMockXhr();
+        vi.spyOn(globalThis, "XMLHttpRequest").mockImplementationOnce(() => instance);
+      }
+
+      mockFetch(200, { recordingId: "rec_1", status: "processing" });
+
+      const result = await repo.uploadPackage(pkg, { media: mediaBlob });
+
+      expect(result.ok).toBe(true);
+      const createSessionBody = JSON.parse(
+        vi.mocked(fetch).mock.calls[0]?.[1]?.body as string,
+      ) as CreateUploadSessionRequest;
+      expect(createSessionBody.assets.find((asset) => asset.kind === "media")?.sha256).toBe(
+        expectedMediaSha256,
+      );
+
+      const completeBody = JSON.parse(
+        vi.mocked(fetch).mock.calls[1]?.[1]?.body as string,
+      ) as { uploadedAssets: CreateUploadSessionRequest["assets"] };
+      expect(completeBody.uploadedAssets.find((asset) => asset.kind === "media")?.sha256).toBe(
+        expectedMediaSha256,
+      );
     });
 
     it("无媒体录制包也能成功上传", async () => {
