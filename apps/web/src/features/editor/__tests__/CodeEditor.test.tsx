@@ -51,6 +51,9 @@ const monacoMock = vi.hoisted(() => {
     });
     setPosition = vi.fn();
     setSelection = vi.fn();
+    deltaDecorations = vi.fn((_oldDecorations: string[], newDecorations: unknown[]) =>
+      newDecorations.map((_decoration, index) => `decoration-${index + 1}`),
+    );
     setScrollTop = vi.fn();
     setScrollLeft = vi.fn();
     trigger = vi.fn();
@@ -315,6 +318,46 @@ describe("CodeEditor", () => {
     });
     expect(editor.setScrollTop).toHaveBeenCalledWith(240);
     expect(editor.setScrollLeft).toHaveBeenCalledWith(16);
+  });
+
+  it("adds a temporary pulse decoration for collapsed replay selections", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="const replay = true;\nconsole.log(replay);"
+        value="const replay = true;\nconsole.log(replay);"
+        fontSize={14}
+        theme="dark"
+        readOnly
+        cursor={{ lineNumber: 2, column: 8 }}
+        selection={{
+          startLineNumber: 2,
+          startColumn: 8,
+          endLineNumber: 2,
+          endColumn: 8,
+        }}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    expect(editor.deltaDecorations).toHaveBeenCalledWith(
+      [],
+      [
+        expect.objectContaining({
+          range: {
+            startLineNumber: 2,
+            startColumn: 8,
+            endLineNumber: 2,
+            endColumn: 8,
+          },
+          options: expect.objectContaining({
+            beforeContentClassName: "code-tape-collapsed-selection-pulse",
+          }),
+        }),
+      ],
+    );
   });
 
   it("registers common editor shortcut commands", async () => {

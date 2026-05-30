@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
 import type { RecordingLanguage, ReplayStableState } from "@/shared/recording-schema";
 
@@ -42,6 +43,7 @@ let workerPromise: Promise<WorkerConstructors> | null = null;
 let monacoPromise: Promise<MonacoModule> | null = null;
 let themesDefined = false;
 let workersConfigured = false;
+const COLLAPSED_SELECTION_PULSE_MS = 420;
 
 function monacoTheme(theme: CodeEditorProps["theme"]): MonacoTheme {
   return theme === "dark" ? "code-tape-dark" : "code-tape-light";
@@ -156,6 +158,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const modelRef = useRef<Monaco.editor.ITextModel | null>(null);
   const monacoRef = useRef<MonacoModule | null>(null);
+  const collapsedSelectionDecorationIdsRef = useRef<string[]>([]);
+  const collapsedSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialValueRef = useRef(initialValue);
   const latestPropsRef = useRef({
     language,
@@ -227,6 +231,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         editorRef.current = editor;
         registerEditorCommands(monaco, editor, (command) => onCommandRef.current?.(command));
         applyControlledEditorState(editor, currentProps);
+        pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
         onMountRef.current?.(editor);
       })
       .catch((error: unknown) => {
@@ -240,6 +245,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       cancelled = true;
       const editor = editorRef.current;
       const model = modelRef.current;
+      clearCollapsedSelectionPulse(editor, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
       editorRef.current = null;
       modelRef.current = null;
       monacoRef.current = null;
@@ -281,6 +287,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     } else if (cursor) {
       editor.setPosition(cursor);
     }
+    pulseCollapsedSelection(editor, selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
   }, [cursor, selection]);
 
   useEffect(() => {
@@ -391,4 +398,54 @@ function applyControlledEditorState(
   }
   if (props.scrollTop !== undefined) editor.setScrollTop(props.scrollTop);
   if (props.scrollLeft !== undefined) editor.setScrollLeft(props.scrollLeft);
+}
+
+function isCollapsedSelection(
+  selection: ReplayStableState["editor"]["selection"] | undefined,
+): selection is NonNullable<ReplayStableState["editor"]["selection"]> {
+  return Boolean(
+    selection
+      && selection.startLineNumber === selection.endLineNumber
+      && selection.startColumn === selection.endColumn,
+  );
+}
+
+function pulseCollapsedSelection(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  selection: ReplayStableState["editor"]["selection"] | undefined,
+  decorationIdsRef: MutableRefObject<string[]>,
+  timerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>,
+) {
+  clearCollapsedSelectionPulse(editor, decorationIdsRef, timerRef);
+  if (!isCollapsedSelection(selection)) return;
+
+  decorationIdsRef.current = editor.deltaDecorations(
+    [],
+    [
+      {
+        range: selection,
+        options: {
+          beforeContentClassName: "code-tape-collapsed-selection-pulse",
+        },
+      },
+    ],
+  );
+
+  timerRef.current = setTimeout(() => {
+    clearCollapsedSelectionPulse(editor, decorationIdsRef, timerRef);
+  }, COLLAPSED_SELECTION_PULSE_MS);
+}
+
+function clearCollapsedSelectionPulse(
+  editor: Monaco.editor.IStandaloneCodeEditor | null,
+  decorationIdsRef: MutableRefObject<string[]>,
+  timerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>,
+) {
+  if (timerRef.current) {
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }
+  if (!editor || decorationIdsRef.current.length === 0) return;
+  editor.deltaDecorations(decorationIdsRef.current, []);
+  decorationIdsRef.current = [];
 }

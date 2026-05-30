@@ -56,4 +56,33 @@
     background-color: var(--ct-color-primary);
     color: var(--ct-color-primary-foreground);
   }
+
+  .monaco-editor .code-tape-collapsed-selection-pulse {
+    display: inline-block;
+    width: 2px;
+    height: 1.15em;
+    margin-left: -1px;
+    vertical-align: text-bottom;
+    border-radius: 999px;
+    background: var(--ct-color-primary);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ct-color-primary) 20%, transparent);
+    animation: code-tape-collapsed-selection-pulse 420ms ease-out both;
+  }
+
+  @keyframes code-tape-collapsed-selection-pulse {
+    0% {
+      opacity: 0;
+      transform: translateY(-0.35em) scaleY(0.7);
+    }
+
+    35% {
+      opacity: 1;
+      transform: translateY(0) scaleY(1.08);
+    }
+
+    100% {
+      opacity: 0;
+      transform: translateY(0) scaleY(1);
+    }
+  }
 }
