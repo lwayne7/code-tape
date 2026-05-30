@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import {
+  Check,
   CircleDot,
   ClipboardList,
+  Copy,
   Mic,
   MicOff,
   Monitor,
@@ -12,6 +14,7 @@ import {
   Video,
   VideoOff,
 } from "lucide-react";
+import { routerBasename } from "@/app/routerBase";
 import { RecorderPage } from "@/features/recorder/RecorderPage";
 import type { EventBus } from "@/shared/recording-schema";
 import { Toggle, Tooltip } from "@/shared/ui";
@@ -730,6 +733,37 @@ export function CandidateInterviewView({
   const micLabel = mediaState.microphoneEnabled ? "麦克风已开启" : "麦克风已关闭";
   const cameraLabel = mediaState.cameraEnabled ? "摄像头已开启" : "摄像头已关闭";
   const canEndInterview = CANDIDATE_ACTIVE_STATUSES.has(roomState.status);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const interviewerUrl = useMemo(
+    () =>
+      roomId && roomState.joinCode
+        ? buildInterviewerRoomUrl(roomId, roomState.joinCode)
+        : null,
+    [roomId, roomState.joinCode],
+  );
+  const clipboardAvailable =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const canCopyInterviewerUrl = Boolean(interviewerUrl && clipboardAvailable);
+  const copyLabel =
+    copyState === "copied"
+      ? "链接已复制"
+      : copyState === "failed"
+        ? "复制失败"
+        : "复制面试官链接";
+  const CopyIcon = copyState === "copied" ? Check : Copy;
+  useEffect(() => {
+    setCopyState("idle");
+  }, [interviewerUrl]);
+  const copyInterviewerUrl = useCallback(() => {
+    if (!interviewerUrl || !clipboardAvailable) {
+      setCopyState("failed");
+      return;
+    }
+    void navigator.clipboard
+      .writeText(interviewerUrl)
+      .then(() => setCopyState("copied"))
+      .catch(() => setCopyState("failed"));
+  }, [clipboardAvailable, interviewerUrl]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -748,6 +782,15 @@ export function CandidateInterviewView({
             <span className="font-mono text-foreground">{roomState.joinCode ?? "等待创建"}</span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={copyInterviewerUrl}
+          disabled={!canCopyInterviewerUrl}
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <CopyIcon aria-hidden size={16} />
+          {copyLabel}
+        </button>
         <button
           type="button"
           onClick={onEndInterview}
@@ -789,6 +832,7 @@ export function CandidateInterviewView({
               {roomState.signalingUrl ? (
                 <Metric label="信令" value={roomState.signalingUrl} />
               ) : null}
+              {interviewerUrl ? <Metric label="面试官链接" value={interviewerUrl} /> : null}
               <Metric label="WebRTC" value={mediaState.connectionState} />
               <Metric label="ICE" value={mediaState.iceConnectionState} />
             </dl>
@@ -841,6 +885,14 @@ export function CandidateInterviewView({
       </div>
     </div>
   );
+}
+
+function buildInterviewerRoomUrl(roomId: string, joinCode: string): string {
+  const path = `/interview/interviewer/${encodeURIComponent(roomId)}?joinCode=${encodeURIComponent(
+    joinCode,
+  )}`;
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${routerBasename ?? ""}${path}`;
 }
 
 function MediaStreamTile({
