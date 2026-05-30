@@ -6,6 +6,7 @@ import {
   Mic,
   MicOff,
   Monitor,
+  PhoneOff,
   Radio,
   UserRound,
   Video,
@@ -64,6 +65,7 @@ export type CandidateInterviewViewProps = {
   roomState: CandidateInterviewRoomState;
   mediaState: InterviewMediaSessionState;
   recordingWorkspace: ReactNode;
+  onEndInterview?: () => void;
 };
 
 export type CandidateInterviewPageProps = {
@@ -83,6 +85,14 @@ type CandidateRealtimePublisherContext = {
   roomId: string;
   sessionId: string;
 };
+
+const CANDIDATE_ACTIVE_STATUSES = new Set<CandidateInterviewStatus>([
+  "waiting-interviewer",
+  "connecting",
+  "interviewer-connected",
+  "live-recording",
+  "live-paused",
+]);
 
 const EMPTY_CANDIDATE_MEDIA_STATE: InterviewMediaSessionState = {
   localStream: null,
@@ -116,6 +126,7 @@ export function CandidateInterviewPage({ deps = {} }: CandidateInterviewPageProp
       roomId={session.roomId}
       roomState={session.roomState}
       mediaState={session.mediaState}
+      onEndInterview={session.endInterview}
       recordingWorkspace={<RecorderPage onEventBusReady={session.onEventBusReady} />}
     />
   );
@@ -138,6 +149,7 @@ function useCandidateInterviewRoomSession({
   roomState: CandidateInterviewRoomState;
   mediaState: InterviewMediaSessionState;
   onEventBusReady: (bus: RecorderEventBusSubscription) => (() => void) | void;
+  endInterview: () => void;
 } {
   const [session, setSession] = useState<{
     roomId: string | null;
@@ -149,6 +161,10 @@ function useCandidateInterviewRoomSession({
   const [mediaState, setMediaState] = useState<InterviewMediaSessionState>(
     EMPTY_CANDIDATE_MEDIA_STATE,
   );
+  const endInterviewRef = useRef<(() => void) | null>(null);
+  const endInterview = useCallback(() => {
+    endInterviewRef.current?.();
+  }, []);
   const roomCreationRef = useRef<{
     roomClient: InterviewRoomClient;
     request: ReturnType<InterviewRoomClient["createRoom"]>;
@@ -609,6 +625,27 @@ function useCandidateInterviewRoomSession({
           }));
         },
       });
+
+      endInterviewRef.current = () => {
+        if (closed) return;
+        const connectionId = signalingClient?.getConnectionId();
+        if (connectionId) {
+          void roomClient
+            .endRoom(room.roomId, { joinCode: room.joinCode, connectionId })
+            .catch(() => undefined);
+        }
+        closeMediaSession({ publish: true });
+        signalingClient?.close();
+        signalingClient = null;
+        setSession((current) => ({
+          ...current,
+          roomState: {
+            ...current.roomState,
+            status: "completed",
+            interviewerOnline: false,
+          },
+        }));
+      };
     }).catch((error: unknown) => {
       if (closed) return;
       setSession({
@@ -628,6 +665,7 @@ function useCandidateInterviewRoomSession({
 
     return () => {
       closed = true;
+      endInterviewRef.current = null;
       closeMediaSession({ publish: false });
       signalingClient?.close();
     };
@@ -640,7 +678,7 @@ function useCandidateInterviewRoomSession({
     stopRealtimePublisher,
   ]);
 
-  return { ...session, mediaState, onEventBusReady };
+  return { ...session, mediaState, onEventBusReady, endInterview };
 }
 
 function initialCandidateRoomState(routeRoomId: string | null): CandidateInterviewRoomState {
@@ -686,10 +724,12 @@ export function CandidateInterviewView({
   roomState,
   mediaState,
   recordingWorkspace,
+  onEndInterview,
 }: CandidateInterviewViewProps) {
   const status = candidateStatusView(roomState);
   const micLabel = mediaState.microphoneEnabled ? "麦克风已开启" : "麦克风已关闭";
   const cameraLabel = mediaState.cameraEnabled ? "摄像头已开启" : "摄像头已关闭";
+  const canEndInterview = CANDIDATE_ACTIVE_STATUSES.has(roomState.status);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -708,6 +748,15 @@ export function CandidateInterviewView({
             <span className="font-mono text-foreground">{roomState.joinCode ?? "等待创建"}</span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onEndInterview}
+          disabled={!canEndInterview || !onEndInterview}
+          className="inline-flex items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PhoneOff aria-hidden size={16} />
+          结束面试
+        </button>
         <div
           role="status"
           aria-live="polite"

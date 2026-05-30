@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, type ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -348,6 +348,51 @@ describe("CandidateInterviewPage", () => {
       expect(snapshots[0].snapshotSeq).toBe(1);
       expect(snapshots[0].state.editor.code).toBe("const answer = 1;");
     });
+  });
+
+  it("ends the interview room and closes the session when 结束面试 is clicked", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "connected",
+        roomId: "room-created",
+        connectionId: "candidate-connection-1",
+      });
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "结束面试" }));
+    });
+
+    await waitFor(() => {
+      expect(roomClient.endRoom).toHaveBeenCalledWith("room-created", {
+        joinCode: "JOIN1234",
+        connectionId: "candidate-connection-1",
+      });
+    });
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+    expect(signaling.client.close).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("面试已完成")).toHaveLength(2);
   });
 
   it("waits for the candidate events DataChannel to open before subscribing and backfills queued events", async () => {
@@ -1534,7 +1579,14 @@ function makeRoomClient(patch: Partial<InterviewRoomClient> = {}): InterviewRoom
       },
     }),
     getRoom: vi.fn(),
-    endRoom: vi.fn(),
+    endRoom: vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        roomId: "room-created",
+        status: "ended",
+        expiresAt: "2026-05-29T17:00:00.000Z",
+      },
+    }),
     ...patch,
   };
 }
