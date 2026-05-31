@@ -266,6 +266,29 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("renders a document in a no-script sandbox and returns sanitized markup", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const returned = await runtime.renderDocument(
+      "<body><h1>hello</h1><script>window.x=1</script></body>",
+    );
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.getAttribute("sandbox")).toBe("");
+    expect(frame?.srcdoc).toContain("script-src 'none'");
+    expect(frame?.srcdoc).toContain("<h1>hello</h1>");
+    expect(frame?.srcdoc).not.toMatch(/<script/i);
+    // 返回值是净化后的标记（脚本已剥离），作为 previewHtml 持久化时不含脚本。
+    expect(returned).toContain("<h1>hello</h1>");
+    expect(returned).not.toMatch(/<script/i);
+    expect(returned).not.toContain("window.x=1");
+    runtime.destroy();
+    host.remove();
+  });
+
   it("keeps the mounted host usable after reset", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

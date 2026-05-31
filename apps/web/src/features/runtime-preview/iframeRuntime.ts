@@ -274,6 +274,14 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
     async renderPreview(previewHtml: string): Promise<void> {
       await createIframe("", buildPreviewSrcDoc(previewHtml));
     },
+    async renderDocument(html: string): Promise<string> {
+      const safe = sanitizePreviewHtml(html);
+      await createIframe("", buildPreviewSrcDoc(html));
+      // Return the SANITIZED markup actually rendered (scripts stripped), so the
+      // persisted previewHtml is script-free regardless of who re-renders it.
+      const sanitized = safe.headHtml ? `${safe.headHtml}${safe.bodyHtml}` : safe.bodyHtml;
+      return limitString(sanitized, RUNTIME_PREVIEW_HTML_MAX_CHARS);
+    },
     reset() {
       teardown();
     },
