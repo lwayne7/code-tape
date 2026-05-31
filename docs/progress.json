@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T21:30:50Z",
+  "updatedAt": "2026-05-31T21:33:12Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        256
       ],
       "completedIssues": [
         11,
@@ -1405,6 +1406,20 @@
       "claimedAt": "2026-05-31T21:07:07Z",
       "closedAt": "2026-05-31T21:30:50Z",
       "mergedPr": 255
+    },
+    "256": {
+      "number": 256,
+      "title": "统一库页品牌字标并移除重复标识",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T21:33:12Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
