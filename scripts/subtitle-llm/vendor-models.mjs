@@ -17,8 +17,13 @@ const MIN_VALID_BYTES = 200;
 
 // Only the files transformers.js actually loads for each pipeline.
 // Whisper is Seq2Seq -> encoder_model + decoder_model_merged (session_config.js).
-// dtype q8 -> "_quantized" suffix (dtypes.js). We deliberately skip unused
-// onnx variants (decoder_with_past_*, standalone decoder_model_*, fp16/q4/...).
+// Whisper uses dtype fp32 (no filename suffix): q8/_quantized triggers the
+// onnxruntime-web WASM MatMulNBits path (TransposeDQWeightsForMatMulNBits) and
+// fp16 fails to load (InsertedPrecisionFreeCast); fp32 is the proven browser
+// default, viable here because LFS removes the 100MB per-file limit. The
+// postprocessor below stays q8 (its repo ships only that). We deliberately skip
+// unused onnx variants (decoder_with_past_*, standalone decoder_model_*, other
+// quantizations).
 const MODELS = [
   {
     repo: "onnx-community/whisper-tiny",
@@ -32,8 +37,8 @@ const MODELS = [
       "vocab.json",
       "merges.txt",
       "added_tokens.json",
-      "onnx/encoder_model_quantized.onnx",
-      "onnx/decoder_model_merged_quantized.onnx",
+      "onnx/encoder_model.onnx",
+      "onnx/decoder_model_merged.onnx",
     ],
   },
   {
