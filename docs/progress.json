@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T20:19:12Z",
+  "updatedAt": "2026-05-31T20:24:59Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        252
       ],
       "completedIssues": [
         11,
@@ -1375,6 +1376,20 @@
       "claimedAt": "2026-05-31T18:52:28Z",
       "closedAt": "2026-05-31T20:19:12Z",
       "mergedPr": 251
+    },
+    "252": {
+      "number": 252,
+      "title": "修复录制页窄屏响应式布局溢出",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T20:24:59Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
