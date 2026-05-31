@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T21:04:28Z",
+  "updatedAt": "2026-05-31T21:07:07Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        254
       ],
       "completedIssues": [
         11,
@@ -1390,6 +1391,20 @@
       "claimedAt": "2026-05-31T20:24:59Z",
       "closedAt": "2026-05-31T21:04:28Z",
       "mergedPr": 253
+    },
+    "254": {
+      "number": 254,
+      "title": "修复回放显示开关关闭状态缺少斜杠反馈",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T21:07:07Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
