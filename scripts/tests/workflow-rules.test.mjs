@@ -1238,12 +1238,31 @@ test('repo guard supports fork pull requests without checking out PR code', () =
   const workflow = readFileSync('.github/workflows/repo-guard.yml', 'utf8');
 
   assert.match(workflow, /name:\s*Repo Guard/);
+  assert.doesNotMatch(workflow, /^concurrency:\s*$/m);
+  assert.match(workflow, /^\s{4}concurrency:\s*$/m);
+  assert.match(workflow, /^\s{6}group:\s*repo-guard-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.event\.issue\.number\s*\|\|\s*github\.run_id\s*\}\}/m);
+  assert.match(workflow, /^\s{6}cancel-in-progress:\s*true$/m);
   assert.match(workflow, /^\s{2}pull_request_target:\s*$/m);
   assert.doesNotMatch(workflow, /^\s{2}pull_request:\s*$/m);
   assert.doesNotMatch(workflow, /head\.repo\.full_name\s*==\s*github\.repository/);
   assert.doesNotMatch(workflow, /actions\/checkout@/);
   assert.match(workflow, /ceilf6\/repo-guard@main/);
   assert.match(workflow, /github-token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN\s*\}\}/);
+  assert.match(workflow, /!\s*contains\(fromJSON\('\["认领","确认合并","CR通过"\]'\),\s*github\.event\.comment\.body\)/);
+});
+
+test('long-running PR workflows cancel stale runs and cache dependency setup', () => {
+  const workflowTests = readFileSync('.github/workflows/workflow-tests.yml', 'utf8');
+  const contractGuard = readFileSync('.github/workflows/contract-guard.yml', 'utf8');
+
+  assert.match(workflowTests, /group:\s*workflow-tests-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.ref\s*\}\}/);
+  assert.match(workflowTests, /cancel-in-progress:\s*\$\{\{\s*github\.event_name\s*==\s*'pull_request'\s*\}\}/);
+  assert.match(workflowTests, /cache:\s*npm/);
+  assert.match(workflowTests, /actions\/cache@v4/);
+  assert.match(workflowTests, /path:\s*~\/\.cache\/ms-playwright/);
+
+  assert.match(contractGuard, /group:\s*contract-guard-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.ref\s*\}\}/);
+  assert.match(contractGuard, /cancel-in-progress:\s*\$\{\{\s*github\.event_name\s*==\s*'pull_request'\s*\}\}/);
 });
 
 test('training PR workflows use the bot token for checkout and API reads when available', () => {
