@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T12:26:56Z",
+  "updatedAt": "2026-05-31T12:29:30Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        233
       ],
       "completedIssues": [
         11,
@@ -1229,6 +1230,19 @@
       "claimedAt": "2026-05-31T11:42:14Z",
       "closedAt": "2026-05-31T12:26:56Z",
       "mergedPr": 232
+    },
+    "233": {
+      "number": 233,
+      "title": "[体验] 工作区支持上下（垂直）区域滑动分配空间",
+      "score": 3,
+      "stack": [
+        "react"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T12:29:30Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
