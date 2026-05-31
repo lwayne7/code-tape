@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T03:55:14Z",
+  "updatedAt": "2026-05-31T03:58:50Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        217
       ],
       "completedIssues": [
         11,
@@ -1111,6 +1112,20 @@
       "claimedAt": "2026-05-31T02:09:13Z",
       "closedAt": "2026-05-31T03:55:14Z",
       "mergedPr": 216
+    },
+    "217": {
+      "number": 217,
+      "title": "合并字幕生成与 LLM 纠错章节流程",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T03:58:50Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
