@@ -22,17 +22,27 @@ import { generateId } from "@/shared/util/ids";
 import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
 import { buildRecordingZip } from "./recordingArchive";
 import { awaitTransaction, openDatabase, promisifyRequest } from "./idb";
+import {
+  createVideoThumbnail,
+  DEFAULT_VIDEO_THUMBNAIL_OPTIONS,
+  type VideoThumbnailOptions,
+} from "./videoThumbnail";
 
 export type RecordingStoreOptions = {
   databaseName?: string;
   /** Drafts older than this are removed by sweep(). Defaults to 24h. */
   draftMaxAgeMs?: number;
+  thumbnailGenerator?: ThumbnailGenerator;
 };
 
 const DEFAULT_DB_NAME = "code-tape";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_RECORDINGS = "recordings";
 const STORE_BLOBS = "blobs";
+const STORE_THUMBNAILS = "thumbnails";
+
+type ThumbnailGenerator = (mediaBlob: Blob, options: VideoThumbnailOptions) => Promise<Blob | null>;
+type StoredBlob = { buffer?: ArrayBuffer; dataBase64?: string; mimeType: string };
 
 type StoredRecording = {
   id: string;
@@ -43,6 +53,7 @@ type StoredRecording = {
   indexes: RecordingIndexes;
   media: RecordingMedia | null;
   blobId: string | null;
+  thumbnailBlobId: string | null;
   createdAtMs: number;
 };
 
@@ -64,9 +75,13 @@ type StoredRecording = {
 export function createRecordingStore(options: RecordingStoreOptions = {}): RecordingRepository {
   const databaseName = options.databaseName ?? DEFAULT_DB_NAME;
   const draftMaxAgeMs = options.draftMaxAgeMs ?? 24 * 60 * 60 * 1000;
+  const thumbnailGenerator = options.thumbnailGenerator ?? createVideoThumbnail;
 
   const getDb = (() => {
     let cached: Promise<IDBDatabase> | null = null;
+    const clearCached = () => {
+      cached = null;
+    };
     return () => {
       if (!cached) {
         cached = openDatabase({
@@ -81,7 +96,14 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
             if (!db.objectStoreNames.contains(STORE_BLOBS)) {
               db.createObjectStore(STORE_BLOBS);
             }
+            if (!db.objectStoreNames.contains(STORE_THUMBNAILS)) {
+              db.createObjectStore(STORE_THUMBNAILS);
+            }
           },
+          onVersionChange: clearCached,
+        }).catch((err) => {
+          clearCached();
+          throw err;
         });
       }
       return cached;
@@ -97,12 +119,10 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
     return value ?? null;
   };
 
-  type StoredBlob = { buffer?: ArrayBuffer; dataBase64?: string; mimeType: string };
-
-  const readBlob = async (blobId: string): Promise<Blob | null> => {
+  const readStoredBlob = async (storeName: string, blobId: string): Promise<Blob | null> => {
     const db = await getDb();
-    const tx = db.transaction(STORE_BLOBS, "readonly");
-    const store = tx.objectStore(STORE_BLOBS);
+    const tx = db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
     const value = (await promisifyRequest(store.get(blobId))) as StoredBlob | undefined;
     await awaitTransaction(tx);
     if (!value) return null;
@@ -110,11 +130,14 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
     return buffer ? new Blob([buffer], { type: value.mimeType }) : null;
   };
 
+  const readBlob = async (blobId: string): Promise<Blob | null> => readStoredBlob(STORE_BLOBS, blobId);
+
   return {
     async saveDraft(input: SaveDraftInput): Promise<SaveResult> {
       const db = await getDb();
       const recordingId = input.meta.id;
       const blobId = input.mediaBlob ? generateId("blob") : null;
+      const thumbnailBlobId = input.mediaBlob && isVideoBlob(input.mediaBlob) ? generateId("thumbnail") : null;
       const eventsSha256 = await sha256Hex(canonicalStringify(input.events));
       const snapshotsSha256 = await sha256Hex(canonicalStringify(input.snapshots));
       // Materialize the blob to ArrayBuffer BEFORE opening the transaction so
@@ -165,6 +188,7 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
             }
           : null,
         blobId,
+        thumbnailBlobId: null,
         createdAtMs: Date.now(),
       };
 
@@ -181,6 +205,9 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           blobs.put(payload, blobId);
         }
         await awaitTransaction(tx);
+        if (thumbnailBlobId && input.mediaBlob) {
+          void generateAndPersistThumbnail(getDb, recordingId, thumbnailBlobId, input.mediaBlob, thumbnailGenerator);
+        }
         return { ok: true, recordingId };
       } catch (err) {
         const error = err as Error;
@@ -197,18 +224,27 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
     async commit(recordingId: string): Promise<SaveResult> {
       const db = await getDb();
       try {
-        const existing = await readRecording(recordingId);
-        if (!existing) {
-          return { ok: false, reason: "validation-failed", message: "draft not found" };
-        }
-        const updated: StoredRecording = {
-          ...existing,
-          manifest: { ...existing.manifest, status: "complete", completedAt: new Date().toISOString() },
-        };
-        const tx = db.transaction(STORE_RECORDINGS, "readwrite");
-        tx.objectStore(STORE_RECORDINGS).put(updated);
-        await awaitTransaction(tx);
-        return { ok: true, recordingId };
+        return await new Promise<SaveResult>((resolve) => {
+          const tx = db.transaction(STORE_RECORDINGS, "readwrite");
+          const recordings = tx.objectStore(STORE_RECORDINGS);
+          const request = recordings.get(recordingId);
+          let result: SaveResult | null = null;
+          request.onsuccess = () => {
+            const existing = request.result as StoredRecording | undefined;
+            if (!existing) {
+              result = { ok: false, reason: "validation-failed", message: "draft not found" };
+              return;
+            }
+            recordings.put({
+              ...existing,
+              manifest: { ...existing.manifest, status: "complete", completedAt: new Date().toISOString() },
+            });
+            result = { ok: true, recordingId };
+          };
+          tx.oncomplete = () => resolve(result ?? { ok: false, reason: "unknown", message: "commit did not complete" });
+          tx.onerror = () => resolve({ ok: false, reason: "unknown", message: tx.error?.message ?? "unknown" });
+          tx.onabort = () => resolve({ ok: false, reason: "unknown", message: tx.error?.message ?? "unknown" });
+        });
       } catch (err) {
         return { ok: false, reason: "unknown", message: (err as Error).message };
       }
@@ -232,7 +268,7 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           initialLanguage: item.meta.initialLanguage,
           hasAudio: item.media?.hasAudio ?? false,
           hasCamera: item.media?.hasCamera ?? false,
-          thumbnailBlobId: null,
+          thumbnailBlobId: item.thumbnailBlobId ?? null,
         }));
     },
 
@@ -257,6 +293,10 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       return verifyRecordingPackageIntegrity(pkg, mediaBlob);
     },
 
+    async loadThumbnail(thumbnailBlobId: string): Promise<Blob | null> {
+      return readStoredBlob(STORE_THUMBNAILS, thumbnailBlobId);
+    },
+
     async rename(recordingId: string, title: string): Promise<void> {
       const db = await getDb();
       const existing = await readRecording(recordingId);
@@ -274,9 +314,10 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       const db = await getDb();
       const existing = await readRecording(recordingId);
       if (!existing) return;
-      const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS], "readwrite");
+      const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS, STORE_THUMBNAILS], "readwrite");
       tx.objectStore(STORE_RECORDINGS).delete(recordingId);
       if (existing.blobId) tx.objectStore(STORE_BLOBS).delete(existing.blobId);
+      if (existing.thumbnailBlobId) tx.objectStore(STORE_THUMBNAILS).delete(existing.thumbnailBlobId);
       await awaitTransaction(tx);
     },
 
@@ -371,27 +412,40 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
 
     async sweep(): Promise<{ removedDrafts: number; removedBlobs: number }> {
       const db = await getDb();
-      const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS], "readwrite");
+      const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS, STORE_THUMBNAILS], "readwrite");
       const recordings = tx.objectStore(STORE_RECORDINGS);
       const blobs = tx.objectStore(STORE_BLOBS);
+      const thumbnails = tx.objectStore(STORE_THUMBNAILS);
       const all = (await promisifyRequest(recordings.getAll())) as StoredRecording[];
       const allBlobKeys = (await promisifyRequest(blobs.getAllKeys())) as IDBValidKey[];
+      const allThumbnailKeys = (await promisifyRequest(thumbnails.getAllKeys())) as IDBValidKey[];
       let removedDrafts = 0;
       let removedBlobs = 0;
       const referencedBlobIds = new Set<string>();
+      const referencedThumbnailBlobIds = new Set<string>();
       const now = Date.now();
       for (const item of all) {
         if (item.manifest.status === "draft" && now - item.createdAtMs > draftMaxAgeMs) {
           recordings.delete(item.id);
           if (item.blobId) blobs.delete(item.blobId);
+          if (item.thumbnailBlobId) thumbnails.delete(item.thumbnailBlobId);
           removedDrafts += 1;
         } else if (item.blobId) {
           referencedBlobIds.add(item.blobId);
+          if (item.thumbnailBlobId) referencedThumbnailBlobIds.add(item.thumbnailBlobId);
+        } else if (item.thumbnailBlobId) {
+          referencedThumbnailBlobIds.add(item.thumbnailBlobId);
         }
       }
       for (const key of allBlobKeys) {
         if (typeof key === "string" && !referencedBlobIds.has(key)) {
           blobs.delete(key);
+          removedBlobs += 1;
+        }
+      }
+      for (const key of allThumbnailKeys) {
+        if (typeof key === "string" && !referencedThumbnailBlobIds.has(key)) {
+          thumbnails.delete(key);
           removedBlobs += 1;
         }
       }
@@ -407,6 +461,71 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       return { usageBytes: 0, quotaBytes: 0 };
     },
   };
+}
+
+function persistThumbnail(
+  db: IDBDatabase,
+  recordingId: string,
+  thumbnailBlobId: string,
+  thumbnailPayload: StoredBlob,
+): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction([STORE_RECORDINGS, STORE_THUMBNAILS], "readwrite");
+      const recordings = tx.objectStore(STORE_RECORDINGS);
+      const request = recordings.get(recordingId);
+      request.onsuccess = () => {
+        const existing = request.result as StoredRecording | undefined;
+        if (!existing) return;
+        tx.objectStore(STORE_THUMBNAILS).put(thumbnailPayload, thumbnailBlobId);
+        recordings.put({ ...existing, thumbnailBlobId });
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      // Thumbnail storage is best-effort; the recording and media are already durable.
+      resolve();
+    }
+  });
+}
+
+async function generateAndPersistThumbnail(
+  getDb: () => Promise<IDBDatabase>,
+  recordingId: string,
+  thumbnailBlobId: string,
+  mediaBlob: Blob,
+  thumbnailGenerator: ThumbnailGenerator,
+): Promise<void> {
+  const thumbnailPayload = await prepareThumbnailPayload(mediaBlob, thumbnailGenerator);
+  if (!thumbnailPayload) return;
+  try {
+    const db = await getDb();
+    await persistThumbnail(db, recordingId, thumbnailBlobId, thumbnailPayload);
+  } catch {
+    // Reopening the DB can fail after a blocked upgrade; thumbnails remain optional.
+  }
+}
+
+async function prepareThumbnailPayload(
+  mediaBlob: Blob,
+  thumbnailGenerator: ThumbnailGenerator,
+): Promise<StoredBlob | null> {
+  try {
+    const thumbnail = await thumbnailGenerator(mediaBlob, DEFAULT_VIDEO_THUMBNAIL_OPTIONS);
+    if (!thumbnail || thumbnail.size === 0) return null;
+    const buffer = await thumbnail.arrayBuffer();
+    return {
+      dataBase64: arrayBufferToBase64(buffer),
+      mimeType: thumbnail.type || DEFAULT_VIDEO_THUMBNAIL_OPTIONS.mimeType,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isVideoBlob(blob: Blob): boolean {
+  return blob.type.toLowerCase().startsWith("video/");
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

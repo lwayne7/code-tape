@@ -23,17 +23,33 @@ export type OpenDatabaseOptions = {
   name: string;
   version: number;
   onUpgrade(db: IDBDatabase, oldVersion: number, newVersion: number, transaction: IDBTransaction): void;
+  onVersionChange?: () => void;
 };
 
 export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let rejectedAfterBlocked = false;
     const request = indexedDB.open(options.name, options.version);
     request.onupgradeneeded = (event) => {
       const target = event.target as IDBOpenDBRequest;
       options.onUpgrade(target.result, event.oldVersion, event.newVersion ?? options.version, target.transaction!);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (rejectedAfterBlocked) {
+        db.close();
+        return;
+      }
+      db.onversionchange = () => {
+        db.close();
+        options.onVersionChange?.();
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("indexeddb open blocked"));
+    request.onblocked = () => {
+      rejectedAfterBlocked = true;
+      reject(new Error("indexeddb open blocked by another open tab; close other Code Tape tabs and retry"));
+    };
   });
 }
