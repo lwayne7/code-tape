@@ -25,6 +25,7 @@ export type CodeEditorProps = {
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
   onChange?(): void;
   onCommand?(command: CodeEditorCommand): void;
+  onBeforeFormatApply?(): (() => void) | void;
 };
 
 type MonacoModule = typeof Monaco;
@@ -42,9 +43,15 @@ type MonacoEnvironmentHost = typeof globalThis & {
 
 let workerPromise: Promise<WorkerConstructors> | null = null;
 let monacoPromise: Promise<MonacoModule> | null = null;
+let prettierFormatterPromise: Promise<PrettierFormatter> | null = null;
 let themesDefined = false;
 let workersConfigured = false;
 const COLLAPSED_SELECTION_PULSE_MS = 420;
+const FORMAT_ACTION_ID = "editor.action.formatDocument";
+
+type PrettierFormatter = {
+  format(source: string, language: RecordingLanguage): Promise<string | null>;
+};
 
 function monacoTheme(theme: CodeEditorProps["theme"]): MonacoTheme {
   return theme === "dark" ? "code-tape-dark" : "code-tape-light";
@@ -153,6 +160,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     onMount,
     onChange,
     onCommand,
+    onBeforeFormatApply,
   },
   ref,
 ) {
@@ -177,6 +185,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const onMountRef = useRef(onMount);
   const onChangeRef = useRef(onChange);
   const onCommandRef = useRef(onCommand);
+  const onBeforeFormatApplyRef = useRef(onBeforeFormatApply);
   const [loadError, setLoadError] = useState<unknown>(null);
 
   latestPropsRef.current = {
@@ -193,6 +202,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   onMountRef.current = onMount;
   onChangeRef.current = onChange;
   onCommandRef.current = onCommand;
+  onBeforeFormatApplyRef.current = onBeforeFormatApply;
 
   useImperativeHandle(
     ref,
@@ -236,7 +246,13 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         const contentChangeDisposable = editor.onDidChangeModelContent(() => {
           onChangeRef.current?.();
         });
-        registerEditorCommands(monaco, editor, (command) => onCommandRef.current?.(command));
+        registerEditorCommands(
+          monaco,
+          editor,
+          () => latestPropsRef.current.readOnly,
+          (command) => onCommandRef.current?.(command),
+          () => onBeforeFormatApplyRef.current?.(),
+        );
         applyControlledEditorState(editor, currentProps);
         pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
         onMountRef.current?.(editor);
@@ -328,7 +344,9 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
 function registerEditorCommands(
   _monaco: MonacoModule,
   editor: Monaco.editor.IStandaloneCodeEditor,
+  isReadOnly: () => boolean,
   onCommand: (command: CodeEditorCommand) => void,
+  onBeforeFormatApply: () => (() => void) | void,
 ) {
   editor.onKeyDown((event) => {
     const browserEvent = event.browserEvent;
@@ -342,7 +360,8 @@ function registerEditorCommands(
 
     if (isFormatShortcut(event)) {
       consumeShortcut(event);
-      editor.trigger("keyboard", "editor.action.formatDocument", null);
+      if (isReadOnly()) return;
+      void formatEditorDocument(editor, isReadOnly, onBeforeFormatApply);
       onCommand("format");
       return;
     }
@@ -360,6 +379,107 @@ function registerEditorCommands(
       onCommand("go-to-line");
     }
   });
+}
+
+async function formatEditorDocument(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  isReadOnly: () => boolean,
+  onBeforeFormatApply: () => (() => void) | void,
+) {
+  const originalValue = editor.getValue();
+  const action = typeof editor.getAction === "function" ? editor.getAction(FORMAT_ACTION_ID) : null;
+
+  try {
+    if (action) {
+      await action.run();
+    } else {
+      editor.trigger("keyboard", FORMAT_ACTION_ID, null);
+    }
+  } catch (error) {
+    console.warn("Monaco format action failed", error);
+  }
+
+  if (isReadOnly() || editor.getValue() !== originalValue) return;
+
+  const model = editor.getModel();
+  if (!model) return;
+  const language = model.getLanguageId() as RecordingLanguage | undefined;
+  if (!language || !isPrettierSupportedLanguage(language)) return;
+
+  try {
+    const formatter = await loadPrettierFormatter();
+    const formatted = await formatter.format(originalValue, language);
+    const currentModel = editor.getModel();
+    if (
+      !formatted ||
+      formatted === originalValue ||
+      isReadOnly() ||
+      editor.getValue() !== originalValue ||
+      currentModel !== model ||
+      currentModel.getLanguageId() !== language
+    ) {
+      return;
+    }
+    const cancelFormatSignal = onBeforeFormatApply();
+    const currentSelection = editor.getSelection();
+    const endCursorState = currentSelection ? [currentSelection] : undefined;
+    try {
+      editor.pushUndoStop();
+      const applied = editor.executeEdits(
+        "code-tape-format",
+        [
+          {
+            range: model.getFullModelRange(),
+            text: formatted,
+            forceMoveMarkers: true,
+          },
+        ],
+        endCursorState,
+      );
+      if (!applied) {
+        cancelFormatSignal?.();
+        return;
+      }
+      editor.pushUndoStop();
+    } catch (error) {
+      cancelFormatSignal?.();
+      throw error;
+    }
+  } catch (error) {
+    console.warn("Failed to format editor document", error);
+  }
+}
+
+function isPrettierSupportedLanguage(language: RecordingLanguage): boolean {
+  return language === "javascript" || language === "typescript";
+}
+
+function loadPrettierFormatter(): Promise<PrettierFormatter> {
+  prettierFormatterPromise ??= (async () => {
+    const [prettier, babelPlugin, estreePlugin, typescriptPlugin] = await Promise.all([
+      import("prettier/standalone"),
+      import("prettier/plugins/babel"),
+      import("prettier/plugins/estree"),
+      import("prettier/plugins/typescript"),
+    ]);
+    return {
+      async format(source: string, language: RecordingLanguage) {
+        const parser = language === "typescript" ? "typescript" : "babel";
+        return prettier.format(source, {
+          parser,
+          plugins: [babelPlugin, estreePlugin, typescriptPlugin],
+          tabWidth: 2,
+          useTabs: false,
+          semi: true,
+          singleQuote: false,
+        });
+      },
+    };
+  })().catch((error: unknown) => {
+    prettierFormatterPromise = null;
+    throw error;
+  });
+  return prettierFormatterPromise;
 }
 
 function isPrimaryShortcut(event: Monaco.IKeyboardEvent, key: string): boolean {
