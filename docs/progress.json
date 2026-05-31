@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T18:21:34Z",
+  "updatedAt": "2026-05-31T18:23:20Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        239
+        239,
+        247
       ],
       "completedIssues": [
         11,
@@ -1331,6 +1332,19 @@
       "claimedAt": "2026-05-31T18:05:26Z",
       "closedAt": "2026-05-31T18:21:34Z",
       "mergedPr": 246
+    },
+    "247": {
+      "number": 247,
+      "title": "移除已处理的候选人房间状态 Todo",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T18:23:20Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
