@@ -15,6 +15,11 @@ const RUNTIME_SOURCE = "code-tape-runtime";
 export const RUNTIME_CONSOLE_ARG_LIMIT = 50;
 export const RUNTIME_CONSOLE_ARG_MAX_CHARS = 2_000;
 export const RUNTIME_PREVIEW_HTML_MAX_CHARS = 200_000;
+/** Per-run cap on the combined stdout + stderr line count (including the
+ *  reserved truncation-notice slot) — bounds memory and recording size when
+ *  async code floods console before the run timeout fires. */
+export const RUNTIME_OUTPUT_LINE_LIMIT = 1_000;
+export const RUNTIME_OUTPUT_TRUNCATED_NOTICE = "[输出已截断：超过单次运行行数上限]";
 
 const RUNTIME_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
@@ -186,6 +191,20 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       const frame = await createIframe(sandboxFlags, buildSrcDoc(IFRAME_BOOT_SCRIPT));
       const stdout: string[] = [];
       const stderr: string[] = [];
+      let outputTruncated = false;
+      // Shared cap over stdout + stderr (a runaway async task can flood either
+      // stream). The final slot is reserved for the truncation notice so the
+      // combined line count never exceeds RUNTIME_OUTPUT_LINE_LIMIT.
+      const pushOutput = (sink: string[], line: string) => {
+        if (outputTruncated) return;
+        const total = stdout.length + stderr.length;
+        if (total >= RUNTIME_OUTPUT_LINE_LIMIT - 1) {
+          outputTruncated = true;
+          stderr.push(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
+          return;
+        }
+        sink.push(line);
+      };
 
       return new Promise<IframeRunResult>((resolve) => {
         let settled = false;
@@ -199,6 +218,10 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
         };
 
         const timer = setTimeout(() => {
+          // Destroy the run iframe so a runaway async task (setInterval, fetch
+          // retry loop, unbounded DOM growth, etc.) stops consuming CPU/memory
+          // once we give up — matches the 技术方案 timeout contract ("销毁 iframe").
+          if (iframe === frame) teardown();
           finish({ runId: input.runId, status: "timeout", stdout, stderr });
         }, input.timeoutMs);
 
@@ -211,8 +234,8 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
           if (!msg) return;
           switch (msg.type) {
             case "console":
-              if (msg.payload.level === "error") stderr.push(msg.payload.args.join(" "));
-              else stdout.push(msg.payload.args.join(" "));
+              if (msg.payload.level === "error") pushOutput(stderr, msg.payload.args.join(" "));
+              else pushOutput(stdout, msg.payload.args.join(" "));
               break;
             case "error":
               finish({
@@ -226,7 +249,7 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
               });
               break;
             case "blocked-alert":
-              stderr.push(`[blocked] ${msg.payload.message}`);
+              pushOutput(stderr, `[blocked] ${msg.payload.message}`);
               break;
             case "complete":
               finish({
