@@ -21,6 +21,10 @@ export type TransformersEnvironment = {
 export type ModelSourceConfig = {
   baseUrl?: string;
   remoteHost?: string;
+  // Whether the model being loaded is vendored under public/models. Default
+  // true; a custom (non-default) model override is not vendored and must load
+  // from the Hub/mirror instead of 404ing on a same-origin local path.
+  vendored?: boolean;
 };
 
 type ModelSourceEnv = {
@@ -75,10 +79,11 @@ export async function loadTransformersPipeline<TPipeline>(
   model: string,
   options: unknown,
   loaderOptions: TransformersModuleLoaderOptions = {},
+  modelSourceConfig?: Partial<ModelSourceConfig>,
 ): Promise<TPipeline> {
   const module = await loadTransformersModule(loaderOptions);
   configureQuietBrowserCache(module.env);
-  configureModelSource(module.env);
+  configureModelSource(module.env, { ...readModelSourceConfig(), ...modelSourceConfig });
   const pipe = await module.pipeline(task, model, options);
   return pipe as TPipeline;
 }
@@ -129,6 +134,14 @@ export function configureModelSource(
     env.allowRemoteModels = true;
     env.allowLocalModels = false;
     env.remoteHost = remoteHost.endsWith("/") ? remoteHost : `${remoteHost}/`;
+    return;
+  }
+  if (config.vendored === false) {
+    // A custom (non-default) model override is not vendored under public/models.
+    // Let transformers.js reach the Hub (or a mirror) for it instead of forcing
+    // a same-origin local path that would 404. This keeps the documented
+    // VITE_SUBTITLE_POSTPROCESSOR_MODEL debug/gray override working.
+    env.allowRemoteModels = true;
     return;
   }
   if (!hasSameOriginAssetHost()) {

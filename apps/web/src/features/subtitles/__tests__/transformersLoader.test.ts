@@ -231,6 +231,18 @@ describe("configureModelSource", () => {
     expect(env.backends?.onnx?.wasm?.wasmPaths).toBe("/ort/");
   });
 
+  it("allows remote loading for a non-vendored custom model override", () => {
+    const env: TransformersEnvironment = {};
+
+    configureModelSource(env, { baseUrl: "/", vendored: false });
+
+    // Custom override (e.g. VITE_SUBTITLE_POSTPROCESSOR_MODEL) is not vendored;
+    // it must be allowed to reach the Hub instead of 404ing on a local path.
+    expect(env.allowRemoteModels).toBe(true);
+    expect(env.allowLocalModels).toBeUndefined();
+    expect(env.localModelPath).toBeUndefined();
+  });
+
   it("ignores a missing environment", () => {
     expect(() => configureModelSource(undefined, { baseUrl: "/" })).not.toThrow();
   });

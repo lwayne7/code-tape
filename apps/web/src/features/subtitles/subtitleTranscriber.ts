@@ -110,7 +110,9 @@ async function loadDefaultPipeline(
   model: string,
   options: AsrPipelineOptions,
 ): Promise<AsrPipeline> {
-  return loadTransformersPipeline<AsrPipeline>(task, model, options);
+  return loadTransformersPipeline<AsrPipeline>(task, model, options, {}, {
+    vendored: model === DEFAULT_TRANSCRIPTION_MODEL,
+  });
 }
 
 function segmentFromChunk(

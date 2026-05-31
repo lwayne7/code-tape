@@ -653,7 +653,9 @@ async function loadDefaultPipeline(
   model: string,
   options: TextGenerationPipelineOptions,
 ): Promise<TextGenerationPipeline> {
-  return loadTransformersPipeline<TextGenerationPipeline>(task, model, options);
+  return loadTransformersPipeline<TextGenerationPipeline>(task, model, options, {}, {
+    vendored: model === DEFAULT_POSTPROCESSOR_MODEL,
+  });
 }
 
 function readGeneratedText(output: unknown): string {
