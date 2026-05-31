@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T22:28:14Z",
+  "updatedAt": "2026-05-31T22:33:49Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        261
       ],
       "completedIssues": [
         11,
@@ -1442,6 +1443,20 @@
       "claimedAt": "2026-05-31T21:53:56Z",
       "closedAt": "2026-05-31T22:10:36Z",
       "mergedPr": 259
+    },
+    "261": {
+      "number": 261,
+      "title": "补齐 P1 活动密度索引与回放时间轴标记",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T22:33:49Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
