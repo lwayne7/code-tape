@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T11:13:47Z",
+  "updatedAt": "2026-05-31T11:42:14Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        231
       ],
       "completedIssues": [
         11,
@@ -1215,6 +1216,19 @@
       "claimedAt": "2026-05-31T10:35:41Z",
       "closedAt": "2026-05-31T11:13:47Z",
       "mergedPr": 230
+    },
+    "231": {
+      "number": 231,
+      "title": "[安全] 云端身份认证：长期 refresh token 换取短期签名 access token",
+      "score": 5,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T11:42:14Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
