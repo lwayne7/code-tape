@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-30T06:19:31Z",
+  "updatedAt": "2026-05-31T02:09:13Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        215
       ],
       "completedIssues": [
         11,
@@ -1094,6 +1095,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-30T06:19:31Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "215": {
+      "number": 215,
+      "title": "修复编辑器格式化快捷键与缩进行为",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T02:09:13Z",
       "closedAt": null,
       "mergedPr": null
     }
