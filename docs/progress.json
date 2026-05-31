@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T05:22:51Z",
+  "updatedAt": "2026-05-31T05:24:27Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        221
+        221,
+        222
       ],
       "completedIssues": [
         11,
@@ -1154,6 +1155,20 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T05:22:51Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "222": {
+      "number": 222,
+      "title": "优化协作工作流等待时间",
+      "score": 2,
+      "stack": [
+        "typescript",
+        "github-actions"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T05:24:27Z",
       "closedAt": null,
       "mergedPr": null
     }
