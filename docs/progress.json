@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T15:30:10Z",
+  "updatedAt": "2026-05-31T15:54:11Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        241
+        241,
+        243
       ],
       "completedIssues": [
         11,
@@ -1300,6 +1301,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T15:30:10Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "243": {
+      "number": 243,
+      "title": "修复自动合并因非必需检查 unstable 被阻塞",
+      "score": 1,
+      "stack": [
+        "github-actions"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T15:54:11Z",
       "closedAt": null,
       "mergedPr": null
     }
