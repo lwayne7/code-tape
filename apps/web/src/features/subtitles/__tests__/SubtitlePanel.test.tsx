@@ -55,6 +55,10 @@ async function flushPromises() {
   await Promise.resolve();
 }
 
+const GENERATE_SUBTITLES_LABEL = "生成字幕";
+const GENERATE_AND_OPTIMIZE_LABEL = "生成字幕并优化";
+const OPTIMIZE_SUBTITLES_LABEL = "优化字幕和章节";
+
 describe("SubtitlePanel", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -86,10 +90,11 @@ describe("SubtitlePanel", () => {
         onSeek={onSeek}
         store={store}
         transcriber={transcriber}
+        postProcessor={null}
       />,
     );
 
-    const generateButton = screen.getByRole("button", { name: "生成字幕" });
+    const generateButton = screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL });
 
     await waitFor(() => expect(generateButton).not.toBeDisabled());
 
@@ -111,6 +116,83 @@ describe("SubtitlePanel", () => {
         source: "huggingface-local",
       }),
     );
+  });
+
+  it("uses one click to show ASR subtitles before applying local LLM corrections and chapters", async () => {
+    const store = createMemorySubtitleStore();
+    const transcription = createDeferred<SubtitleTrackDraft>();
+    const postProcessing = createDeferred<SubtitleCorrectionResult>();
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(() => transcription.promise),
+    };
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(() => postProcessing.promise),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={1_500}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={transcriber}
+        postProcessor={postProcessor}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
+
+    await act(async () => {
+      transcription.resolve({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local",
+        segments: [
+          { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+          { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
+        ],
+      });
+      await flushPromises();
+    });
+
+    expect(screen.getByText("use state hook")).toBeInTheDocument();
+    expect(screen.getByText("render result")).toBeInTheDocument();
+    expect(postProcessor.process).toHaveBeenCalledWith(
+      expect.objectContaining({
+        track: expect.objectContaining({
+          recordingId: "recording-1",
+          segments: expect.arrayContaining([
+            expect.objectContaining({ id: "subtitle-1", text: "use state hook" }),
+          ]),
+        }),
+      }),
+    );
+    await expect(store.load("recording-1")).resolves.toEqual(
+      expect.objectContaining({
+        segments: expect.arrayContaining([
+          expect.objectContaining({ id: "subtitle-2", text: "render result" }),
+        ]),
+      }),
+    );
+
+    await act(async () => {
+      postProcessing.resolve({
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [{ title: "代码实现", startMs: 1_000, endMs: 3_000 }],
+      });
+      await flushPromises();
+    });
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /代码实现/ })).toBeInTheDocument();
+    await expect(store.loadChapters("recording-1")).resolves.toEqual([
+      { id: "chapter-1", title: "代码实现", startMs: 1_000, endMs: 3_000 },
+    ]);
   });
 
   it("recovers from stale Transformers chunks during subtitle generation without showing the raw import error", async () => {
@@ -143,10 +225,11 @@ describe("SubtitlePanel", () => {
         onSeek={vi.fn()}
         store={store}
         transcriber={transcriber}
+        postProcessor={null}
       />,
     );
 
-    const generateButton = screen.getByRole("button", { name: "生成字幕" });
+    const generateButton = screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL });
     await waitFor(() => expect(generateButton).not.toBeDisabled());
 
     fireEvent.click(generateButton);
@@ -193,11 +276,11 @@ describe("SubtitlePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "生成字幕" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
 
     await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /代码实现/ })).toHaveAttribute(
@@ -241,7 +324,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={3_000}
         currentTimeMs={500}
@@ -260,7 +343,7 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
     fireEvent.click(screen.getByRole("button", { name: "render result" }));
     fireEvent.click(screen.getByRole("button", { name: /已有章节/ }));
 
@@ -287,9 +370,13 @@ describe("SubtitlePanel", () => {
       })),
     };
     const postProcessor: SubtitlePostProcessor = {
-      process: vi.fn(async () => {
-        throw new Error("LLM JSON parse failed");
-      }),
+      process: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("LLM JSON parse failed"))
+        .mockResolvedValueOnce({
+          segments: [{ id: "subtitle-1", text: "useState hook" }],
+          chapters: [{ title: "失败后重试", startMs: 0, endMs: 1_000 }],
+        }),
     };
 
     render(
@@ -306,14 +393,83 @@ describe("SubtitlePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "生成字幕" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"));
     expect(screen.getByText("use state hook")).toBeInTheDocument();
+
+    const retryButton = screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL });
+    await waitFor(() => expect(retryButton).not.toBeDisabled());
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /失败后重试/ })).toBeInTheDocument();
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(2);
+    expect(postProcessor.process).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears persisted chapters after regenerating ASR subtitles when local LLM post-processing fails", async () => {
+    const previousTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "old subtitle" }],
+    };
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(previousTrack, [
+      { id: "chapter-1", title: "旧章节", startMs: 0, endMs: 1_000 },
+    ]);
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(async () => ({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "new ASR subtitle" }],
+      })),
+    };
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => {
+        throw new Error("LLM JSON parse failed");
+      }),
+    };
+    const panelProps = {
+      recordingId: "recording-1",
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      hasAudio: true,
+      durationMs: 1_000,
+      currentTimeMs: 0,
+      onSeek: vi.fn(),
+      store,
+      transcriber,
+      postProcessor,
+    } satisfies Parameters<typeof SubtitlePanel>[0];
+
+    const { unmount } = render(<SubtitlePanel {...panelProps} />);
+
+    await waitFor(() => expect(screen.getByText("old subtitle")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /旧章节/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
+
+    await waitFor(() => expect(screen.getByText("new ASR subtitle")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"));
+    expect(screen.queryByRole("button", { name: /旧章节/ })).not.toBeInTheDocument();
+    await expect(store.loadChapters("recording-1")).resolves.toEqual([]);
+    await expect(store.load("recording-1")).resolves.toEqual(
+      expect.objectContaining({
+        segments: [expect.objectContaining({ text: "new ASR subtitle" })],
+      }),
+    );
+
+    unmount();
+    render(<SubtitlePanel {...panelProps} mediaBlob={null} />);
+
+    await waitFor(() => expect(screen.getByText("new ASR subtitle")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /旧章节/ })).not.toBeInTheDocument();
   });
 
   it("recovers from stale Transformers chunks during local LLM post-processing without showing the raw import error", async () => {
@@ -347,7 +503,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={1_000}
         currentTimeMs={0}
@@ -366,7 +522,7 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -401,7 +557,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={1_000}
         currentTimeMs={0}
@@ -420,7 +576,7 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("atomic write failed"));
     expect(screen.getByText("use state hook")).toBeInTheDocument();
@@ -454,7 +610,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={3_000}
         currentTimeMs={500}
@@ -473,7 +629,7 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -520,7 +676,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={3_000}
         currentTimeMs={500}
@@ -542,7 +698,7 @@ describe("SubtitlePanel", () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+      fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
       await act(async () => {
         await flushPromises();
       });
@@ -567,7 +723,7 @@ describe("SubtitlePanel", () => {
     expect(onSeek).toHaveBeenCalledWith(0);
     await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
     await expect(store.loadChapters("recording-1")).resolves.toEqual(existingChapters);
-    expect(screen.getByRole("button", { name: "纠错并生成章节" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL })).not.toBeDisabled();
   });
 
   it("ignores stale local LLM timeout after switching recordings", async () => {
@@ -600,7 +756,7 @@ describe("SubtitlePanel", () => {
       ),
     };
     const props = {
-      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      mediaBlob: null,
       hasAudio: true,
       durationMs: 1_000,
       currentTimeMs: 0,
@@ -623,7 +779,7 @@ describe("SubtitlePanel", () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+      fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
       await act(async () => {
         await flushPromises();
       });
@@ -665,10 +821,11 @@ describe("SubtitlePanel", () => {
         onSeek={vi.fn()}
         store={createMemorySubtitleStore()}
         transcriber={transcriber}
+        postProcessor={null}
       />,
     );
 
-    const generateButton = screen.getByRole("button", { name: "生成字幕" });
+    const generateButton = screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL });
 
     await waitFor(() => expect(generateButton).not.toBeDisabled());
 
@@ -704,10 +861,11 @@ describe("SubtitlePanel", () => {
             segments: [],
           })),
         }}
+        postProcessor={null}
       />,
     );
 
-    const generateButton = screen.getByRole("button", { name: "生成字幕" });
+    const generateButton = screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL });
 
     await waitFor(() => expect(generateButton).toBeDisabled());
 
@@ -786,12 +944,13 @@ describe("SubtitlePanel", () => {
         onSeek={vi.fn()}
         store={store}
         transcriber={transcriber}
+        postProcessor={null}
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "生成字幕" })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL })).not.toBeDisabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_SUBTITLES_LABEL }));
 
     rerender(
       <SubtitlePanel
@@ -803,6 +962,7 @@ describe("SubtitlePanel", () => {
         onSeek={vi.fn()}
         store={store}
         transcriber={transcriber}
+        postProcessor={null}
       />,
     );
 
@@ -1201,7 +1361,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={1_000}
         currentTimeMs={0}
@@ -1225,7 +1385,7 @@ describe("SubtitlePanel", () => {
     expect(requestIdleCallback).toHaveBeenCalledTimes(1);
     expect(postProcessorWarmUp).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
     await waitFor(() => expect(process).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
@@ -1277,7 +1437,7 @@ describe("SubtitlePanel", () => {
     await waitFor(() => expect(screen.getByText("Old subtitles.")).toBeInTheDocument());
     expect(requestIdleCallback).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
 
     await waitFor(() => expect(screen.getByText("New subtitles.")).toBeInTheDocument());
     expect(cancelIdleCallback).toHaveBeenCalledWith(1);
@@ -1338,7 +1498,7 @@ describe("SubtitlePanel", () => {
     await waitFor(() => expect(screen.getByText("Old subtitles.")).toBeInTheDocument());
     expect(requestIdleCallback).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
 
     await waitFor(() => expect(cancelIdleCallback).toHaveBeenCalledWith(1));
     await act(async () => {
@@ -1424,7 +1584,7 @@ describe("SubtitlePanel", () => {
       await flushPromises();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
 
     await waitFor(() => expect(transcribe).toHaveBeenCalledTimes(1));
     expect(events).toEqual(["warmUp", "dispose", "transcribe"]);
@@ -1469,7 +1629,7 @@ describe("SubtitlePanel", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={1_000}
         currentTimeMs={0}
@@ -1499,7 +1659,7 @@ describe("SubtitlePanel", () => {
       await flushPromises();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
     await waitFor(() => expect(process).toHaveBeenCalledTimes(1));
     expect(events).toEqual(["warmUp", "process"]);
