@@ -215,6 +215,140 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("injects a dark theme background into the empty preview srcdoc by default", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("color-scheme:dark");
+    expect(frame?.srcdoc).toContain("#1c1f26"); // dark default background
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("injects a light theme background when initialized with theme: 'light'", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "light" });
+
+    await runtime.mount(host);
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("color-scheme:light");
+    expect(frame?.srcdoc).toContain("#f5f5f4"); // light default background
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("re-renders the current preview with the new theme on setTheme", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    expect(host.querySelector("iframe")?.srcdoc).toContain("color-scheme:dark");
+
+    runtime.setTheme("light");
+    // setTheme triggers an async re-render; wait a microtask.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector("iframe")?.srcdoc).toContain("color-scheme:light");
+
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("preserves the rendered preview content across a theme change", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    await runtime.renderPreview("<body><h1>kept</h1></body>");
+    expect(host.querySelector("iframe")?.srcdoc).toContain("<h1>kept</h1>");
+
+    runtime.setTheme("light");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    expect(srcdoc).toContain("<h1>kept</h1>");
+    expect(srcdoc).toContain("color-scheme:light");
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("uses :where() for the theme default so user CSS wins regardless of source order", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // Default selectors must have zero specificity (`:where()` per CSS spec)
+    // so any user `body { ... }` rule wins regardless of source order.
+    expect(srcdoc).toContain(":where(html)");
+    expect(srcdoc).toContain(":where(body)");
+    expect(srcdoc).not.toMatch(/<style[^>]*>html\{|<style[^>]*>body\{/);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("scopes background/color to body so user body bg propagates to the canvas", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // CSS canvas painting only propagates body bg when html has no bg of its own.
+    // Theme defaults: color-scheme on html; background/color only on body.
+    expect(srcdoc).toMatch(/:where\(html\)\{color-scheme:(light|dark);\}/);
+    expect(srcdoc).not.toMatch(/:where\(html\)\{[^}]*background/);
+    expect(srcdoc).toMatch(/:where\(body\)\{background:[^;]+;color:[^;]+;\}/);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("does not reset body margin in the theme default style", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // Theme tag is identifiable, but it must not modify layout (no margin reset).
+    expect(srcdoc).toContain('id="ct-theme"');
+    expect(srcdoc).not.toMatch(/margin\s*:\s*0/);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("posts a set-theme message to the JS run iframe instead of recreating it", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    // Start a long-running JS run so the iframe stays mounted.
+    const run = runtime.run({ runId: "run-theme", compiledCode: "", timeoutMs: 200 });
+    const frame = host.querySelector("iframe");
+    expect(frame).toBeTruthy();
+    const postSpy = vi.spyOn(frame!.contentWindow!, "postMessage");
+
+    runtime.setTheme("light");
+    // setTheme should NOT replace the run iframe; it should postMessage instead.
+    expect(host.querySelector("iframe")).toBe(frame);
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "set-theme", theme: "light" }),
+      "*",
+    );
+
+    await run;
+    runtime.destroy();
+    host.remove();
+  });
+
   it("renders replay preview in a no-script sandbox", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

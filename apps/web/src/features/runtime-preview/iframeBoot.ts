@@ -70,6 +70,32 @@ export const IFRAME_BOOT_SCRIPT = `
     post("error", { message: limit(reason.message || String(reason), CONSOLE_ARG_MAX_CHARS), stack: reason.stack ? limit(reason.stack, CONSOLE_ARG_MAX_CHARS) : undefined });
   });
 
+  // Allowed theme bodies (must match host themeStyleTag in iframeRuntime.ts).
+  // Split by element so a user-provided body background propagates to the
+  // canvas (per CSS canvas painting rule); values are hard-coded so a hostile
+  // parent can't inject arbitrary CSS via setTheme.
+  var THEME_HTML = { light: "color-scheme:light;", dark: "color-scheme:dark;" };
+  var THEME_BODY = {
+    light: "background:#f5f5f4;color:#24272d;",
+    dark: "background:#1c1f26;color:#e7e9ee;",
+  };
+
+  window.addEventListener("message", function (event) {
+    var msg = event.data;
+    if (!msg || msg.type !== "set-theme") return;
+    var htmlBody = THEME_HTML[msg.theme];
+    var bodyBody = THEME_BODY[msg.theme];
+    if (!htmlBody || !bodyBody) return;
+    var styleEl = document.getElementById("ct-theme");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "ct-theme";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent =
+      ":where(html){" + htmlBody + "}:where(body){" + bodyBody + "}";
+  });
+
   window.addEventListener("message", async function (event) {
     const msg = event.data;
     if (!msg || msg.type !== "init") return;
