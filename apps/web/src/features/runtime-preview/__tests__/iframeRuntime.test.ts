@@ -546,6 +546,26 @@ describe("IframeRuntime sandbox lifecycle", () => {
 });
 
 describe("IFRAME_BOOT_SCRIPT error reporting", () => {
+  it("executes user code in global script scope so inline HTML handlers can call declared functions", async () => {
+    const messages = await runBootScript(`
+      document.body.innerHTML = '<h1 id="title">hello</h1><button onclick="changeText()">切换文字</button>';
+      function changeText() {
+        const title = document.getElementById('title');
+        title.innerHTML = title.innerHTML === 'hello' ? '你好' : 'hello';
+      }
+      document.querySelector('button').click();
+    `);
+    const errors = messages.filter((message) => message.type === "error");
+    const complete = messages.find((message) => message.type === "complete");
+
+    expect(errors).toHaveLength(0);
+    expect(complete?.payload).toEqual(
+      expect.objectContaining({
+        previewHtml: expect.stringContaining("<h1 id=\"title\">你好</h1>"),
+      }),
+    );
+  });
+
   it("reports syntax errors as runtime errors without completing", async () => {
     const messages = await runBootScript("const broken = ;");
     const error = expectSingleRuntimeError(messages);
@@ -560,8 +580,8 @@ describe("IFRAME_BOOT_SCRIPT error reporting", () => {
     expect(error.payload.message).toContain("sync boom");
   });
 
-  it("reports rejected promises as runtime errors without completing", async () => {
-    const messages = await runBootScript('await Promise.reject(new Error("async boom"));');
+  it("reports async throws as runtime errors without completing", async () => {
+    const messages = await runBootScript('setTimeout(() => { throw new Error("async boom"); }, 0);');
     const error = expectSingleRuntimeError(messages);
 
     expect(error.payload.message).toContain("async boom");
