@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T02:02:49Z",
+  "updatedAt": "2026-06-01T02:10:17Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        269
       ],
       "completedIssues": [
         11,
@@ -1501,6 +1502,19 @@
       "claimedAt": "2026-06-01T01:27:19Z",
       "closedAt": "2026-06-01T02:02:49Z",
       "mergedPr": 268
+    },
+    "269": {
+      "number": 269,
+      "title": "修正 Todos 待办权威来源指向",
+      "score": 1,
+      "stack": [
+        "research"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T02:10:17Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
