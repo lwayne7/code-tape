@@ -2,8 +2,8 @@
 // Vendors the AI-subtitle models into apps/web/public/models/ so the browser
 // loads them same-origin instead of reaching huggingface.co at runtime.
 // Downloads via a mirror (HF_ENDPOINT, default hf-mirror.com) because
-// huggingface.co is unreachable on the target network. *.onnx files are
-// committed through Git LFS (see .gitattributes).
+// huggingface.co is unreachable on the target network. Large *.onnx files are
+// generated build assets and are intentionally not tracked in Git.
 import { mkdir, writeFile, stat, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -20,8 +20,8 @@ const MIN_VALID_BYTES = 200;
 // Whisper uses dtype fp32 (no filename suffix): q8/_quantized triggers the
 // onnxruntime-web WASM MatMulNBits path (TransposeDQWeightsForMatMulNBits) and
 // fp16 fails to load (InsertedPrecisionFreeCast); fp32 is the proven browser
-// default, viable here because LFS removes the 100MB per-file limit. The
-// postprocessor below stays q8 (its repo ships only that). We deliberately skip
+// default, viable here because build-time vendoring avoids Git host file-size
+// limits. The postprocessor below stays q8 (its repo ships only that). We deliberately skip
 // unused onnx variants (decoder_with_past_*, standalone decoder_model_*, other
 // quantizations).
 const MODELS = [
@@ -75,7 +75,7 @@ async function main() {
     }
   }
   console.log(`Done: ${downloaded} downloaded, ${skipped} already present.`);
-  console.log("Reminder: *.onnx are Git LFS tracked; commit with git-lfs installed.");
+  console.log("Reminder: *.onnx are generated build assets; keep them out of Git.");
 }
 
 async function downloadTo(url, destPath) {

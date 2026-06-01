@@ -31,7 +31,7 @@ async function main() {
     await copyFile(src, dest);
     console.log(`  ${file} (${formatBytes(info.size)}) -> ${dest}`);
   }
-  console.log("Done. The .wasm files are Git LFS tracked (see .gitattributes).");
+  console.log("Done. The .wasm files are generated build assets; keep them out of Git.");
 }
 
 function formatBytes(bytes) {

@@ -21,6 +21,9 @@ ml/subtitle-postprocessor/data/generated
 ml/subtitle-postprocessor/output
 ml/subtitle-postprocessor/onnx
 
+apps/web/public/models/**/*.onnx
+apps/web/public/ort/*.wasm
+
 *.log
 *.local
 *.tsbuildinfo

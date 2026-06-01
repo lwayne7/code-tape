@@ -48,8 +48,8 @@ async function main() {
       "Vendored subtitle assets are not real binaries:",
       ...problems.map((p) => `  - ${p}`),
       "",
-      "On a fresh clone, run `git lfs pull` (or `git lfs fetch --all`) so the",
-      "real .onnx/.wasm files replace their pointers before building.",
+      "On a fresh clone, run `npm run subtitle:vendor` so the real .onnx/.wasm",
+      "files are generated before building.",
     ]);
   }
   console.log(`Verified ${assets.length} vendored subtitle assets are real binaries.`);

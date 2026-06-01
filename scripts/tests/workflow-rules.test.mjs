@@ -1408,6 +1408,30 @@ test('api package test script runs compiled tests without shell glob expansion',
   assert.ok(existsSync('apps/api/scripts/run-dist-tests.mjs'));
 });
 
+test('web package hydrates vendored subtitle assets during build', () => {
+  const pkg = JSON.parse(readFileSync('apps/web/package.json', 'utf8'));
+
+  assert.match(pkg.scripts.prebuild, /npm run subtitle:vendor --prefix \.\.\/\.\./u);
+  assert.match(pkg.scripts.prebuild, /verify-vendored-assets\.mjs/u);
+});
+
+test('vendored subtitle binaries are not tracked in Git checkout', () => {
+  const trackedBinaries = execFileSync(
+    'git',
+    [
+      'ls-files',
+      'apps/web/public/models/**/*.onnx',
+      'apps/web/public/ort/*.wasm',
+    ],
+    { encoding: 'utf8' },
+  )
+    .trim()
+    .split('\n')
+    .filter(Boolean);
+
+  assert.deepEqual(trackedBinaries, []);
+});
+
 test('agent prompts rely on git hooks for commit and push quality gates', () => {
   const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
   const claudePrompt = readFileSync('CLAUDE.md', 'utf8');
@@ -1489,12 +1513,10 @@ test('training PR workflows use the bot token for checkout and API reads when av
   assert.match(autoMergeWorkflow, /token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*github\.token\s*\}\}/);
 });
 
-test('pages workflow checks out Git LFS so deployed model assets are real binaries', () => {
-  // The subtitle ASR/LLM model weights and ONNX runtime live in Git LFS under
-  // apps/web/public. A checkout without lfs:true leaves pointer text files, so
-  // the deployment workflow must keep fetching real binaries before build.
+test('pages workflow avoids checkout-time Git LFS for generated model assets', () => {
   const workflow = readFileSync('.github/workflows/pages.yml', 'utf8');
-  assert.equal(checkoutStepFetchesLfs(workflow), true);
+  assert.equal(checkoutStepFetchesLfs(workflow), false);
+  assert.match(workflow, /- run:\s*GITHUB_PAGES=true npm run build/u);
 });
 
 test('checkout LFS detection covers non-leading checkout options', () => {
