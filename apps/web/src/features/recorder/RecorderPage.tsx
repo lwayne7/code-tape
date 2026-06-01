@@ -784,6 +784,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
         selectedCameraDeviceId={selectedCameraDeviceId}
         permissionNotice={mediaPermissionNotice}
         permissionRequesting={mediaPermissionRequesting}
+        languageDisabled={controllerState.status !== "idle" && controllerState.status !== "recording"}
         disabled={controllerState.status !== "idle"}
         onLanguageChange={handleLanguageChange}
         onFontSizeChange={setEditorFontSize}
@@ -882,6 +883,7 @@ type RecorderSetupToolbarProps = {
   selectedCameraDeviceId: string | null;
   permissionNotice: string | null;
   permissionRequesting: boolean;
+  languageDisabled: boolean;
   disabled: boolean;
   onLanguageChange(language: RecordingLanguage): void;
   onFontSizeChange(size: number): void;
@@ -899,6 +901,7 @@ function RecorderSetupToolbar({
   selectedCameraDeviceId,
   permissionNotice,
   permissionRequesting,
+  languageDisabled,
   disabled,
   onLanguageChange,
   onFontSizeChange,
@@ -914,7 +917,7 @@ function RecorderSetupToolbar({
       <LabeledSelect
         label="语言"
         value={language}
-        disabled={disabled}
+        disabled={languageDisabled}
         onChange={(value) => onLanguageChange(value as RecordingLanguage)}
         options={[
           { value: "javascript", label: "JavaScript" },

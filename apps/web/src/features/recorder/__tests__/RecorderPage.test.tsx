@@ -594,6 +594,26 @@ describe("RecorderPage", () => {
     );
   });
 
+  it("keeps the language selector usable while recording", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.editorProducer.start).toHaveBeenCalledTimes(1));
+
+    const languageSelect = screen.getByRole("combobox", { name: "语言" });
+    expect(languageSelect).not.toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "字号" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "麦克风设备" })).toBeDisabled();
+
+    fireEvent.change(languageSelect, { target: { value: "html" } });
+
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "html" })),
+    );
+    expect(recorderPageMock.editorProducer.setLanguage).toHaveBeenCalledWith("html");
+  });
+
   it("renders console output from a run in the recorder right panel", async () => {
     const { RecorderPage } = await import("../RecorderPage");
     recorderPageMock.editorValue.current = "console.log(1);";
