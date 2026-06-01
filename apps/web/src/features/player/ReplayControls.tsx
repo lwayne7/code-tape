@@ -25,6 +25,7 @@ export type ReplayControlsProps = {
 };
 
 const PLAYBACK_RATES: ReplayPlaybackRate[] = [2, 1.5, 1, 0.5];
+const SEEK_PROGRESS_SETTLE_THRESHOLD_MS = 100;
 
 export function ReplayControls({
   state,
@@ -41,6 +42,8 @@ export function ReplayControls({
   const [ratePopoverOpen, setRatePopoverOpen] = useState(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
   const [pendingProgressPercent, setPendingProgressPercent] = useState<number | null>(null);
+  const [progressInteraction, setProgressInteraction] =
+    useState<"idle" | "dragging" | "committed">("idle");
   const rateCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlaying = state.status === "playing" || state.status === "buffering";
@@ -49,6 +52,8 @@ export function ReplayControls({
   const baseProgressPercent = safeDuration > 0 ? (baseCurrentTime / safeDuration) * 100 : 0;
   const currentProgressPercent = pendingProgressPercent ?? baseProgressPercent;
   const currentTime = (currentProgressPercent / 100) * safeDuration;
+  const pendingProgressTime =
+    pendingProgressPercent === null ? null : (pendingProgressPercent / 100) * safeDuration;
   const displayedVolume = muted ? 0 : volume;
   const timelineDisabled =
     safeDuration === 0 ||
@@ -62,6 +67,30 @@ export function ReplayControls({
       if (volumeCloseTimeoutRef.current) clearTimeout(volumeCloseTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (pendingProgressPercent === null) return;
+    if (safeDuration === 0 || state.status === "loading" || state.status === "error") {
+      setPendingProgressPercent(null);
+      setProgressInteraction("idle");
+      return;
+    }
+    if (
+      progressInteraction === "committed" &&
+      pendingProgressTime !== null &&
+      Math.abs(baseCurrentTime - pendingProgressTime) <= SEEK_PROGRESS_SETTLE_THRESHOLD_MS
+    ) {
+      setPendingProgressPercent(null);
+      setProgressInteraction("idle");
+    }
+  }, [
+    baseCurrentTime,
+    pendingProgressPercent,
+    pendingProgressTime,
+    progressInteraction,
+    safeDuration,
+    state.status,
+  ]);
 
   const openRatePopover = () => {
     if (rateCloseTimeoutRef.current) clearTimeout(rateCloseTimeoutRef.current);
@@ -94,13 +123,21 @@ export function ReplayControls({
   const handleSliderChange = (value: number) => {
     if (timelineDisabled) return;
     setPendingProgressPercent(value);
+    setProgressInteraction("dragging");
   };
 
   const handleSliderCommit = async (value: number) => {
     if (timelineDisabled) return;
     const targetMs = (value / 100) * safeDuration;
-    setPendingProgressPercent(null);
-    await onSeek(targetMs);
+    setPendingProgressPercent(value);
+    setProgressInteraction("committed");
+    try {
+      await onSeek(targetMs);
+    } catch (err) {
+      setPendingProgressPercent(null);
+      setProgressInteraction("idle");
+      throw err;
+    }
   };
 
   const handleVolumeChange = (v: number) => {
@@ -131,7 +168,7 @@ export function ReplayControls({
         </span>
       </div>
 
-      <div className="relative flex-1 min-w-[120px]" data-replay-progress-control>
+      <div className="relative flex-1 min-w-[120px] pb-2" data-replay-progress-control>
         <ReplayActivityMarkers activityDensity={activityDensity} durationMs={safeDuration} />
         <Slider
           value={currentProgressPercent}
@@ -259,7 +296,10 @@ function ReplayActivityMarkers({
 }) {
   if (durationMs <= 0 || activityDensity.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute inset-x-2 top-1/2 z-10 h-2 -translate-y-1/2">
+    <div
+      className="pointer-events-none absolute inset-x-2 bottom-0 h-1"
+      data-replay-activity-markers
+    >
       {activityDensity.map((bucket, index) => {
         const left = clampPercent((bucket.startMs / durationMs) * 100);
         const width = Math.max(
@@ -271,7 +311,7 @@ function ReplayActivityMarkers({
             key={`${bucket.kind}-${bucket.startMs}-${bucket.endMs}-${index}`}
             aria-label={`活动：${activityKindLabel(bucket.kind)} ${formatDurationMs(bucket.startMs)}-${formatDurationMs(bucket.endMs)}`}
             className={cn(
-              "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full border border-background/80",
+              "absolute top-0 h-1 rounded-full opacity-80",
               activityKindClassName(bucket.kind),
             )}
             style={{ left: `${left}%`, width: `${width}%` }}

@@ -145,7 +145,7 @@ describe("ReplayControls", () => {
   });
 
   it("renders activity density markers on the progress timeline", () => {
-    renderControls({
+    const { container } = renderControls({
       durationMs: 60_000,
       activityDensity: [
         { kind: "edit", startMs: 0, endMs: 10_000, count: 3, eventSeqs: [1, 2, 3] },
@@ -159,6 +159,7 @@ describe("ReplayControls", () => {
     expect(screen.getByLabelText("活动：运行 00:20-00:30")).toBeInTheDocument();
     expect(screen.getByLabelText("活动：错误 00:40-00:50")).toBeInTheDocument();
     expect(screen.getByLabelText("活动：静默 00:50-01:00")).toBeInTheDocument();
+    expect(container.querySelector("[data-replay-activity-markers]")).toHaveClass("bottom-0");
   });
 
   it("renders short full-duration silence markers", () => {
@@ -208,6 +209,28 @@ describe("ReplayControls", () => {
       await waitFor(() => expect(onSeek).toHaveBeenCalledWith(25_000));
     });
 
+    it("keeps a slight drag preview while playback advances before commit", () => {
+      const onSeek = vi.fn();
+      const { rerender, props } = renderControls({
+        durationMs: 100_000,
+        onSeek,
+        state: state("playing", { timelineTimeMs: 50_000 }),
+      });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "50.1" } });
+
+      rerender(
+        <ReplayControls
+          {...props}
+          state={state("playing", { timelineTimeMs: 50_050 })}
+        />,
+      );
+
+      expect(progressSlider).toHaveValue("50.1");
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it("does not issue playback while an async seek is pending", async () => {
       let resolveSeek: () => void = () => {};
       const onSeek = vi.fn(
@@ -223,10 +246,65 @@ describe("ReplayControls", () => {
       fireEvent.mouseUp(progressSlider);
 
       expect(onSeek).toHaveBeenCalledWith(60_000);
+      expect(progressSlider).toHaveValue("50");
+      expect(screen.getByText("01:00")).toBeInTheDocument();
 
       await act(async () => {
         resolveSeek();
       });
+    });
+
+    it("keeps a committed long-recording seek preview until scheduler is within a small time window", async () => {
+      const onSeek = vi.fn();
+      const durationMs = 3_600_000;
+      const { rerender, props } = renderControls({
+        durationMs,
+        onSeek,
+        state: state("playing", { timelineTimeMs: 600_000 }),
+      });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "50" } });
+      fireEvent.mouseUp(progressSlider);
+
+      await waitFor(() => expect(onSeek).toHaveBeenCalledWith(1_800_000));
+
+      rerender(
+        <ReplayControls
+          {...props}
+          state={state("playing", { timelineTimeMs: 1_796_500 })}
+        />,
+      );
+      await act(async () => {});
+
+      expect(progressSlider).toHaveValue("50");
+      expect(screen.getByText("30:00")).toBeInTheDocument();
+    });
+
+    it("releases a committed long-recording seek preview when scheduler enters the settle window", async () => {
+      const onSeek = vi.fn();
+      const durationMs = 3_600_000;
+      const { rerender, props } = renderControls({
+        durationMs,
+        onSeek,
+        state: state("playing", { timelineTimeMs: 600_000 }),
+      });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "50" } });
+      fireEvent.mouseUp(progressSlider);
+
+      await waitFor(() => expect(onSeek).toHaveBeenCalledWith(1_800_000));
+
+      rerender(
+        <ReplayControls
+          {...props}
+          state={state("playing", { timelineTimeMs: 1_799_950 })}
+        />,
+      );
+      await act(async () => {});
+
+      expect(Number((progressSlider as HTMLInputElement).value)).toBeCloseTo(49.9986, 4);
     });
   });
 
