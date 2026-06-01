@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T03:30:15Z",
+  "updatedAt": "2026-06-01T04:03:23Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
         247,
-        269
+        269,
+        272
       ],
       "completedIssues": [
         11,
@@ -1522,6 +1523,20 @@
       "status": "closed",
       "closedAt": "2026-06-01T03:30:15Z",
       "mergedPr": 270
+    },
+    "272": {
+      "number": 272,
+      "title": "支持 GitHub 图标点击跳转仓库",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T04:03:23Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
