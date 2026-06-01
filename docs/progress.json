@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T01:22:09Z",
+  "updatedAt": "2026-06-01T01:27:19Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        267
       ],
       "completedIssues": [
         11,
@@ -1487,6 +1488,19 @@
       "claimedAt": "2026-06-01T00:17:35Z",
       "closedAt": "2026-06-01T01:22:09Z",
       "mergedPr": 266
+    },
+    "267": {
+      "number": 267,
+      "title": "稳定 GitNexus contract 的 npx 缓存解析",
+      "score": 1,
+      "stack": [
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T01:27:19Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
