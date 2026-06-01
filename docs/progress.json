@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T00:14:37Z",
+  "updatedAt": "2026-06-01T00:17:35Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        265
       ],
       "completedIssues": [
         11,
@@ -1472,6 +1473,20 @@
       "claimedAt": "2026-05-31T23:42:57Z",
       "closedAt": "2026-06-01T00:14:37Z",
       "mergedPr": 264
+    },
+    "265": {
+      "number": 265,
+      "title": "增强运行 Console 与错误输出面板",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T00:17:35Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
