@@ -1,14 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-02T02:48:50Z",
+  "updatedAt": "2026-06-02T06:00:59Z",
   "students": {
     "ceilf6": {
-      "activeIssue": [
-        202,
-        239,
-        247,
-        269
-      ],
+      "activeIssue": [],
       "completedIssues": [
         11,
         10,
@@ -89,7 +84,11 @@
         279,
         281,
         283,
-        292
+        292,
+        202,
+        239,
+        247,
+        269
       ],
       "reviewedIssues": [
         4,
@@ -110,10 +109,10 @@
           "delta": -1.5
         }
       ],
-      "developmentScore": 138.75,
+      "developmentScore": 144,
       "reviewScore": 5.75,
       "penaltyScore": -1.5,
-      "totalScore": 143
+      "totalScore": 148.25
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -1121,16 +1120,16 @@
     },
     "202": {
       "number": 202,
-      "title": "[P1+ WebRTC] 抖动缓冲、快照重同步与 hash 校验端到端接线",
+      "title": "[P1+ WebRTC] 候选人周期性状态快照发送与面试官快照重同步",
       "score": 3,
       "stack": [
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-30T06:19:31Z",
-      "closedAt": null,
+      "closedAt": "2026-05-30T07:04:40Z",
       "mergedPr": null
     },
     "214": {
@@ -1312,10 +1311,10 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T15:04:10Z",
-      "closedAt": null,
+      "closedAt": "2026-05-31T22:14:48Z",
       "mergedPr": null
     },
     "241": {
@@ -1365,10 +1364,10 @@
       "stack": [
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T18:23:20Z",
-      "closedAt": null,
+      "closedAt": "2026-05-31T18:24:37Z",
       "mergedPr": null
     },
     "248": {
@@ -1517,10 +1516,10 @@
       "stack": [
         "research"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-06-01T02:10:17Z",
-      "closedAt": null,
+      "closedAt": "2026-06-01T02:11:35Z",
       "mergedPr": null
     },
     "271": {
@@ -2851,6 +2850,50 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-06-02T02:48:50Z"
+    },
+    {
+      "id": "manual-close-issue-202-ceilf6",
+      "type": "manual_development_bonus",
+      "issue": 202,
+      "pr": null,
+      "score": 3,
+      "developer": "ceilf6",
+      "developerDelta": 2.25,
+      "reason": "GitHub issue closed without merged PR reference",
+      "createdAt": "2026-05-30T07:04:40Z"
+    },
+    {
+      "id": "manual-close-issue-239-ceilf6",
+      "type": "manual_development_bonus",
+      "issue": 239,
+      "pr": null,
+      "score": 2,
+      "developer": "ceilf6",
+      "developerDelta": 1.5,
+      "reason": "GitHub issue closed without merged PR reference",
+      "createdAt": "2026-05-31T22:14:48Z"
+    },
+    {
+      "id": "manual-close-issue-247-ceilf6",
+      "type": "manual_development_bonus",
+      "issue": 247,
+      "pr": null,
+      "score": 1,
+      "developer": "ceilf6",
+      "developerDelta": 0.75,
+      "reason": "GitHub issue closed without merged PR reference",
+      "createdAt": "2026-05-31T18:24:37Z"
+    },
+    {
+      "id": "manual-close-issue-269-ceilf6",
+      "type": "manual_development_bonus",
+      "issue": 269,
+      "pr": null,
+      "score": 1,
+      "developer": "ceilf6",
+      "developerDelta": 0.75,
+      "reason": "GitHub issue closed without merged PR reference",
+      "createdAt": "2026-06-01T02:11:35Z"
     }
   ]
 }

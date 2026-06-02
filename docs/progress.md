@@ -2,23 +2,20 @@
 
 > 本文件由 GitHub Actions 自动生成，请勿手动修改。
 
-更新时间：2026-06-02T02:48:50Z
+更新时间：2026-06-02T06:00:59Z
 
 ## 当前任务
 
 | GitHub 用户 | 当前 Issue | 认领时间 |
 | --- | --- | --- |
-| ceilf6 | #202 [P1+ WebRTC] 抖动缓冲、快照重同步与 hash 校验端到端接线 | 2026-05-30 06:19:31Z |
-| ceilf6 | #239 修复候选人房间状态区长链接导致横向溢出 | 2026-05-31 15:04:10Z |
-| ceilf6 | #247 移除已处理的候选人房间状态 Todo | 2026-05-31 18:23:20Z |
-| ceilf6 | #269 修正 Todos 待办权威来源指向 | 2026-06-01 02:10:17Z |
+| - | - | - |
 
 ## 积分总览
 
 | GitHub 用户 | 开发分 | CR 分 | 扣分 | 总分 |
 | --- | --- | --- | --- | --- |
 | cecilyw | 2.25 | 0.00 | 0.00 | 2.25 |
-| ceilf6 | 138.75 | 5.75 | -1.50 | 143.00 |
+| ceilf6 | 144.00 | 5.75 | -1.50 | 148.25 |
 | JunMang01 | 3.00 | 0.00 | 0.00 | 3.00 |
 | lwayne7 | 3.75 | 0.00 | 0.00 | 3.75 |
 | MINTPIPERAS | 10.00 | 4.75 | 0.00 | 14.75 |
@@ -36,16 +33,16 @@
 | 2026-06-01 04:49:32Z | feature_merge | #274 | #275 | ceilf6 +1.50 |
 | 2026-06-01 04:14:57Z | feature_merge | #272 | #273 | ceilf6 +0.75 |
 | 2026-06-01 03:30:15Z | feature_merge | #271 | #270 | ceilf6 +1.50 |
+| 2026-06-01 02:11:35Z | manual_development_bonus | #269 | - | ceilf6 +0.75 (GitHub issue closed without merged PR reference) |
 | 2026-06-01 02:02:49Z | feature_merge | #267 | #268 | ceilf6 +0.75 |
 | 2026-06-01 01:22:09Z | feature_merge | #265 | #266 | ceilf6 +1.50 |
 | 2026-06-01 00:14:37Z | feature_merge | #263 | #264 | ceilf6 +0.75 |
 | 2026-05-31 23:38:43Z | feature_merge | #261 | #262 | ceilf6 +1.50 |
 | 2026-05-31 22:28:14Z | feature_merge | #214 | #260 | ceilf6 +2.25 |
+| 2026-05-31 22:14:48Z | manual_development_bonus | #239 | - | ceilf6 +1.50 (GitHub issue closed without merged PR reference) |
 | 2026-05-31 22:10:36Z | feature_merge | #258 | #259 | ceilf6 +0.75 |
 | 2026-05-31 21:49:34Z | feature_merge | #256 | #257 | ceilf6 +0.75 |
 | 2026-05-31 21:30:50Z | feature_merge | #254 | #255 | ceilf6 +0.75 |
 | 2026-05-31 21:04:28Z | feature_merge | #252 | #253 | ceilf6 +2.25 |
 | 2026-05-31 20:19:12Z | feature_merge | #250 | #251 | ceilf6 +2.25 |
 | 2026-05-31 18:49:06Z | feature_merge | #248 | #249 | ceilf6 +0.75 |
-| 2026-05-31 18:21:34Z | feature_merge | #245 | #246 | ceilf6 +0.75 |
-| 2026-05-31 18:03:24Z | feature_merge | #243 | #244 | ceilf6 +0.75 |
