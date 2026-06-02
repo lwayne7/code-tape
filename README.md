@@ -15,9 +15,6 @@
 -> [技术方案](docs/技术方案.md)
 -> [AI模型](https://huggingface.co/collections/ceilf6/code-tape)
 
-[各位同学当前进度](docs/progress.md)
--> [工作量、Issues 与 PR 统计](docs/workload-report.md)
-
 ## Harness 循环
 
 - GitHub Actions
